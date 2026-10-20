@@ -196,6 +196,23 @@ StepResult GameEngine::beginGame(
     return current_step_;
 }
 
+bool isCleanResumePoint(const GameState& state) {
+    if (state.game_over ||
+        !state.turn.awaiting_main_action ||
+        state.turn.phase != TurnPhase::MainPhase ||
+        state.turn.oc_state != OpenClosedState::Open ||
+        state.turn.ns_state != NeutralShowdownState::Neutral ||
+        state.chain.exists() ||
+        state.cost_cursor.has_value())
+        return false;
+    for (const auto& bf : state.battlefields) {
+        if (bf.combat_in_progress || bf.showdown_in_progress ||
+            bf.combat_staged || bf.showdown_staged)
+            return false;
+    }
+    return true;
+}
+
 StepResult GameEngine::resumeFromSnapshot(GameState snapshot_state,
                                             uint64_t engine_seed) {
     if (step_driver_) {
@@ -990,7 +1007,11 @@ void GameEngine::mainPhaseLoop() {
         auto adv = advanceMainPhase(action_count);
         if (adv.kind == MainPhaseAdvance::Kind::Done) return;
 
+        // Marks the one decision resumeFromSnapshot can re-enter: a resumed
+        // engine lands back here, not inside the chosen action.
+        state_.turn.awaiting_main_action = true;
         auto intent = queryAgent(state_.turn.turn_player);
+        state_.turn.awaiting_main_action = false;
         if (!resolveMainPhaseDecision(intent, action_count)) return;
     }
 }
@@ -2849,6 +2870,7 @@ std::vector<Intent> GameEngine::generateMainPhaseActions(PlayerId player) const 
 
         Card* gear_card = card_registry_.get(obj.card_def_id);
         if (!gear_card || !gear_card->hasEquipAbility()) continue;
+        if (!gear_card->canEquip(state_, player)) continue;
 
         if (gear_card->needsEquipTimeTarget()) {
             // One intent per gear; target chosen at resolve via pickTarget.
@@ -5979,13 +6001,51 @@ GameEngine::CostPaymentAdvance GameEngine::advanceCostPayment() {
         return adv;
     }
 
-    // Build the candidate list for the current phase.
-    std::vector<GameObjectId> candidates;
+    // Energy is paid without a decision: any ready rune gives the same
+    // Energy. Runes of the card's power domains go first when power is still
+    // owed, so the power step can recycle the runes just exhausted instead
+    // of a ready one.
     if (cur.phase == Phase::PayingEnergy) {
-        candidates = readyRunesInBase(state_, cur.player);
-    } else {
-        candidates = matchingRunesInBase(state_, cur.player, cur.power_domains);
+        std::vector<GameObjectId> ready = readyRunesInBase(state_, cur.player);
+        const auto feeds_power = [&](GameObjectId id) {
+            if (cur.power_remaining <= 0) return false;
+            for (auto d : state_.getObject(id).domains)
+                if (std::find(cur.power_domains.begin(), cur.power_domains.end(), d) !=
+                    cur.power_domains.end())
+                    return true;
+            return false;
+        };
+        std::sort(ready.begin(), ready.end(), [&](GameObjectId a, GameObjectId b) {
+            const bool fa = feeds_power(a), fb = feeds_power(b);
+            return fa != fb ? fa : a < b;
+        });
+        for (GameObjectId rune_id : ready) {
+            if (cur.energy_remaining <= 0) break;
+            exhaustRuneForEnergy(rune_id);
+        }
+        if (cur.energy_remaining > 0) {
+            // canAfford() was checked upstream, so this should not happen.
+            state_.cost_cursor.reset();
+            adv.kind = CostPaymentAdvance::Kind::Done;
+            return adv;
+        }
+        cur.phase = (cur.power_remaining > 0) ? Phase::PayingPower : Phase::Done;
+        if (cur.phase == Phase::Done) {
+            state_.cost_cursor.reset();
+            adv.kind = CostPaymentAdvance::Kind::Done;
+            return adv;
+        }
     }
+
+    // Power: recycling an exhausted rune costs nothing more this turn, a
+    // ready one also gives up its Energy, so exhausted runes are listed first.
+    std::vector<GameObjectId> candidates =
+        matchingRunesInBase(state_, cur.player, cur.power_domains);
+    std::sort(candidates.begin(), candidates.end(), [&](GameObjectId a, GameObjectId b) {
+        const bool ea = state_.getObject(a).is_exhausted;
+        const bool eb = state_.getObject(b).is_exhausted;
+        return ea != eb ? ea : a < b;
+    });
 
     if (candidates.empty()) {
         // Can't continue — but the contract is canAfford() was checked
@@ -6007,6 +6067,15 @@ GameEngine::CostPaymentAdvance GameEngine::advanceCostPayment() {
     return adv;
 }
 
+void GameEngine::exhaustRuneForEnergy(GameObjectId rune_id) {
+    auto& rune = state_.getObject(rune_id);
+    events_.logTrace("  EXHAUST_RUNE: " + rune.name + " (id=" +
+                     std::to_string(rune_id) + ") for energy");
+    rune.is_exhausted = true;
+    events_.emit(ObjectStateChangedEvent{rune_id, "exhausted"});
+    state_.cost_cursor->energy_remaining--;
+}
+
 GameEngine::CostPaymentAdvance GameEngine::resolveCostPaymentDecision(
     const Intent& chosen) {
     assert(state_.cost_cursor.has_value() &&
@@ -6024,12 +6093,7 @@ GameEngine::CostPaymentAdvance GameEngine::resolveCostPaymentDecision(
     auto& rune = state_.getObject(rune_id);
 
     if (cur.phase == Phase::PayingEnergy) {
-        events_.logTrace("  EXHAUST_RUNE: " + rune.name + " (id=" +
-                         std::to_string(rune_id) +
-                         ") for energy [agent choice]");
-        rune.is_exhausted = true;
-        events_.emit(ObjectStateChangedEvent{rune_id, "exhausted"});
-        cur.energy_remaining--;
+        exhaustRuneForEnergy(rune_id);
     } else if (cur.phase == Phase::PayingPower) {
         events_.logTrace("  RECYCLE_RUNE: " + rune.name + " (id=" +
                          std::to_string(rune_id) + ", " +

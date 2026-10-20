@@ -10,6 +10,8 @@
 ///   human             — block on browser input through HumanAgent
 ///   mcts:sims=N       — OpenSpiel MCTSBot wrapped as AgentInterface
 ///   ismcts:sims=N     — OpenSpiel ISMCTSBot wrapped as AgentInterface
+///   scripted          — fixed rule-based policy (ScriptedAgent)
+///   heuristic[:guesses=N] — one-turn look-ahead scored by evaluate()
 ///
 /// When any seat is human:
 ///   • `god_mode` edits are accepted by the WebSocket API.
@@ -20,7 +22,11 @@
 
 #include "agents/human_agent.h"
 #include "agents/mcts_agent.h"
+#include "agents/gbt_evaluator.h"
+#include "agents/heuristic_agent.h"
+#include "agents/ismcts_bot.h"
 #include "agents/random_agent.h"
+#include "agents/scripted_agent.h"
 #include "cards/card_registry.h"
 #include "core/card_db.h"
 #include "core/events.h"
@@ -41,7 +47,9 @@
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <random>
 #include <sstream>
 #include <stdexcept>
@@ -163,8 +171,20 @@ void dumpRegistry(const CardDB& db, const std::string& path) {
 
 struct AgentSpec {
     std::string raw;       // original spec string
-    std::string kind;      // "random", "human", "mcts", "ismcts"
+    std::string kind;      // "random", "human", "mcts", "ismcts", "scripted", "heuristic", "ismcts-native"
     int sims = 0;          // populated for mcts/ismcts
+    int guesses = 0;       // heuristic only; 0 = HeuristicConfig default
+    int turns_ahead = 0;   // heuristic / ismcts-native; 0 = config default
+    double uct_c = 0.0;    // ismcts-native only; 0 = IsmctsConfig default
+    double value_scale = 0.0;  // ismcts-native only; 0 = IsmctsConfig default
+    std::string policy;    // ismcts-native only: visits | maxvisits | maxvalue
+    int worlds = 0;        // ismcts-native only: max_world_samples; 0 = unlimited
+    std::string observer;  // ismcts-native only: searcher | actor (node keys)
+    int cut = -1;          // ismcts-native only: cut tree at horizon (1/0); -1 = default
+    int depth = 0;         // ismcts-native only: max tree depth; 0 = unlimited
+    std::string model;     // heuristic / ismcts-native: learned value model (JSON)
+    // heuristic only: EvalWeights overrides, e.g. "hand=3" (see setWeight)
+    std::vector<std::pair<std::string, double>> weights;
 };
 
 AgentSpec parseAgentSpec(const std::string& s) {
@@ -173,14 +193,18 @@ AgentSpec parseAgentSpec(const std::string& s) {
     auto colon = s.find(':');
     out.kind = (colon == std::string::npos) ? s : s.substr(0, colon);
     if (out.kind != "random" && out.kind != "human" &&
-        out.kind != "mcts" && out.kind != "ismcts") {
+        out.kind != "mcts" && out.kind != "ismcts" &&
+        out.kind != "scripted" && out.kind != "heuristic" &&
+        out.kind != "ismcts-native") {
         throw std::runtime_error(
             "Unknown agent kind '" + out.kind + "'. Expected one of: "
-            "random, human, mcts, ismcts.");
+            "random, human, mcts, ismcts, scripted, heuristic, ismcts-native.");
     }
     if (colon != std::string::npos) {
         auto rest = s.substr(colon + 1);
-        // key=value pairs separated by commas; only "sims=N" recognised.
+        // key=value pairs separated by commas: "sims=N", "guesses=N",
+        // "turns_ahead=N", and
+        // for heuristic any EvalWeights field ("hand=2").
         size_t i = 0;
         while (i < rest.size()) {
             auto eq    = rest.find('=', i);
@@ -190,6 +214,22 @@ AgentSpec parseAgentSpec(const std::string& s) {
                 auto key = rest.substr(i, eq - i);
                 auto val = rest.substr(eq + 1, comma - eq - 1);
                 if (key == "sims") out.sims = std::stoi(val);
+                else if (key == "guesses") out.guesses = std::stoi(val);
+                else if (key == "turns_ahead") out.turns_ahead = std::stoi(val);
+                else if (key == "uct_c") out.uct_c = std::stod(val);
+                else if (key == "value_scale") out.value_scale = std::stod(val);
+                else if (key == "policy") out.policy = val;
+                else if (key == "worlds") out.worlds = std::stoi(val);
+                else if (key == "observer") out.observer = val;
+                else if (key == "cut") out.cut = std::stoi(val);
+                else if (key == "depth") out.depth = std::stoi(val);
+                else if (key == "model") out.model = val;
+                else if (out.kind == "heuristic" || out.kind == "ismcts-native") {
+                    EvalWeights probe;
+                    if (!setWeight(probe, key, std::stod(val)))
+                        throw std::runtime_error("Unknown heuristic option '" + key + "'.");
+                    out.weights.emplace_back(key, std::stod(val));
+                }
             }
             i = comma + 1;
         }
@@ -199,6 +239,17 @@ AgentSpec parseAgentSpec(const std::string& s) {
         }
     }
     return out;
+}
+
+/// A value model per file, loaded once and shared by every agent (models are
+/// read-only, so concurrent games may share one).
+std::shared_ptr<const PositionModel> loadModelCached(const std::string& path) {
+    static std::mutex mutex;
+    static std::map<std::string, std::shared_ptr<const PositionModel>> cache;
+    std::lock_guard<std::mutex> lock(mutex);
+    auto& slot = cache[path];
+    if (!slot) slot = GbtModel::load(path);
+    return slot;
 }
 
 /// `game_seed` MUST be the engine's runGame seed — MctsAgent and IsMctsAgent
@@ -218,8 +269,46 @@ std::unique_ptr<AgentInterface> buildAgent(const AgentSpec& spec,
                                            const std::string& deck1,
                                            const std::string& deck2,
                                            const std::string& registry,
+                                           const CardDB& card_db,
+                                           const CardRegistry& card_registry,
                                            HumanAgent** human_out) {
     if (spec.kind == "random") return std::make_unique<RandomAgent>(derived_seed);
+    if (spec.kind == "scripted") return std::make_unique<ScriptedAgent>(card_db);
+    if (spec.kind == "heuristic") {
+        HeuristicConfig config;
+        if (spec.guesses > 0) config.guesses = spec.guesses;
+        if (spec.turns_ahead > 0) config.turns_ahead = spec.turns_ahead;
+        for (const auto& [name, value] : spec.weights) setWeight(config.weights, name, value);
+        if (!spec.model.empty()) config.model = loadModelCached(spec.model);
+        config.seed = derived_seed | 1;
+        return std::make_unique<HeuristicAgent>(card_db, card_registry, config);
+    }
+    if (spec.kind == "ismcts-native") {
+        IsmctsConfig config;
+        if (spec.sims > 0) config.max_simulations = spec.sims;
+        if (spec.turns_ahead > 0) config.turns_ahead = spec.turns_ahead;
+        if (spec.uct_c > 0) config.uct_c = spec.uct_c;
+        if (spec.value_scale > 0) config.value_scale = spec.value_scale;
+        if (spec.worlds > 0) config.max_world_samples = spec.worlds;
+        if (spec.cut >= 0) config.cut_tree_at_horizon = spec.cut != 0;
+        if (spec.depth > 0) config.max_tree_depth = spec.depth;
+        if (spec.observer == "actor") config.key_by_searcher = false;
+        else if (spec.observer == "searcher") config.key_by_searcher = true;
+        else if (!spec.observer.empty())
+            throw std::runtime_error("Unknown ismcts-native observer '" + spec.observer + "'.");
+        if (spec.policy == "visits")
+            config.final_policy_type = IsmctsFinalPolicyType::kNormalizedVisitCount;
+        else if (spec.policy == "maxvisits")
+            config.final_policy_type = IsmctsFinalPolicyType::kMaxVisitCount;
+        else if (spec.policy == "maxvalue")
+            config.final_policy_type = IsmctsFinalPolicyType::kMaxValue;
+        else if (!spec.policy.empty())
+            throw std::runtime_error("Unknown ismcts-native policy '" + spec.policy + "'.");
+        for (const auto& [name, value] : spec.weights) setWeight(config.weights, name, value);
+        if (!spec.model.empty()) config.model = loadModelCached(spec.model);
+        config.seed = derived_seed | 1;
+        return std::make_unique<IsmctsBot>(card_db, card_registry, config);
+    }
     if (spec.kind == "human") {
         auto a = std::make_unique<HumanAgent>();
         if (human_out) *human_out = a.get();
@@ -273,6 +362,24 @@ int main(int argc, char* argv[]) {
         "                    StateEditor god-mode edits do not participate\n"
         "                    in MCTS planning; the bot sees the state\n"
         "                    implied by action_history alone.\n"
+        "  scripted          Fixed rules: play the most expensive card, move\n"
+        "                    to the weakest enemy battlefield, then pass.\n"
+        "  heuristic[:guesses=N]\n"
+        "                    Tries every legal action, plays out the rest of\n"
+        "                    the turn with the scripted rules over N guesses\n"
+        "                    of the hidden cards (default 4), and keeps the\n"
+        "                    best-scoring one. Falls back to the scripted\n"
+        "                    rules mid-chain and mid-combat. turns_ahead=2\n"
+        "                    also plays out the opponent's next turn. Weights\n"
+        "                    are options too: heuristic:hand=3,runes=6\n"
+        "                    (names as in agents/evaluator.h EvalWeights).\n"
+        "                    model=FILE scores positions with a learned\n"
+        "                    value model (riftbound-trainer value_gbt.py).\n"
+        "  ismcts-native[:sims=N,uct_c=X,turns_ahead=N]\n"
+        "                    Information Set MCTS on the engine (OpenSpiel's\n"
+        "                    is_mcts.cc design) with real hidden-card\n"
+        "                    determinization; leaves scored by a scripted\n"
+        "                    playout + evaluate(). Default sims=300, uct_c=2.\n"
         "\n"
         "Common invocations:\n"
         "  ./riftbound --deck1 D1.txt --deck2 D2.txt\n"
@@ -297,10 +404,10 @@ int main(int argc, char* argv[]) {
          "(validation/export tool; does not require decks)")
         ("agent1", po::value<std::string>()->default_value("random"),
          "Player 1 agent spec (see top of --help for full descriptions). "
-         "One of: random | human | mcts:sims=N | ismcts:sims=N")
+         "One of: random | human | mcts:sims=N | ismcts:sims=N | scripted | heuristic[:guesses=N]")
         ("agent2", po::value<std::string>()->default_value("random"),
          "Player 2 agent spec (see top of --help for full descriptions). "
-         "One of: random | human | mcts:sims=N | ismcts:sims=N")
+         "One of: random | human | mcts:sims=N | ismcts:sims=N | scripted | heuristic[:guesses=N]")
         ("web", po::value<std::string>()->default_value("auto"),
          "Web UI mode: auto (default — ON if any seat is human, else OFF), "
          "on (force ON), off (force OFF, even with human seats)")
@@ -534,14 +641,16 @@ int main(int argc, char* argv[]) {
         auto factory_spec2 = spec2;
         auto factory =
             [factory_spec1, factory_spec2,
-             d1 = deck1_path, d2 = deck2_path, r = registry_path]
+             d1 = deck1_path, d2 = deck2_path, r = registry_path,
+             &card_db, &card_registry]
             (int seat, uint64_t game_seed) -> std::unique_ptr<AgentInterface> {
                 const AgentSpec& s = (seat == 0) ? factory_spec1 : factory_spec2;
                 if (s.kind == "human") {
                     throw std::runtime_error("batch mode cannot use human seats");
                 }
                 uint64_t derived = game_seed * 2 + static_cast<uint64_t>(seat);
-                return buildAgent(s, game_seed, derived, d1, d2, r, nullptr);
+                return buildAgent(s, game_seed, derived, d1, d2, r,
+                                  card_db, card_registry, nullptr);
             };
 
         GameConfig cfg;
@@ -580,8 +689,8 @@ int main(int argc, char* argv[]) {
     try {
         // game_seed flows through verbatim so MCTS-style agents seed their
         // internal OpenSpiel state with the same value runGame uses below.
-        agent1 = buildAgent(spec1, game_seed, game_seed * 2,     deck1_path, deck2_path, registry_path, &p1_human_ptr);
-        agent2 = buildAgent(spec2, game_seed, game_seed * 2 + 1, deck1_path, deck2_path, registry_path, &p2_human_ptr);
+        agent1 = buildAgent(spec1, game_seed, game_seed * 2,     deck1_path, deck2_path, registry_path, card_db, card_registry, &p1_human_ptr);
+        agent2 = buildAgent(spec2, game_seed, game_seed * 2 + 1, deck1_path, deck2_path, registry_path, card_db, card_registry, &p2_human_ptr);
     } catch (const std::exception& e) {
         std::cerr << "Failed to build agents: " << e.what() << "\n";
         return 1;

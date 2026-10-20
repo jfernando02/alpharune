@@ -11,7 +11,10 @@
 ///      with as many units as possible.
 ///   3. Otherwise activate an ability.
 ///   4. Otherwise answer a prompt: accept optional triggers and costs, say
-///      yes, keep the opening hand, take the first option offered.
+///      yes, take the first option offered. Mulligan: keep a hand holding an
+///      early drop, a unit costing 2 Energy going first or 2-3 going second
+///      (gear and spells at that cost count when the deck has no such
+///      unit); without one, set aside the two most expensive cards.
 ///   5. Otherwise pass or end the turn.
 ///
 /// Ties go to the earlier legal action. It never concedes.
@@ -33,6 +36,9 @@ public:
                     const std::vector<Intent>& legal_actions) const;
 
 private:
+    /// Index of the mulligan to take, or -1 when `legal` is not a mulligan.
+    int mulliganIndex(const GameState& state, const std::vector<Intent>& legal) const;
+
     const CardDB& card_db_;
 };
 

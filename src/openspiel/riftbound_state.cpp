@@ -91,24 +91,7 @@ void RiftboundState::ensureLive() const {
     // full memcpy refactor (no replay anywhere) requires extracting the
     // entry-side-effects from EVERY phase function + ChainManager
     // processFEPR, which is multi-day work; queued in CLAUDE.md.
-    bool snapshot_is_clean_boundary = !lazy_state_.game_over &&
-        lazy_state_.turn.phase != ::riftbound::TurnPhase::Setup &&
-        lazy_state_.turn.phase != ::riftbound::TurnPhase::Mulligan &&
-        lazy_state_.turn.oc_state == ::riftbound::OpenClosedState::Open &&
-        lazy_state_.turn.ns_state == ::riftbound::NeutralShowdownState::Neutral &&
-        !lazy_state_.chain.exists() &&
-        !lazy_state_.cost_cursor.has_value();
-    if (snapshot_is_clean_boundary) {
-        // Also reject if any BF is mid-combat/showdown.
-        for (const auto& bf : lazy_state_.battlefields) {
-            if (bf.combat_in_progress || bf.showdown_in_progress ||
-                bf.combat_staged || bf.showdown_staged) {
-                snapshot_is_clean_boundary = false;
-                break;
-            }
-        }
-    }
-    bool snapshot_is_resumable = snapshot_is_clean_boundary;
+    bool snapshot_is_resumable = ::riftbound::isCleanResumePoint(lazy_state_);
 
     // Move state off the lazy fields before flipping. Snapshot still
     // holds action_history (needed only by the replay fallback).
@@ -130,9 +113,9 @@ void RiftboundState::ensureLive() const {
         // thread which dispatches based on state_.turn.phase.
         engine_->resumeFromSnapshot(std::move(moved_state), engine_seed_);
     } else {
-        // Legacy replay path for the few clones that snapshot during
-        // Setup/Mulligan. Re-extract action history from the moved
-        // state and replay.
+        // Replay path for every other decision (Setup/Mulligan, chain
+        // priority, combat, choices asked inside a main-phase action).
+        // Re-extract action history from the moved state and replay.
         std::vector<int64_t> history_to_replay =
             std::move(moved_state.action_history);
         engine_->beginGame(rb_game_.deck1(), rb_game_.deck2(), engine_seed_);
@@ -148,7 +131,8 @@ void RiftboundState::ensureLive() const {
                 }
             }
             if (legal_index < 0) break;
-            engine_->mutableState().action_history.push_back(action_id);
+            // applyChoice records the action on action_history itself
+            // (GameEngine::recordAppliedIntent).
             engine_->applyChoice(legal_index);
         }
     }
@@ -373,7 +357,9 @@ void RiftboundState::DoApplyAction(::open_spiel::Action action) {
         legal_index = 0;
     }
 
-    engine_->mutableState().action_history.push_back(static_cast<int64_t>(action));
+    // No action_history push here: the engine records every applied
+    // decision itself (GameEngine::recordAppliedIntent). Pushing it again
+    // doubled each entry and broke the replay fallback in ensureLive.
     engine_->applyChoice(legal_index);
 }
 

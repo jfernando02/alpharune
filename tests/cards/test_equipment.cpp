@@ -262,6 +262,22 @@ TEST_F(EquipmentTest, BladeOfRuinedKingFailsWithoutFriendlyToKill) {
     EXPECT_FALSE(state.getObject(gear).attached_to.has_value());
 }
 
+// canEquip gates the equip action. Without it the generator offered an equip
+// that onEquip then refused, a legal action that changed nothing; the
+// look-ahead agent chose it again and again until the game hung.
+TEST_F(EquipmentTest, SimpleEquipCanEquipOnlyWithAMatchingRune) {
+    addUnit(P1, kInvalidId, /*might=*/1, /*at_bf=*/0);
+    addGearOnBoard(P1, kEyeOfTheHerald, /*at_bf=*/0);
+    const Card* eye = card_registry.get(kEyeOfTheHerald);
+    ASSERT_NE(eye, nullptr);
+
+    EXPECT_FALSE(eye->canEquip(state, P1)) << "no runes";
+    addRune(P1, Domain::Fury);
+    EXPECT_FALSE(eye->canEquip(state, P1)) << "no Order rune for the [Y] power";
+    addRune(P1, Domain::Order);
+    EXPECT_TRUE(eye->canEquip(state, P1));
+}
+
 // Shepherd's Heirloom (720): [Equip] — Spend 1 XP.
 TEST_F(EquipmentTest, ShepherdsHeirloomEquipsBySpendingXp) {
     auto unit = addUnit(P1, kInvalidId, /*might=*/3, /*at_bf=*/0);

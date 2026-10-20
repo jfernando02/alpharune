@@ -69,6 +69,16 @@ struct StepResult {
     std::vector<Intent> legal;              // populated when kind==NeedDecision
 };
 
+/// True when `state` can be handed to `GameEngine::resumeFromSnapshot`: the
+/// main-phase loop is waiting on the turn player's priority decision
+/// (`TurnState::awaiting_main_action`), Neutral / Open, with no chain, no
+/// cost payment in progress and no battlefield mid-combat or mid-showdown.
+/// A resumed engine re-enters that loop, so anywhere else — including a
+/// choice asked partway through a main-phase action — it would skip the
+/// pending prompt or re-run side effects the snapshot already holds, and
+/// callers must replay `action_history` instead.
+bool isCleanResumePoint(const GameState& state);
+
 class GameEngine {
 public:
     GameEngine(const CardDB& card_db, EventBus& event_bus,
@@ -478,9 +488,9 @@ private:
     /// the first rune-pick options. Side effects: writes
     /// state_.cost_cursor; consumes one-shot CostModifier entries.
     CostPaymentAdvance beginCostPayment(PlayerId player, GameObjectId card_obj);
-    /// Inspect the cursor and produce the next NeedDecision (or Done
-    /// if all payments are complete). Pure read of state — does NOT
-    /// mutate runes. Used internally by resolveCostPaymentDecision
+    /// Pay the cursor's Energy (no decision: any ready rune gives the same
+    /// Energy), then produce the next power rune pick, or Done when all
+    /// payments are complete. Used internally by resolveCostPaymentDecision
     /// after each rune pick to surface the next choice.
     CostPaymentAdvance advanceCostPayment();
     /// Apply the chosen rune pick (a MakeChoice intent with
@@ -488,6 +498,8 @@ private:
     /// the cursor's remaining count, and returns the next decision
     /// (or Done when the cursor finishes). Asserts a cursor exists.
     CostPaymentAdvance resolveCostPaymentDecision(const Intent& chosen);
+    /// Exhaust `rune_id` for one Energy of the active cost cursor.
+    void exhaustRuneForEnergy(GameObjectId rune_id);
 
     // ── Actions ──
     void executeIntent(const Intent& intent);
