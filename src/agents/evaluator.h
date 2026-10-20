@@ -53,4 +53,21 @@ inline constexpr double kWinScore = 1e9;
 /// Score `state` from `me`'s point of view. Higher is better for `me`.
 double evaluate(const GameState& state, PlayerId me, const EvalWeights& weights = {});
 
+/// Distinct cards in `player`'s trash that a standing grant lets them play.
+int trashReplayable(const GameState& state, PlayerId player);
+
+/// Energy `player`'s runes give over the next `horizon` turns if they
+/// channel 2 a turn into base, up to every rune they own (base + rune deck).
+int projectedRuneEnergy(const GameState& state, PlayerId player, int horizon);
+
+/// A learned position evaluator. When an agent is given one it replaces
+/// `evaluate`: the agent scores a position by `me`'s chance of winning.
+/// Implementations must read only what `me` can see.
+class PositionModel {
+public:
+    virtual ~PositionModel() = default;
+    /// Probability in [0, 1] that `me` wins from `state` (not game over).
+    virtual double winProbability(const GameState& state, PlayerId me) const = 0;
+};
+
 } // namespace riftbound

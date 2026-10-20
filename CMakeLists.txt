@@ -346,7 +346,9 @@ add_library(riftbound_core
     src/agents/determinize.cpp
     src/agents/heuristic_agent.cpp
     src/agents/ismcts_bot.cpp
+    src/agents/gbt_evaluator.cpp
     src/ml/feature_extractor.cpp
+    src/ml/value_features.cpp
     src/ml/cfr_util.cpp
     src/openspiel/action_vocab.cpp
 )
@@ -401,6 +403,10 @@ target_link_libraries(riftbound PRIVATE
 # OpenSpiel sources include "open_spiel/spiel.h" — needs the parent of the
 # open_spiel/ subdir on the include path.
 target_include_directories(riftbound PRIVATE ${open_spiel_SOURCE_DIR})
+
+# Training-data recorder for the learned value model (see tools/value_data.cpp).
+add_executable(riftbound_value_data tools/value_data.cpp)
+target_link_libraries(riftbound_value_data PRIVATE riftbound_core)
 
 # Config parsing (src/config/) moved to riftbound-trainer along with the
 # training driver — engine has no current consumers. A future engine

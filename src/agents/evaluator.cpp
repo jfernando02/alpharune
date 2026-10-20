@@ -28,7 +28,8 @@ int boardMight(const GameState& state, PlayerId player) {
     return total;
 }
 
-/// Distinct cards in `player`'s trash that a standing grant lets them play.
+} // namespace
+
 int trashReplayable(const GameState& state, PlayerId player) {
     std::vector<GameObjectId> cards;
     for (const auto& grant : state.player(player).trash_replay_grants) {
@@ -40,8 +41,6 @@ int trashReplayable(const GameState& state, PlayerId player) {
     return static_cast<int>(cards.size());
 }
 
-/// Energy `player`'s runes give over the next `horizon` turns if they
-/// channel 2 a turn into base, up to every rune they own (base + rune deck).
 int projectedRuneEnergy(const GameState& state, PlayerId player, int horizon) {
     const int in_base = static_cast<int>(state.runesInBase(player).size());
     const int owned = in_base + static_cast<int>(state.player(player).rune_deck.size());
@@ -49,8 +48,6 @@ int projectedRuneEnergy(const GameState& state, PlayerId player, int horizon) {
     for (int t = 1; t <= horizon; ++t) total += std::min(owned, in_base + 2 * t);
     return total;
 }
-
-} // namespace
 
 bool setWeight(EvalWeights& w, const std::string& name, double value) {
     if (name == "points") w.points = value;

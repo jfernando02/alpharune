@@ -365,8 +365,14 @@ std::vector<double> IsmctsBot::Evaluate(Sim& sim) {
             sim.apply(pick < 0 ? 0 : pick);
         }
     }
-    const double v = std::tanh(evaluate(state, PlayerId::Player1, config_.weights) /
-                               config_.value_scale);
+    double v;
+    if (!config_.model) {
+        v = std::tanh(evaluate(state, PlayerId::Player1, config_.weights) / config_.value_scale);
+    } else if (state.game_over) {
+        v = state.winner == PlayerId::Player1 ? 1.0 : state.winner == PlayerId::Player2 ? -1.0 : 0.0;
+    } else {
+        v = 2.0 * config_.model->winProbability(state, PlayerId::Player1) - 1.0;
+    }
     return {v, -v};
 }
 

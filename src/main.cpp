@@ -22,6 +22,7 @@
 
 #include "agents/human_agent.h"
 #include "agents/mcts_agent.h"
+#include "agents/gbt_evaluator.h"
 #include "agents/heuristic_agent.h"
 #include "agents/ismcts_bot.h"
 #include "agents/random_agent.h"
@@ -46,7 +47,9 @@
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <random>
 #include <sstream>
 #include <stdexcept>
@@ -179,6 +182,7 @@ struct AgentSpec {
     std::string observer;  // ismcts-native only: searcher | actor (node keys)
     int cut = -1;          // ismcts-native only: cut tree at horizon (1/0); -1 = default
     int depth = 0;         // ismcts-native only: max tree depth; 0 = unlimited
+    std::string model;     // heuristic / ismcts-native: learned value model (JSON)
     // heuristic only: EvalWeights overrides, e.g. "hand=3" (see setWeight)
     std::vector<std::pair<std::string, double>> weights;
 };
@@ -219,6 +223,7 @@ AgentSpec parseAgentSpec(const std::string& s) {
                 else if (key == "observer") out.observer = val;
                 else if (key == "cut") out.cut = std::stoi(val);
                 else if (key == "depth") out.depth = std::stoi(val);
+                else if (key == "model") out.model = val;
                 else if (out.kind == "heuristic" || out.kind == "ismcts-native") {
                     EvalWeights probe;
                     if (!setWeight(probe, key, std::stod(val)))
@@ -234,6 +239,17 @@ AgentSpec parseAgentSpec(const std::string& s) {
         }
     }
     return out;
+}
+
+/// A value model per file, loaded once and shared by every agent (models are
+/// read-only, so concurrent games may share one).
+std::shared_ptr<const PositionModel> loadModelCached(const std::string& path) {
+    static std::mutex mutex;
+    static std::map<std::string, std::shared_ptr<const PositionModel>> cache;
+    std::lock_guard<std::mutex> lock(mutex);
+    auto& slot = cache[path];
+    if (!slot) slot = GbtModel::load(path);
+    return slot;
 }
 
 /// `game_seed` MUST be the engine's runGame seed — MctsAgent and IsMctsAgent
@@ -263,6 +279,7 @@ std::unique_ptr<AgentInterface> buildAgent(const AgentSpec& spec,
         if (spec.guesses > 0) config.guesses = spec.guesses;
         if (spec.turns_ahead > 0) config.turns_ahead = spec.turns_ahead;
         for (const auto& [name, value] : spec.weights) setWeight(config.weights, name, value);
+        if (!spec.model.empty()) config.model = loadModelCached(spec.model);
         config.seed = derived_seed | 1;
         return std::make_unique<HeuristicAgent>(card_db, card_registry, config);
     }
@@ -288,6 +305,7 @@ std::unique_ptr<AgentInterface> buildAgent(const AgentSpec& spec,
         else if (!spec.policy.empty())
             throw std::runtime_error("Unknown ismcts-native policy '" + spec.policy + "'.");
         for (const auto& [name, value] : spec.weights) setWeight(config.weights, name, value);
+        if (!spec.model.empty()) config.model = loadModelCached(spec.model);
         config.seed = derived_seed | 1;
         return std::make_unique<IsmctsBot>(card_db, card_registry, config);
     }
@@ -355,6 +373,8 @@ int main(int argc, char* argv[]) {
         "                    also plays out the opponent's next turn. Weights\n"
         "                    are options too: heuristic:hand=3,runes=6\n"
         "                    (names as in agents/evaluator.h EvalWeights).\n"
+        "                    model=FILE scores positions with a learned\n"
+        "                    value model (riftbound-trainer value_gbt.py).\n"
         "  ismcts-native[:sims=N,uct_c=X,turns_ahead=N]\n"
         "                    Information Set MCTS on the engine (OpenSpiel's\n"
         "                    is_mcts.cc design) with real hidden-card\n"

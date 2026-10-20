@@ -29,6 +29,7 @@
 #include "core/card_db.h"
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <random>
 
@@ -46,6 +47,9 @@ struct HeuristicConfig {
     // re-chosen forever, since the rollout after it keeps playing.
     int max_lookaheads_per_turn = 100;
     EvalWeights weights;
+    // When set, positions are scored by this model's win probability
+    // instead of `evaluate(weights)`.
+    std::shared_ptr<const PositionModel> model;
     uint64_t seed = 1;              // 0 picks a random seed
 };
 

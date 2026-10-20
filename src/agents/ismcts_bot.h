@@ -86,6 +86,9 @@ struct IsmctsConfig {
     int turns_ahead = 1;             // horizon, counted from the root's turn
     double value_scale = 150.0;      // a point is 100 in evaluate()
     EvalWeights weights;
+    // When set, a leaf is scored 2p - 1 from this model's win probability p
+    // instead of tanh(evaluate / value_scale).
+    std::shared_ptr<const PositionModel> model;
     int max_steps = 400;             // decisions per simulation, tree + playout
 
     int max_lookaheads_per_turn = 100;  // see HeuristicConfig
