@@ -342,6 +342,10 @@ add_library(riftbound_core
     src/engine/batch_runner.cpp
     src/engine/step_driver.cpp
     src/agents/scripted_agent.cpp
+    src/agents/evaluator.cpp
+    src/agents/determinize.cpp
+    src/agents/heuristic_agent.cpp
+    src/agents/ismcts_bot.cpp
     src/ml/feature_extractor.cpp
     src/ml/cfr_util.cpp
     src/openspiel/action_vocab.cpp
