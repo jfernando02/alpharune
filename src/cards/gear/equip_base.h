@@ -16,6 +16,28 @@
 
 namespace riftbound {
 
+// ─── Standard equip cost check: [energy] ready runes + one [domain] rune ─────
+/// The rune `standardEquip` would recycle for the [domain] power, or
+/// kInvalidId when `player` cannot pay [energy] + that power.
+inline GameObjectId standardEquipPowerRune(const GameState& state, PlayerId player,
+                                           int energy_cost, Domain domain) {
+    const auto base_loc = BaseLocation{player};
+    int ready_count = 0;
+    GameObjectId domain_rune = kInvalidId;
+    for (const auto& [id, obj] : state.objects) {
+        if (!obj.isRune() || obj.controller != player) continue;
+        if (!obj.location.has_value() || *obj.location != LocationId{base_loc}) continue;
+        if (!obj.is_exhausted) ready_count++;
+        if (domain_rune == kInvalidId) {
+            for (auto d : obj.domains) {
+                if (d == domain) { domain_rune = id; break; }
+            }
+        }
+    }
+    if (ready_count < energy_cost) return kInvalidId;
+    return domain_rune;
+}
+
 // ─── Canonical standard equip: pay [energy] + one [domain] power, then attach ──
 inline bool standardEquip(CardContext& ctx, GameObjectId gear_id, GameObjectId unit_id,
                           int energy_cost, Domain domain) {
@@ -27,20 +49,8 @@ inline bool standardEquip(CardContext& ctx, GameObjectId gear_id, GameObjectId u
     // PRE-CHECK: bail (no state change) unless BOTH the energy and the
     // domain-power can be paid — otherwise the loops below would partially
     // pay and then "equip for free".
-    int ready_count = 0;
-    GameObjectId domain_rune = kInvalidId;
-    for (auto& [id, obj] : state.objects) {
-        if (!obj.isRune() || obj.controller != player) continue;
-        if (!obj.location.has_value() || *obj.location != LocationId{base_loc}) continue;
-        if (!obj.is_exhausted) ready_count++;
-        if (domain_rune == kInvalidId) {
-            for (auto d : obj.domains) {
-                if (d == domain) { domain_rune = id; break; }
-            }
-        }
-    }
-    if (ready_count < energy_cost) return false;
-    if (domain_rune == kInvalidId)  return false;
+    const GameObjectId domain_rune = standardEquipPowerRune(state, player, energy_cost, domain);
+    if (domain_rune == kInvalidId) return false;
 
     // Pay energy: exhaust ready runes.
     if (energy_cost > 0) {
@@ -90,6 +100,9 @@ public:
     bool hasEquipAbility() const override { return true; }
     bool onEquip(CardContext& ctx, GameObjectId unit) override {
         return standardEquip(ctx, ctx.source, unit, energy_cost_, equip_domain_);
+    }
+    bool canEquip(const GameState& state, PlayerId controller) const override {
+        return standardEquipPowerRune(state, controller, energy_cost_, equip_domain_) != kInvalidId;
     }
 
 protected:

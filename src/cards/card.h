@@ -559,6 +559,11 @@ public:
     /// Returns true if equip succeeded (cost paid, attached).
     virtual bool onEquip(CardContext& ctx, GameObjectId unit) { return false; }
 
+    /// Whether `controller` can currently pay this gear's equip cost. The
+    /// action generator offers equip only when true, so an equip that
+    /// onEquip would refuse is not a legal action that changes nothing.
+    virtual bool canEquip(const GameState& state, PlayerId controller) const { return true; }
+
     /// Whether THIS gear defers equip-time target selection to onEquip
     /// via pickTarget. When true, generateMainPhaseActions emits ONE
     /// equip intent per gear (no per-target enumeration), and the

@@ -488,9 +488,9 @@ private:
     /// the first rune-pick options. Side effects: writes
     /// state_.cost_cursor; consumes one-shot CostModifier entries.
     CostPaymentAdvance beginCostPayment(PlayerId player, GameObjectId card_obj);
-    /// Inspect the cursor and produce the next NeedDecision (or Done
-    /// if all payments are complete). Pure read of state — does NOT
-    /// mutate runes. Used internally by resolveCostPaymentDecision
+    /// Pay the cursor's Energy (no decision: any ready rune gives the same
+    /// Energy), then produce the next power rune pick, or Done when all
+    /// payments are complete. Used internally by resolveCostPaymentDecision
     /// after each rune pick to surface the next choice.
     CostPaymentAdvance advanceCostPayment();
     /// Apply the chosen rune pick (a MakeChoice intent with
@@ -498,6 +498,8 @@ private:
     /// the cursor's remaining count, and returns the next decision
     /// (or Done when the cursor finishes). Asserts a cursor exists.
     CostPaymentAdvance resolveCostPaymentDecision(const Intent& chosen);
+    /// Exhaust `rune_id` for one Energy of the active cost cursor.
+    void exhaustRuneForEnergy(GameObjectId rune_id);
 
     // ── Actions ──
     void executeIntent(const Intent& intent);
