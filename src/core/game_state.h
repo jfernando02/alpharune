@@ -406,6 +406,13 @@ struct TurnState {
     int turn_number = 0;
     bool is_additional_turn = false;
 
+    // True only while the main-phase loop waits on the turn player's
+    // priority decision (play / move / end turn). False at every decision an
+    // action asks for partway through (MakeChoice for an optional cost, a
+    // play location, ...), which otherwise look like the same Open / Neutral
+    // boundary. isCleanResumePoint requires it.
+    bool awaiting_main_action = false;
+
     // True once any unit has died during the current turn (reset each runTurn).
     // Read by cards like Towering Pairofant ("if a unit died this turn, ...").
     bool any_unit_died_this_turn = false;

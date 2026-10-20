@@ -341,6 +341,7 @@ add_library(riftbound_core
     src/engine/game_runner.cpp
     src/engine/batch_runner.cpp
     src/engine/step_driver.cpp
+    src/agents/scripted_agent.cpp
     src/ml/feature_extractor.cpp
     src/ml/cfr_util.cpp
     src/openspiel/action_vocab.cpp
@@ -415,14 +416,23 @@ file(GLOB_RECURSE RIFTBOUND_TEST_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.cpp")
 # Model-forward + CFR util tests live in riftbound-trainer.
 
-add_executable(riftbound_tests ${RIFTBOUND_TEST_SOURCES})
+add_executable(riftbound_tests ${RIFTBOUND_TEST_SOURCES}
+    # RiftboundState (OpenSpiel wrapper) is under test too; its TUs are
+    # compiled in directly, as for the riftbound binary.
+    src/openspiel/riftbound_game.cpp
+    src/openspiel/riftbound_state.cpp
+)
 # Per-card test fixture lives in tests/cards/. Bring tests/ onto the include
 # path so #include "tests/cards/card_test_fixture.h" resolves.
-target_include_directories(riftbound_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(riftbound_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR} ${open_spiel_SOURCE_DIR})
 
 target_link_libraries(riftbound_tests PRIVATE
     riftbound_core
+    open_spiel_core
     GTest::gtest_main
+    absl::algorithm absl::flags absl::flags_parse absl::flat_hash_map
+    absl::optional absl::random_random absl::str_format absl::strings absl::time
 )
 
 # The tests parse the same engine headers plus GoogleTest and the shared card

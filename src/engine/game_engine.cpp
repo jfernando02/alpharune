@@ -196,6 +196,23 @@ StepResult GameEngine::beginGame(
     return current_step_;
 }
 
+bool isCleanResumePoint(const GameState& state) {
+    if (state.game_over ||
+        !state.turn.awaiting_main_action ||
+        state.turn.phase != TurnPhase::MainPhase ||
+        state.turn.oc_state != OpenClosedState::Open ||
+        state.turn.ns_state != NeutralShowdownState::Neutral ||
+        state.chain.exists() ||
+        state.cost_cursor.has_value())
+        return false;
+    for (const auto& bf : state.battlefields) {
+        if (bf.combat_in_progress || bf.showdown_in_progress ||
+            bf.combat_staged || bf.showdown_staged)
+            return false;
+    }
+    return true;
+}
+
 StepResult GameEngine::resumeFromSnapshot(GameState snapshot_state,
                                             uint64_t engine_seed) {
     if (step_driver_) {
@@ -968,7 +985,11 @@ void GameEngine::mainPhaseLoop() {
         auto adv = advanceMainPhase(action_count);
         if (adv.kind == MainPhaseAdvance::Kind::Done) return;
 
+        // Marks the one decision resumeFromSnapshot can re-enter: a resumed
+        // engine lands back here, not inside the chosen action.
+        state_.turn.awaiting_main_action = true;
         auto intent = queryAgent(state_.turn.turn_player);
+        state_.turn.awaiting_main_action = false;
         if (!resolveMainPhaseDecision(intent, action_count)) return;
     }
 }

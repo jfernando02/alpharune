@@ -69,6 +69,16 @@ struct StepResult {
     std::vector<Intent> legal;              // populated when kind==NeedDecision
 };
 
+/// True when `state` can be handed to `GameEngine::resumeFromSnapshot`: the
+/// main-phase loop is waiting on the turn player's priority decision
+/// (`TurnState::awaiting_main_action`), Neutral / Open, with no chain, no
+/// cost payment in progress and no battlefield mid-combat or mid-showdown.
+/// A resumed engine re-enters that loop, so anywhere else — including a
+/// choice asked partway through a main-phase action — it would skip the
+/// pending prompt or re-run side effects the snapshot already holds, and
+/// callers must replay `action_history` instead.
+bool isCleanResumePoint(const GameState& state);
+
 class GameEngine {
 public:
     GameEngine(const CardDB& card_db, EventBus& event_bus,
