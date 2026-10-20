@@ -885,32 +885,54 @@ GameEngine::MainPhaseAdvance GameEngine::advanceMainPhase(int& action_count) {
         return adv;
     }
 
-    // Check for staged showdowns/combats after cleanup
-    processContestedBattlefields();
-    if (state_.game_over) {
-        adv.kind = MainPhaseAdvance::Kind::Done;
-        return adv;
-    }
-
-    // If in showdown, run it. Sub-calls still use the recursive path
-    // until C-1 commit 6 converts the chain / combat subsystems.
-    for (auto& bf : state_.battlefields) {
-        if (bf.showdown_staged && !bf.showdown_in_progress &&
-            !bf.combat_staged) {
-            runShowdown(bf.id);
-            if (state_.game_over) {
-                adv.kind = MainPhaseAdvance::Kind::Done;
-                return adv;
-            }
-            bf.showdown_staged = false;
+    // Run staged showdowns/combats before the turn player gets priority. Each
+    // one ends with a Cleanup (CR 319.1: back to Neutral Open; 319.6: Units it
+    // killed or recalled left the board). That Cleanup removes Contested from
+    // a battlefield whose contester has no Units left (CR 323.10) and may
+    // stage another showdown or combat, so repeat until nothing is staged.
+    constexpr int kMaxStagedRounds = 16;  // safety cap
+    for (int round = 0; round < kMaxStagedRounds; ++round) {
+        processContestedBattlefields();
+        if (state_.game_over) {
+            adv.kind = MainPhaseAdvance::Kind::Done;
+            return adv;
         }
-        if (bf.combat_staged && !bf.combat_in_progress) {
-            runCombat(bf.id);
-            if (state_.game_over) {
-                adv.kind = MainPhaseAdvance::Kind::Done;
-                return adv;
+
+        // Sub-calls still use the recursive path until C-1 commit 6
+        // converts the chain / combat subsystems. Indexed: a showdown can
+        // create a battlefield.
+        bool ran = false;
+        for (size_t i = 0; i < state_.battlefields.size(); ++i) {
+            const BattlefieldId bf_id = state_.battlefields[i].id;
+            if (state_.battlefields[i].showdown_staged &&
+                !state_.battlefields[i].showdown_in_progress &&
+                !state_.battlefields[i].combat_staged) {
+                runShowdown(bf_id);
+                ran = true;
+                if (state_.game_over) {
+                    adv.kind = MainPhaseAdvance::Kind::Done;
+                    return adv;
+                }
+                state_.battlefields[i].showdown_staged = false;
             }
-            bf.combat_staged = false;
+            if (state_.battlefields[i].combat_staged &&
+                !state_.battlefields[i].combat_in_progress) {
+                runCombat(bf_id);
+                ran = true;
+                if (state_.game_over) {
+                    adv.kind = MainPhaseAdvance::Kind::Done;
+                    return adv;
+                }
+                state_.battlefields[i].combat_staged = false;
+            }
+        }
+        if (!ran) break;
+
+        cleanup();
+        if (chain_manager_->chainExists()) runChain();
+        if (state_.game_over) {
+            adv.kind = MainPhaseAdvance::Kind::Done;
+            return adv;
         }
     }
 
