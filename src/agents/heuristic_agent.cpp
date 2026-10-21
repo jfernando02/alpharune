@@ -40,6 +40,7 @@ Intent HeuristicAgent::selectAction(const GameState& state,
     if (state.turn.turn_number != lookahead_turn_) {
         lookahead_turn_ = state.turn.turn_number;
         lookaheads_this_turn_ = 0;
+        steps_this_turn_ = 0;
     }
     if (++lookaheads_this_turn_ > config_.max_lookaheads_per_turn) {
         // isLookaheadPoint guarantees an EndTurn is present.
@@ -49,12 +50,30 @@ Intent HeuristicAgent::selectAction(const GameState& state,
         });
     }
 
+    // Fit the search to what is left of the turn's budget, pricing a
+    // simulation at the average rollout so far (a guess before the first).
+    int guesses = config_.guesses;
+    if (config_.max_rollout_steps_per_turn > 0) {
+        const long left = config_.max_rollout_steps_per_turn - steps_this_turn_;
+        const double per_sim = stats_.simulations > 0
+            ? static_cast<double>(stats_.rollout_steps) / stats_.simulations : 20.0;
+        const long affordable = static_cast<long>(left / (per_sim * legal.size()));
+        if (affordable < 1) {
+            ++stats_.budget_fallbacks;
+            return scripted_.selectAction(state, legal);
+        }
+        if (affordable < guesses) {
+            guesses = static_cast<int>(affordable);
+            ++stats_.thinned_searches;
+        }
+    }
+
     const PlayerId me = legal[0].player;
     const size_t n = legal.size();
     std::vector<double> total(n, 0.0);
     std::vector<int> samples(n, 0);
 
-    for (int g = 0; g < config_.guesses; ++g) {
+    for (int g = 0; g < guesses; ++g) {
         GameState guess = state;
         determinize(guess, me, rng_);
         // Nonzero: resumeFromSnapshot treats 0 as "seed from random_device".
@@ -132,13 +151,16 @@ std::optional<double> HeuristicAgent::simulate(const GameState& guess,
 
         const int last_turn = guess.turn.turn_number + config_.turns_ahead - 1;
         step = engine.applyChoice(index);
-        for (int s = 0; s < config_.max_rollout_steps &&
-                        step.kind == StepKind::NeedDecision &&
-                        engine.state().turn.turn_number <= last_turn;
+        int s = 0;
+        for (; s < config_.max_rollout_steps &&
+               step.kind == StepKind::NeedDecision &&
+               engine.state().turn.turn_number <= last_turn;
              ++s) {
             const int pick = scripted_.selectIndex(engine.state(), step.legal);
             step = engine.applyChoice(pick < 0 ? 0 : pick);
         }
+        stats_.rollout_steps += s + 1;  // + the action itself
+        steps_this_turn_ += s + 1;
 
         ++stats_.simulations;
         const GameState& end = engine.state();

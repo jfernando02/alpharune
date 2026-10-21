@@ -46,6 +46,17 @@ struct HeuristicConfig {
     // action that changes nothing (an engine bug) would otherwise be
     // re-chosen forever, since the rollout after it keeps playing.
     int max_lookaheads_per_turn = 100;
+    // Rollout steps (decisions simulated, across every simulation) the agent
+    // may spend searching one turn; 0 = no limit. A search costs legal actions
+    // x guesses x rollout length, and all three grow with the board: a deck
+    // that floods it with tokens (Eye of the Herald's Recruits) reached 54
+    // units, ~106 legal actions and hours per game. A decision that cannot
+    // afford every guess searches with fewer; once the budget is spent the
+    // agent plays the rest of the turn as ScriptedAgent. The budget is checked
+    // between decisions, so one search may overshoot it. Over 44 arena games
+    // (2026-10) ordinary turns peaked at ~2k steps (median game) and ~19k
+    // (worst); the runaway turns spent 175k-970k before this cap.
+    long max_rollout_steps_per_turn = 40000;
     EvalWeights weights;
     // When set, positions are scored by this model's win probability
     // instead of `evaluate(weights)`.
@@ -62,6 +73,9 @@ public:
         int simulations = 0;         // simulations that produced a score
         int failed_simulations = 0;  // threw, or could not match the action
         int turn_cap_hits = 0;       // turns ended by max_lookaheads_per_turn
+        long rollout_steps = 0;      // decisions simulated, across all simulations
+        int thinned_searches = 0;    // searched with fewer guesses to fit the budget
+        int budget_fallbacks = 0;    // answered as ScriptedAgent: turn budget spent
         // Searched EndTurn picks with a ready rune and a card still playable
         // ("left Energy unspent"), and how many of those held an [Action] or
         // [Reaction] card in hand.
@@ -98,8 +112,9 @@ private:
     ScriptedAgent scripted_;
     std::mt19937_64 rng_;
     Stats stats_;
-    int lookahead_turn_ = -1;        // turn_number the count below is for
+    int lookahead_turn_ = -1;        // turn_number the counts below are for
     int lookaheads_this_turn_ = 0;
+    long steps_this_turn_ = 0;       // rollout steps spent searching this turn
 };
 
 } // namespace riftbound

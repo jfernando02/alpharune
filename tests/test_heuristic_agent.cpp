@@ -379,6 +379,37 @@ TEST_F(HeuristicAgentTest, ReturnsALegalActionAndIsDeterministic) {
     }
 }
 
+// With the turn's search budget spent, the agent answers as ScriptedAgent.
+TEST_F(HeuristicAgentTest, SpentBudgetFallsBackToScripted) {
+    HeuristicConfig config;
+    config.max_rollout_steps_per_turn = 1;  // not enough for a single simulation
+    ScriptedAgent scripted(card_db);
+    for (const auto& [state, legal] : cleanPoints(23, 8)) {
+        HeuristicAgent agent(card_db, card_registry, config);
+        EXPECT_EQ(agent.selectAction(state, legal), scripted.selectAction(state, legal));
+        EXPECT_EQ(agent.stats().budget_fallbacks, 1);
+        EXPECT_EQ(agent.stats().simulations, 0);
+    }
+}
+
+// A decision the budget cannot afford in full is searched with fewer guesses
+// (each a simulation of every legal action), and the steps are counted.
+TEST_F(HeuristicAgentTest, TightBudgetSearchesWithFewerGuesses) {
+    for (const auto& [state, legal] : cleanPoints(23, 8)) {
+        HeuristicConfig config;
+        config.guesses = 4;
+        // Priced at 20 steps a simulation before the first: room for 2 guesses.
+        config.max_rollout_steps_per_turn = 20L * static_cast<long>(legal.size()) * 2;
+        HeuristicAgent agent(card_db, card_registry, config);
+        const Intent pick = agent.selectAction(state, legal);
+        EXPECT_NE(std::find(legal.begin(), legal.end(), pick), legal.end());
+        EXPECT_EQ(agent.stats().thinned_searches, 1);
+        EXPECT_EQ(agent.stats().budget_fallbacks, 0);
+        EXPECT_LE(agent.stats().simulations, 2 * static_cast<int>(legal.size()));
+        EXPECT_GE(agent.stats().rollout_steps, agent.stats().simulations);
+    }
+}
+
 TEST_F(HeuristicAgentTest, BeatsRandom) {
     HeuristicConfig config;
     config.guesses = 2;
@@ -398,6 +429,9 @@ TEST_F(HeuristicAgentTest, BeatsRandom) {
         const PlayerId seat = heuristic_first ? PlayerId::Player1 : PlayerId::Player2;
         if (r.winner == seat) ++wins;
         EXPECT_EQ(heuristic.stats().failed_simulations, 0) << "game " << g;
+        // Ordinary games never reach the default search budget.
+        EXPECT_EQ(heuristic.stats().budget_fallbacks, 0) << "game " << g;
+        EXPECT_EQ(heuristic.stats().thinned_searches, 0) << "game " << g;
     }
     EXPECT_GE(wins, 9) << wins << "/" << games;
 }

@@ -404,9 +404,13 @@ target_link_libraries(riftbound PRIVATE
 # open_spiel/ subdir on the include path.
 target_include_directories(riftbound PRIVATE ${open_spiel_SOURCE_DIR})
 
-# Training-data recorder for the learned value model (see tools/value_data.cpp).
+# Training-data recorder for the learned value model (see tools/value_data.cpp)
+# and the head-to-head match runner riftbound-trainer's selfplay loop
+# promotes models with (tools/arena.cpp).
 add_executable(riftbound_value_data tools/value_data.cpp)
 target_link_libraries(riftbound_value_data PRIVATE riftbound_core)
+add_executable(riftbound_arena tools/arena.cpp)
+target_link_libraries(riftbound_arena PRIVATE riftbound_core)
 
 # Config parsing (src/config/) moved to riftbound-trainer along with the
 # training driver — engine has no current consumers. A future engine

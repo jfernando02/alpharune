@@ -2,10 +2,11 @@
 /// Records training data for the learned value model.
 ///
 ///   riftbound_value_data --out data/values.txt [--games N] [--threads T]
-///                        [--seed S] [--decks DIR]
+///                        [--seed S] [--decks DIR] [--model FILE] [--guesses N]
 ///
 /// Plays games between random pairs of the legal decks in DIR with a mix of
-/// agents, and at the first decision of every turn encodes the position
+/// agents (the heuristic agent scoring with --model when given: that is how
+/// riftbound-trainer's selfplay loop records its current champion), and at the first decision of every turn encodes the position
 /// from both players' points of view (ml::extractValueFeatures). That is the
 /// point at which HeuristicAgent's playouts call the evaluator. When the
 /// game ends each row is labelled 1 if its player won, 0 if they lost;
@@ -16,15 +17,11 @@
 /// Deck numbers index the list written to <out>.decks; feature names go to
 /// <out>.names (one per index).
 
-#include "agents/heuristic_agent.h"
-#include "agents/random_agent.h"
-#include "agents/scripted_agent.h"
-#include "cards/card_registry.h"
-#include "core/card_db.h"
+#include "tool_common.h"
+
 #include "core/events.h"
 #include "engine/game_engine.h"
 #include "ml/value_features.h"
-#include "rules/deck_validator.h"
 
 #include <algorithm>
 #include <atomic>
@@ -43,7 +40,6 @@
 #include <vector>
 
 using namespace riftbound;
-namespace fs = std::filesystem;
 
 namespace {
 
@@ -53,6 +49,8 @@ struct Options {
     int games = 1000;
     int threads = 0;
     uint64_t seed = 1;
+    std::string model;  // learned value model for the heuristic agent, if any
+    int guesses = 0;    // heuristic determinizations; 0 = HeuristicConfig's default
 };
 
 Options parse(int argc, char** argv) {
@@ -68,6 +66,8 @@ Options parse(int argc, char** argv) {
         else if (a == "--games") o.games = std::stoi(next());
         else if (a == "--threads") o.threads = std::stoi(next());
         else if (a == "--seed") o.seed = std::stoull(next());
+        else if (a == "--model") o.model = next();
+        else if (a == "--guesses") o.guesses = std::stoi(next());
         else throw std::runtime_error("unknown argument " + a);
     }
     if (o.out.empty()) throw std::runtime_error("--out is required");
@@ -86,18 +86,13 @@ constexpr Matchup kMatchups[] = {
     {Kind::Heuristic, Kind::Random, 1}, {Kind::Random, Kind::Heuristic, 1},
 };
 
-std::unique_ptr<AgentInterface> makeAgent(Kind kind, const CardDB& db, const CardRegistry& reg,
+std::unique_ptr<AgentInterface> makeAgent(Kind kind, const tools::ToolAgentSpec& heuristic,
+                                          const CardDB& db, const CardRegistry& reg,
                                           uint64_t seed) {
-    switch (kind) {
-        case Kind::Heuristic: {
-            HeuristicConfig config;
-            config.seed = seed | 1;
-            return std::make_unique<HeuristicAgent>(db, reg, config);
-        }
-        case Kind::Scripted: return std::make_unique<ScriptedAgent>(db);
-        case Kind::Random: return std::make_unique<RandomAgent>(seed | 1);
-    }
-    return nullptr;
+    tools::ToolAgentSpec spec = heuristic;
+    if (kind == Kind::Scripted) spec.kind = "scripted";
+    else if (kind == Kind::Random) spec.kind = "random";
+    return tools::makeToolAgent(spec, db, reg, seed);
 }
 
 } // namespace
@@ -109,7 +104,7 @@ int main(int argc, char** argv) {
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n"
                   << "usage: riftbound_value_data --out FILE [--games N] [--threads T] "
-                     "[--seed S] [--decks DIR]\n";
+                     "[--seed S] [--decks DIR] [--model FILE] [--guesses N]\n";
         return 2;
     }
 
@@ -118,29 +113,18 @@ int main(int argc, char** argv) {
     CardDB db;
     db.buildFromClasses(registry);
 
-    // Legal decks, sorted by file name so deck numbers are stable.
-    std::vector<std::string> deck_names;
-    std::vector<DeckSubmission> decks;
-    {
-        std::vector<fs::path> paths;
-        for (const auto& entry : fs::directory_iterator(opt.decks_dir))
-            if (entry.path().extension() == ".txt") paths.push_back(entry.path());
-        std::sort(paths.begin(), paths.end());
-        DeckValidator validator(db);
-        for (const auto& p : paths) {
-            try {
-                DeckSubmission d = DeckValidator::loadFromDeckList(p.string(), db);
-                if (!validator.validate(d).is_legal) {
-                    std::cerr << "skipping illegal deck " << p.filename().string() << "\n";
-                    continue;
-                }
-                deck_names.push_back(p.stem().string());
-                decks.push_back(std::move(d));
-            } catch (const std::exception& e) {
-                std::cerr << "skipping " << p.filename().string() << ": " << e.what() << "\n";
-            }
-        }
+    tools::ToolAgentSpec heuristic;
+    try {
+        if (!opt.model.empty()) heuristic.heuristic.model = GbtModel::load(opt.model);
+    } catch (const std::exception& e) {
+        std::cerr << "cannot load model " << opt.model << ": " << e.what() << "\n";
+        return 1;
     }
+    if (opt.guesses > 0) heuristic.heuristic.guesses = opt.guesses;
+
+    const tools::DeckSet deck_set = tools::loadLegalDecks(opt.decks_dir, db);
+    const auto& deck_names = deck_set.names;
+    const auto& decks = deck_set.decks;
     if (decks.size() < 2) {
         std::cerr << "need at least two legal decks in " << opt.decks_dir << "\n";
         return 1;
@@ -179,8 +163,8 @@ int main(int argc, char** argv) {
             }
             const uint64_t game_seed = (rng() & 0x7FFFFFFFULL) | 1;
 
-            auto a1 = makeAgent(m->p1, db, registry, rng());
-            auto a2 = makeAgent(m->p2, db, registry, rng());
+            auto a1 = makeAgent(m->p1, heuristic, db, registry, rng());
+            auto a2 = makeAgent(m->p2, heuristic, db, registry, rng());
             EventBus bus;
             GameEngine engine(db, bus, registry);
 
