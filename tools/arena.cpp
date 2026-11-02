@@ -13,7 +13,10 @@
 /// Progress goes to stderr; the last line of stdout is the result as JSON:
 ///   {"games": N, "a_wins": .., "b_wins": .., "draws": .., "a_score": ..}
 /// where a_score = (a_wins + draws / 2) / games, the number riftbound-trainer's
-/// selfplay loop promotes a candidate on.
+/// selfplay loop promotes a candidate on, followed by "pairs", "a_pairs",
+/// "b_pairs" and "split_pairs": pairs A or B won more of, and pairs split 1-1
+/// (where the decks or the seat decided both games, saying nothing about the
+/// agents).
 
 #include "tool_common.h"
 
@@ -96,6 +99,10 @@ int main(int argc, char** argv) {
 
     const int pairs = (opt.games + 1) / 2;
     std::atomic<int> next_pair{0}, games_done{0}, a_wins{0}, b_wins{0}, draws{0}, errors{0};
+    // Per pair: A won more of its two games, B did, or they split. A pair
+    // splits whenever the decks or the seat decide both games, so only the
+    // other pairs say which agent is better.
+    std::atomic<int> a_pairs{0}, b_pairs{0}, split_pairs{0};
     std::mutex log_mutex;
     const auto start = std::chrono::steady_clock::now();
 
@@ -108,6 +115,7 @@ int main(int argc, char** argv) {
             const uint64_t seed_a = rng(), seed_b = rng();
 
             // Game 0: A in seat 1. Game 1: the same game with the seats swapped.
+            double a_points = 0.0;  // A's wins in this pair, a draw counting half
             for (int swap = 0; swap < 2; ++swap) {
                 auto agent_a = tools::makeToolAgent(spec_a, db, registry, seed_a);
                 auto agent_b = tools::makeToolAgent(spec_b, db, registry, seed_b);
@@ -119,13 +127,14 @@ int main(int argc, char** argv) {
                 GameEngine engine(db, bus, registry);
                 try {
                     const GameResult r = engine.runGame(decks[d1], decks[d2], p1, p2, game_seed);
-                    if (r.winner == a_seat) ++a_wins;
-                    else if (r.winner == PlayerId::None) ++draws;
+                    if (r.winner == a_seat) { ++a_wins; a_points += 1.0; }
+                    else if (r.winner == PlayerId::None) { ++draws; a_points += 0.5; }
                     else ++b_wins;
                 } catch (const std::exception& e) {
                     // Scored as a draw so a crash favours neither agent.
                     ++errors;
                     ++draws;
+                    a_points += 0.5;
                     std::lock_guard<std::mutex> lock(log_mutex);
                     std::cerr << "pair " << p << " game " << swap << " threw: " << e.what() << "\n";
                 }
@@ -140,6 +149,9 @@ int main(int argc, char** argv) {
                               << secs << "s\n";
                 }
             }
+            if (a_points > 1.0) ++a_pairs;
+            else if (a_points < 1.0) ++b_pairs;
+            else ++split_pairs;
         }
     };
 
@@ -152,6 +164,9 @@ int main(int argc, char** argv) {
     if (errors.load() > 0) std::cerr << errors.load() << " games threw (scored as draws)\n";
     std::cout << "{\"games\": " << games << ", \"a_wins\": " << a_wins.load()
               << ", \"b_wins\": " << b_wins.load() << ", \"draws\": " << draws.load()
-              << ", \"errors\": " << errors.load() << ", \"a_score\": " << score << "}\n";
+              << ", \"errors\": " << errors.load() << ", \"a_score\": " << score
+              << ", \"pairs\": " << pairs << ", \"a_pairs\": " << a_pairs.load()
+              << ", \"b_pairs\": " << b_pairs.load() << ", \"split_pairs\": " << split_pairs.load()
+              << "}\n";
     return 0;
 }
