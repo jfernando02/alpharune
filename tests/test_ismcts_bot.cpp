@@ -60,6 +60,27 @@ protected:
     }
 };
 
+// The turn's step budget stops the search after the simulation that spends
+// it; later decisions that turn are answered as ScriptedAgent.
+TEST_F(IsmctsBotTest, TurnBudgetCutsTheSearchThenFallsBackToScripted) {
+    IsmctsConfig config;
+    config.max_simulations = 100;
+    config.max_steps_per_turn = 1;  // spent by the first simulation
+    ScriptedAgent scripted(card_db);
+    for (const auto& [state, legal] : lookaheadPoints(23, 4)) {
+        IsmctsBot agent(card_db, card_registry, config);
+        const Intent first = agent.selectAction(state, legal);
+        EXPECT_NE(std::find(legal.begin(), legal.end(), first), legal.end());
+        EXPECT_EQ(agent.stats().simulations, 1);
+        EXPECT_EQ(agent.stats().budget_cut_searches, 1);
+        EXPECT_GE(agent.stats().sim_steps, 1);
+        // Same turn, budget spent.
+        EXPECT_EQ(agent.selectAction(state, legal), scripted.selectAction(state, legal));
+        EXPECT_EQ(agent.stats().budget_fallbacks, 1);
+        EXPECT_EQ(agent.stats().simulations, 1);
+    }
+}
+
 TEST_F(IsmctsBotTest, ReturnsALegalActionAndIsDeterministic) {
     IsmctsConfig config;
     config.max_simulations = 100;

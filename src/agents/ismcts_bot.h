@@ -92,6 +92,12 @@ struct IsmctsConfig {
     int max_steps = 400;             // decisions per simulation, tree + playout
 
     int max_lookaheads_per_turn = 100;  // see HeuristicConfig
+    // Engine decisions (tree + playout, all simulations) the agent may spend
+    // searching one turn; 0 = no limit. As HeuristicConfig's budget: a board
+    // flooded with tokens makes every simulation long and every decision
+    // wide. Simulations stop when it is spent and later decisions that turn
+    // are answered as ScriptedAgent.
+    long max_steps_per_turn = 300000;
     uint64_t seed = 1;               // 0 picks a random seed
 };
 
@@ -110,6 +116,9 @@ public:
         int leaves_own = 0;          // simulations that left the tree at `me`'s decision
         int leaves_opponent = 0;     // ... at the opponent's decision
         int leaves_other = 0;        // ... at a terminal state or the step guard
+        long sim_steps = 0;          // engine decisions, tree + playout, all simulations
+        int budget_cut_searches = 0; // searches stopped early by the turn budget
+        int budget_fallbacks = 0;    // answered as ScriptedAgent: turn budget spent
     };
 
     IsmctsBot(const CardDB& card_db, const CardRegistry& card_registry,
@@ -179,6 +188,7 @@ private:
     Stats stats_;
     int lookahead_turn_ = -1;
     int lookaheads_this_turn_ = 0;
+    long steps_this_turn_ = 0;       // engine decisions spent searching this turn
 };
 
 } // namespace riftbound

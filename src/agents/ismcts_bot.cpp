@@ -80,6 +80,11 @@ Intent IsmctsBot::selectAction(const GameState& state, const std::vector<Intent>
     if (state.turn.turn_number != lookahead_turn_) {
         lookahead_turn_ = state.turn.turn_number;
         lookaheads_this_turn_ = 0;
+        steps_this_turn_ = 0;
+    }
+    if (config_.max_steps_per_turn > 0 && steps_this_turn_ >= config_.max_steps_per_turn) {
+        ++stats_.budget_fallbacks;
+        return scripted_.selectAction(state, legal);
     }
     if (++lookaheads_this_turn_ > config_.max_lookaheads_per_turn) {
         // isLookaheadPoint guarantees an EndTurn is present.
@@ -121,6 +126,10 @@ std::vector<std::pair<Intent, double>> IsmctsBot::RunSearch(const GameState& sta
     root_node_ = CreateNewNode(root_key);
 
     for (int sim = 0; sim < config_.max_simulations; ++sim) {
+        if (config_.max_steps_per_turn > 0 && steps_this_turn_ >= config_.max_steps_per_turn) {
+            ++stats_.budget_cut_searches;
+            break;
+        }
         try {
             std::unique_ptr<Sim> sampled_root = SampleRootState(state, me);
             // OpenSpiel checks the sampled root's key; the legal list must
@@ -140,6 +149,8 @@ std::vector<std::pair<Intent, double>> IsmctsBot::RunSearch(const GameState& sta
                 continue;
             }
             RunSimulation(*sampled_root);
+            stats_.sim_steps += sampled_root->steps;
+            steps_this_turn_ += sampled_root->steps;
             ++stats_.simulations;
         } catch (const std::exception&) {
             ++stats_.failed_simulations;

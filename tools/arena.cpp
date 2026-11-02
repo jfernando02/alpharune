@@ -2,21 +2,25 @@
 /// Head-to-head match between two agents over the legal decks of a directory.
 ///
 ///   riftbound_arena --a SPEC --b SPEC [--games N] [--threads T] [--seed S]
-///                   [--decks DIR]
+///                   [--decks DIR] [--mirror]
 ///
-/// SPEC is random | scripted | heuristic[:model=FILE,guesses=N,turns_ahead=N,step_budget=N,
-/// <weight>=X] (see tools/tool_common.h). Games are played in pairs on the
-/// same random deck pair and game seed with the seats swapped, so neither
-/// agent gains from going first or from a lucky draw of decks; N is rounded
-/// up to an even number.
+/// SPEC is any agent tools/tool_common.h parses (random, scripted,
+/// heuristic[:...], ismcts[:...]). Games are played in pairs on the same random
+/// deck pair and game seed with the seats swapped, so neither agent gains from
+/// going first or from a lucky draw of decks; N is rounded up to an even
+/// number. --mirror gives both seats the same deck, so fewer pairs are decided
+/// by one deck being stronger and more of them by the agents.
 ///
 /// Progress goes to stderr; the last line of stdout is the result as JSON:
-///   {"games": N, "a_wins": .., "b_wins": .., "draws": .., "a_score": ..}
-/// where a_score = (a_wins + draws / 2) / games, the number riftbound-trainer's
-/// selfplay loop promotes a candidate on, followed by "pairs", "a_pairs",
-/// "b_pairs" and "split_pairs": pairs A or B won more of, and pairs split 1-1
-/// (where the decks or the seat decided both games, saying nothing about the
-/// agents).
+///   games, a_wins, b_wins, draws, errors, a_score = (a_wins + draws/2) / games,
+///   pairs, a_pairs, b_pairs, split_pairs: pairs A or B won more of, and pairs
+///     split 1-1 (decided by the decks or the seat, saying nothing about the
+///     agents) — riftbound-trainer's sign test runs on a_pairs vs b_pairs;
+///   a_think_s, b_think_s: seconds each agent spent choosing, summed over
+///     games (so it grows with --threads' worth of parallel games);
+///   a_searched, b_searched, a_fallbacks, b_fallbacks: a look-ahead agent's
+///     searched decisions and those answered without search because its
+///     turn's budget was spent.
 
 #include "tool_common.h"
 
@@ -26,6 +30,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <iomanip>
 #include <iostream>
 #include <mutex>
 #include <random>
@@ -43,6 +48,7 @@ struct Options {
     int games = 200;
     int threads = 0;
     uint64_t seed = 1;
+    bool mirror = false;
 };
 
 Options parse(int argc, char** argv) {
@@ -59,6 +65,7 @@ Options parse(int argc, char** argv) {
         else if (arg == "--games") o.games = std::stoi(next());
         else if (arg == "--threads") o.threads = std::stoi(next());
         else if (arg == "--seed") o.seed = std::stoull(next());
+        else if (arg == "--mirror") o.mirror = true;
         else throw std::runtime_error("unknown argument " + arg);
     }
     if (o.a.empty() || o.b.empty()) throw std::runtime_error("--a and --b are required");
@@ -66,6 +73,22 @@ Options parse(int argc, char** argv) {
     if (o.threads <= 0) o.threads = static_cast<int>(std::max(1u, std::thread::hardware_concurrency()));
     return o;
 }
+
+/// Adds the time the wrapped agent spends choosing to `seconds`.
+class TimedAgent : public AgentInterface {
+public:
+    TimedAgent(AgentInterface& inner, double& seconds) : inner_(inner), seconds_(seconds) {}
+    Intent selectAction(const GameState& state, const std::vector<Intent>& legal) override {
+        const auto t = std::chrono::steady_clock::now();
+        Intent out = inner_.selectAction(state, legal);
+        seconds_ += std::chrono::duration<double>(std::chrono::steady_clock::now() - t).count();
+        return out;
+    }
+
+private:
+    AgentInterface& inner_;
+    double& seconds_;
+};
 
 } // namespace
 
@@ -79,9 +102,10 @@ int main(int argc, char** argv) {
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n"
                   << "usage: riftbound_arena --a SPEC --b SPEC [--games N] [--threads T] "
-                     "[--seed S] [--decks DIR]\n"
-                  << "  SPEC: random | scripted | heuristic[:model=FILE,guesses=N,step_budget=N,"
-                     "turns_ahead=N,<weight>=X]\n";
+                     "[--seed S] [--decks DIR] [--mirror]\n"
+                  << "  SPEC: random | scripted\n"
+                     "      | heuristic[:model=FILE,guesses=N,turns_ahead=N,step_budget=N,<weight>=X]\n"
+                     "      | ismcts[:sims=N,uct_c=X,turns_ahead=N,step_budget=N,model=FILE,<weight>=X]\n";
         return 2;
     }
 
@@ -103,14 +127,17 @@ int main(int argc, char** argv) {
     // splits whenever the decks or the seat decide both games, so only the
     // other pairs say which agent is better.
     std::atomic<int> a_pairs{0}, b_pairs{0}, split_pairs{0};
-    std::mutex log_mutex;
+    std::mutex mutex;  // stderr, and the totals below
+    double a_think = 0.0, b_think = 0.0;
+    long a_searched = 0, b_searched = 0, a_fallbacks = 0, b_fallbacks = 0;
     const auto start = std::chrono::steady_clock::now();
 
     const auto worker = [&] {
         for (int p = next_pair++; p < pairs; p = next_pair++) {
             std::mt19937_64 rng(opt.seed * 1000003ULL + static_cast<uint64_t>(p));
             std::uniform_int_distribution<size_t> pick_deck(0, decks.size() - 1);
-            const size_t d1 = pick_deck(rng), d2 = pick_deck(rng);
+            const size_t d1 = pick_deck(rng), d2_drawn = pick_deck(rng);
+            const size_t d2 = opt.mirror ? d1 : d2_drawn;
             const uint64_t game_seed = (rng() & 0x7FFFFFFFULL) | 1;
             const uint64_t seed_a = rng(), seed_b = rng();
 
@@ -119,8 +146,10 @@ int main(int argc, char** argv) {
             for (int swap = 0; swap < 2; ++swap) {
                 auto agent_a = tools::makeToolAgent(spec_a, db, registry, seed_a);
                 auto agent_b = tools::makeToolAgent(spec_b, db, registry, seed_b);
-                AgentInterface& p1 = swap ? *agent_b : *agent_a;
-                AgentInterface& p2 = swap ? *agent_a : *agent_b;
+                double think_a = 0.0, think_b = 0.0;
+                TimedAgent timed_a(*agent_a, think_a), timed_b(*agent_b, think_b);
+                AgentInterface& p1 = swap ? static_cast<AgentInterface&>(timed_b) : timed_a;
+                AgentInterface& p2 = swap ? static_cast<AgentInterface&>(timed_a) : timed_b;
                 const PlayerId a_seat = swap ? PlayerId::Player2 : PlayerId::Player1;
 
                 EventBus bus;
@@ -135,15 +164,22 @@ int main(int argc, char** argv) {
                     ++errors;
                     ++draws;
                     a_points += 0.5;
-                    std::lock_guard<std::mutex> lock(log_mutex);
+                    std::lock_guard<std::mutex> lock(mutex);
                     std::cerr << "pair " << p << " game " << swap << " threw: " << e.what() << "\n";
                 }
 
+                const auto ca = tools::searchCounts(*agent_a), cb = tools::searchCounts(*agent_b);
+                std::lock_guard<std::mutex> lock(mutex);
+                a_think += think_a;
+                b_think += think_b;
+                a_searched += ca.searched;
+                b_searched += cb.searched;
+                a_fallbacks += ca.fallbacks;
+                b_fallbacks += cb.fallbacks;
                 const int done = ++games_done;
                 if (done % 50 == 0) {
                     const double secs = std::chrono::duration<double>(
                         std::chrono::steady_clock::now() - start).count();
-                    std::lock_guard<std::mutex> lock(log_mutex);
                     std::cerr << done << "/" << pairs * 2 << " games: A " << a_wins.load()
                               << " B " << b_wins.load() << " draws " << draws.load() << ", "
                               << secs << "s\n";
@@ -162,11 +198,15 @@ int main(int argc, char** argv) {
     const int games = pairs * 2;
     const double score = (a_wins.load() + 0.5 * draws.load()) / games;
     if (errors.load() > 0) std::cerr << errors.load() << " games threw (scored as draws)\n";
-    std::cout << "{\"games\": " << games << ", \"a_wins\": " << a_wins.load()
+    std::cout << std::fixed << std::setprecision(4)
+              << "{\"games\": " << games << ", \"a_wins\": " << a_wins.load()
               << ", \"b_wins\": " << b_wins.load() << ", \"draws\": " << draws.load()
               << ", \"errors\": " << errors.load() << ", \"a_score\": " << score
               << ", \"pairs\": " << pairs << ", \"a_pairs\": " << a_pairs.load()
               << ", \"b_pairs\": " << b_pairs.load() << ", \"split_pairs\": " << split_pairs.load()
+              << ", \"a_think_s\": " << a_think << ", \"b_think_s\": " << b_think
+              << ", \"a_searched\": " << a_searched << ", \"b_searched\": " << b_searched
+              << ", \"a_fallbacks\": " << a_fallbacks << ", \"b_fallbacks\": " << b_fallbacks
               << "}\n";
     return 0;
 }

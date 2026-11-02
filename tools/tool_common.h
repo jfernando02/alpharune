@@ -6,6 +6,7 @@
 #include "agents/agent_interface.h"
 #include "agents/gbt_evaluator.h"
 #include "agents/heuristic_agent.h"
+#include "agents/ismcts_bot.h"
 #include "agents/random_agent.h"
 #include "agents/scripted_agent.h"
 #include "cards/card_registry.h"
@@ -57,36 +58,43 @@ inline DeckSet loadLegalDecks(const std::string& dir, const CardDB& db) {
 }
 
 /// An agent a tool can field, parsed from
-///   random | scripted | heuristic[:model=FILE,guesses=N,turns_ahead=N,step_budget=N,
-///                                   <weight>=X]
+///   random | scripted
+///   | heuristic[:model=FILE,guesses=N,turns_ahead=N,step_budget=N,<weight>=X]
+///   | ismcts[:sims=N,uct_c=X,turns_ahead=N,step_budget=N,model=FILE,<weight>=X]
 /// where <weight> is any EvalWeights field (agents/evaluator.h). A model is
 /// loaded once here and shared by every game (models are read-only).
 struct ToolAgentSpec {
     std::string kind = "heuristic";
     HeuristicConfig heuristic;  // kind == "heuristic"; the seed is set per game
+    IsmctsConfig ismcts;        // kind == "ismcts"; likewise
 };
 
 inline ToolAgentSpec parseToolAgent(const std::string& spec) {
     ToolAgentSpec out;
     const auto colon = spec.find(':');
     out.kind = spec.substr(0, colon);
-    if (out.kind != "random" && out.kind != "scripted" && out.kind != "heuristic")
+    if (out.kind != "random" && out.kind != "scripted" && out.kind != "heuristic" &&
+        out.kind != "ismcts")
         throw std::runtime_error("unknown agent '" + out.kind + "' in '" + spec + "'");
     if (colon == std::string::npos) return out;
-    if (out.kind != "heuristic")
+    if (out.kind == "random" || out.kind == "scripted")
         throw std::runtime_error("agent '" + out.kind + "' takes no options");
 
+    const bool h = out.kind == "heuristic";
     std::stringstream opts(spec.substr(colon + 1));
     for (std::string kv; std::getline(opts, kv, ',');) {
         const auto eq = kv.find('=');
         if (eq == std::string::npos) throw std::runtime_error("expected key=value, got '" + kv + "'");
         const std::string key = kv.substr(0, eq), val = kv.substr(eq + 1);
-        if (key == "model") out.heuristic.model = GbtModel::load(val);
-        else if (key == "guesses") out.heuristic.guesses = std::stoi(val);
-        else if (key == "turns_ahead") out.heuristic.turns_ahead = std::stoi(val);
-        else if (key == "step_budget") out.heuristic.max_rollout_steps_per_turn = std::stol(val);
-        else if (!setWeight(out.heuristic.weights, key, std::stod(val)))
-            throw std::runtime_error("unknown heuristic option '" + key + "'");
+        if (key == "model") (h ? out.heuristic.model : out.ismcts.model) = GbtModel::load(val);
+        else if (key == "turns_ahead") (h ? out.heuristic.turns_ahead : out.ismcts.turns_ahead) = std::stoi(val);
+        else if (key == "step_budget" && h) out.heuristic.max_rollout_steps_per_turn = std::stol(val);
+        else if (key == "step_budget") out.ismcts.max_steps_per_turn = std::stol(val);
+        else if (key == "guesses" && h) out.heuristic.guesses = std::stoi(val);
+        else if (key == "sims" && !h) out.ismcts.max_simulations = std::stoi(val);
+        else if (key == "uct_c" && !h) out.ismcts.uct_c = std::stod(val);
+        else if (!setWeight(h ? out.heuristic.weights : out.ismcts.weights, key, std::stod(val)))
+            throw std::runtime_error("unknown " + out.kind + " option '" + key + "'");
     }
     return out;
 }
@@ -95,9 +103,25 @@ inline std::unique_ptr<AgentInterface> makeToolAgent(const ToolAgentSpec& spec, 
                                                      const CardRegistry& reg, uint64_t seed) {
     if (spec.kind == "random") return std::make_unique<RandomAgent>(seed | 1);
     if (spec.kind == "scripted") return std::make_unique<ScriptedAgent>(db);
+    if (spec.kind == "ismcts") {
+        IsmctsConfig config = spec.ismcts;
+        config.seed = seed | 1;
+        return std::make_unique<IsmctsBot>(db, reg, config);
+    }
     HeuristicConfig config = spec.heuristic;
     config.seed = seed | 1;
     return std::make_unique<HeuristicAgent>(db, reg, config);
+}
+
+/// Searched decisions and budget fallbacks of a look-ahead agent (zeros for
+/// the others), for the tools' reports.
+struct SearchCounts { long searched = 0, fallbacks = 0; };
+inline SearchCounts searchCounts(const AgentInterface& agent) {
+    if (const auto* h = dynamic_cast<const HeuristicAgent*>(&agent))
+        return {h->stats().lookahead_decisions, h->stats().budget_fallbacks};
+    if (const auto* m = dynamic_cast<const IsmctsBot*>(&agent))
+        return {m->stats().searched_decisions, m->stats().budget_fallbacks};
+    return {};
 }
 
 } // namespace riftbound::tools
