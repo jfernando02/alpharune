@@ -68,7 +68,10 @@ HeuristicAgent::SearchKind HeuristicAgent::searchKind(const GameState& state,
     if (config_.search_showdowns && isShowdownLookaheadPoint(state, legal))
         return SearchKind::Showdown;
     if (config_.search_chain && isChainLookaheadPoint(state, legal)) return SearchKind::Chain;
-    if (config_.search_setup && isSetupLookaheadPoint(state, legal)) return SearchKind::Setup;
+    if (isSetupLookaheadPoint(state, legal) &&
+        (legal[0].type == IntentType::ChooseBattlefield ? config_.search_battlefield
+                                                        : config_.search_mulligan))
+        return SearchKind::Setup;
     return SearchKind::None;
 }
 

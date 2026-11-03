@@ -198,7 +198,8 @@ TEST_F(ChainResumeTest, HeuristicSearchesChainAndSetupWhenAsked) {
 
         HeuristicConfig on;
         on.search_chain = true;
-        on.search_setup = true;
+        on.search_battlefield = true;
+        on.search_mulligan = true;
         on.guesses = 2;
         on.setup_guesses = 2;
         HeuristicAgent agent(*db_, *registry_, on);

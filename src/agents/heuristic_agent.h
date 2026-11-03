@@ -89,7 +89,8 @@ struct HeuristicConfig {
     // turn `setup_turns - 1` (turn 0 is the first player's first turn),
     // with `setup_guesses` determinizations: the hand drawn afterwards
     // varies far more than a mid-game turn does.
-    bool search_setup = false;
+    bool search_battlefield = false;
+    bool search_mulligan = false;
     int setup_guesses = 8;
     int setup_turns = 2;
     EvalWeights weights;
@@ -145,7 +146,7 @@ public:
     static bool isChainLookaheadPoint(const GameState& state,
                                       const std::vector<Intent>& legal_actions);
     /// The same for a battlefield pick or a mulligan (`isCleanSetupPoint`),
-    /// searched when `search_setup` is set.
+    /// searched when `search_battlefield` / `search_mulligan` is set.
     static bool isSetupLookaheadPoint(const GameState& state,
                                       const std::vector<Intent>& legal_actions);
 

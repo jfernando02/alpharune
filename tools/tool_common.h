@@ -61,7 +61,8 @@ inline DeckSet loadLegalDecks(const std::string& dir, const CardDB& db) {
 /// An agent a tool can field, parsed from
 ///   random | scripted
 ///   | heuristic[:model=FILE,guesses=N,turns_ahead=N,step_budget=N,showdowns=0/1,followups=N,
-///                chain=0/1,setup=0/1,setup_guesses=N,setup_turns=N,<weight>=X]
+///                chain=0/1,setup=0/1 (both of:) battlefield=0/1,mulligan=0/1,
+///                setup_guesses=N,setup_turns=N,<weight>=X]
 ///   | ismcts[:sims=N,uct_c=X,turns_ahead=N,step_budget=N,showdowns=0/1,model=FILE,<weight>=X]
 /// where <weight> is any EvalWeights field (agents/evaluator.h). A model is
 /// loaded once here and shared by every game (models are read-only).
@@ -160,7 +161,10 @@ inline ToolAgentSpec parseToolAgent(const std::string& spec) {
         else if (key == "guesses" && h) out.heuristic.guesses = std::stoi(val);
         else if (key == "followups" && h) out.heuristic.plan_followups = std::stoi(val);
         else if (key == "chain" && h) out.heuristic.search_chain = std::stoi(val) != 0;
-        else if (key == "setup" && h) out.heuristic.search_setup = std::stoi(val) != 0;
+        else if (key == "setup" && h)
+            out.heuristic.search_battlefield = out.heuristic.search_mulligan = std::stoi(val) != 0;
+        else if (key == "battlefield" && h) out.heuristic.search_battlefield = std::stoi(val) != 0;
+        else if (key == "mulligan" && h) out.heuristic.search_mulligan = std::stoi(val) != 0;
         else if (key == "setup_guesses" && h) out.heuristic.setup_guesses = std::stoi(val);
         else if (key == "setup_turns" && h) out.heuristic.setup_turns = std::stoi(val);
         else if (key == "sims" && !h) out.ismcts.max_simulations = std::stoi(val);
