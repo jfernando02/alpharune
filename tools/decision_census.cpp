@@ -23,28 +23,25 @@ using namespace riftbound;
 
 namespace {
 
-bool has(const std::vector<Intent>& legal, IntentType t) {
-    return std::any_of(legal.begin(), legal.end(), [t](const Intent& a) { return a.type == t; });
-}
-
+/// tools::decisionKind with a description (offsearch=random:<kind> takes the kind).
 std::string kindOf(const GameState& s, const std::vector<Intent>& legal) {
-    if (HeuristicAgent::isLookaheadPoint(s, legal)) return "main priority (searched)";
-    if (has(legal, IntentType::EndTurn)) return "main priority, mid-action (not resumable)";
-    if (has(legal, IntentType::MulliganDecision)) return "mulligan";
-    if (has(legal, IntentType::AssignCombatDamage)) return "combat damage assignment";
-    if (has(legal, IntentType::PassFocus)) return "showdown focus (play / pass)";
-    if (has(legal, IntentType::PassPriority)) return "chain response (react / pass)";
-    if (has(legal, IntentType::PlaceOptionalTrigger) || has(legal, IntentType::DeclineOptionalTrigger))
-        return "optional trigger";
-    if (has(legal, IntentType::PayTriggeredCost) || has(legal, IntentType::DeclineTriggeredCost))
-        return "triggered cost";
-    if (has(legal, IntentType::ChooseBattlefield)) return "choose battlefield";
-    if (has(legal, IntentType::MakeChoice)) {
-        if (s.cost_cursor.has_value()) return "choice: rune payment";
-        if (s.chain.exists() || s.chain.resuming.has_value()) return "choice: during resolution (target / mode / X)";
-        return "choice: other (play location, optional cost, ...)";
-    }
-    return std::string("other: ") + toString(legal[0].type);
+    static const std::map<std::string, std::string> describe = {
+        {"main", "main priority (searched)"},
+        {"main_mid", "main priority, mid-action (not resumable)"},
+        {"mulligan", "mulligan"},
+        {"damage", "combat damage assignment"},
+        {"showdown", "showdown focus: play / pass (searched with showdowns=1)"},
+        {"chain", "chain response: react / pass"},
+        {"trigger", "optional trigger"},
+        {"trigger_cost", "triggered cost"},
+        {"battlefield", "choose battlefield"},
+        {"rune", "choice: rune payment"},
+        {"resolve", "choice: during resolution (target / mode / X)"},
+        {"choice", "choice: other (play location, optional cost, ...)"},
+    };
+    const std::string kind = tools::decisionKind(s, legal);
+    const auto it = describe.find(kind);
+    return kind + "  " + (it != describe.end() ? it->second : "");
 }
 
 struct Counter { long n = 0; long legal = 0; };

@@ -124,6 +124,7 @@ TEST_F(ShowdownResumeTest, HeuristicSearchesShowdownFocusWhenAsked) {
     for (size_t k = 0; k < points.size(); ++k) {
         const auto& [state, legal] = points[k];
         HeuristicConfig off;
+        off.search_showdowns = false;
         HeuristicAgent plain(*db_, *registry_, off);
         plain.selectAction(state, legal);
         EXPECT_EQ(plain.stats().lookahead_decisions, 0) << "point " << k;

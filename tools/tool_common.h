@@ -63,24 +63,57 @@ inline DeckSet loadLegalDecks(const std::string& dir, const CardDB& db) {
 ///   | ismcts[:sims=N,uct_c=X,turns_ahead=N,step_budget=N,showdowns=0/1,model=FILE,<weight>=X]
 /// where <weight> is any EvalWeights field (agents/evaluator.h). A model is
 /// loaded once here and shared by every game (models are read-only).
-/// Either look-ahead agent also takes offsearch=random: the decisions it
-/// does not search (anything but the main-phase priority decision) are made
-/// at random instead of by ScriptedAgent, which measures how much those
+/// Either look-ahead agent also takes offsearch=random[:KIND]: the decisions
+/// it does not search (all of them, or only those of one decisionKind) are
+/// made at random instead of by ScriptedAgent, which measures how much those
 /// decisions matter.
 struct ToolAgentSpec {
     std::string kind = "heuristic";
     HeuristicConfig heuristic;  // kind == "heuristic"; the seed is set per game
     IsmctsConfig ismcts;        // kind == "ismcts"; likewise
     bool offsearch_random = false;
+    std::string offsearch_kind;  // "" = every unsearched decision
 };
 
-/// A look-ahead agent whose unsearched decisions are made at random.
+/// What kind of decision `legal` is, by the actions on offer:
+///   main (main-phase priority, resumable), main_mid (asked partway through a
+///   main-phase action), mulligan, damage (combat damage assignment),
+///   showdown (focus: play or pass), chain (react or pass), trigger
+///   (optional trigger), trigger_cost, battlefield, rune (rune payment),
+///   resolve (a choice while a chain item resolves: target / mode / X),
+///   choice (any other MakeChoice: play location, optional cost, ...).
+inline bool offers(const std::vector<Intent>& legal, IntentType t) {
+    return std::any_of(legal.begin(), legal.end(), [t](const Intent& a) { return a.type == t; });
+}
+inline std::string decisionKind(const GameState& s, const std::vector<Intent>& legal) {
+    if (HeuristicAgent::isLookaheadPoint(s, legal)) return "main";
+    if (offers(legal, IntentType::EndTurn)) return "main_mid";
+    if (offers(legal, IntentType::MulliganDecision)) return "mulligan";
+    if (offers(legal, IntentType::AssignCombatDamage)) return "damage";
+    if (offers(legal, IntentType::PassFocus)) return "showdown";
+    if (offers(legal, IntentType::PassPriority)) return "chain";
+    if (offers(legal, IntentType::PlaceOptionalTrigger) || offers(legal, IntentType::DeclineOptionalTrigger))
+        return "trigger";
+    if (offers(legal, IntentType::PayTriggeredCost) || offers(legal, IntentType::DeclineTriggeredCost))
+        return "trigger_cost";
+    if (offers(legal, IntentType::ChooseBattlefield)) return "battlefield";
+    if (offers(legal, IntentType::MakeChoice)) {
+        if (s.cost_cursor.has_value()) return "rune";
+        if (s.chain.exists() || s.chain.resuming.has_value()) return "resolve";
+        return "choice";
+    }
+    return std::string("other:") + toString(legal[0].type);
+}
+
+/// A look-ahead agent whose unsearched decisions (of one kind, or all) are
+/// made at random.
 class OffSearchRandomAgent : public AgentInterface {
 public:
-    OffSearchRandomAgent(std::unique_ptr<AgentInterface> inner, uint64_t seed)
-        : inner_(std::move(inner)), random_(seed | 1) {}
+    OffSearchRandomAgent(std::unique_ptr<AgentInterface> inner, uint64_t seed, std::string kind)
+        : inner_(std::move(inner)), random_(seed | 1), kind_(std::move(kind)) {}
     Intent selectAction(const GameState& s, const std::vector<Intent>& legal) override {
-        if (legal.size() >= 2 && !HeuristicAgent::isLookaheadPoint(s, legal))
+        if (legal.size() >= 2 && !HeuristicAgent::isLookaheadPoint(s, legal) &&
+            (kind_.empty() || decisionKind(s, legal) == kind_))
             return random_.selectAction(s, legal);
         return inner_->selectAction(s, legal);
     }
@@ -89,6 +122,7 @@ public:
 private:
     std::unique_ptr<AgentInterface> inner_;
     RandomAgent random_;
+    std::string kind_;
 };
 
 inline ToolAgentSpec parseToolAgent(const std::string& spec) {
@@ -109,9 +143,11 @@ inline ToolAgentSpec parseToolAgent(const std::string& spec) {
         if (eq == std::string::npos) throw std::runtime_error("expected key=value, got '" + kv + "'");
         const std::string key = kv.substr(0, eq), val = kv.substr(eq + 1);
         if (key == "offsearch") {
-            if (val != "random" && val != "scripted")
-                throw std::runtime_error("offsearch must be random or scripted");
-            out.offsearch_random = val == "random";
+            const std::string how = val.substr(0, val.find(':'));
+            if (how != "random" && how != "scripted")
+                throw std::runtime_error("offsearch must be random[:KIND] or scripted");
+            out.offsearch_random = how == "random";
+            if (val.find(':') != std::string::npos) out.offsearch_kind = val.substr(val.find(':') + 1);
         }
         else if (key == "model") (h ? out.heuristic.model : out.ismcts.model) = GbtModel::load(val);
         else if (key == "turns_ahead") (h ? out.heuristic.turns_ahead : out.ismcts.turns_ahead) = std::stoi(val);
@@ -142,7 +178,8 @@ inline std::unique_ptr<AgentInterface> makeToolAgent(const ToolAgentSpec& spec, 
         agent = std::make_unique<HeuristicAgent>(db, reg, config);
     }
     if (spec.offsearch_random)
-        return std::make_unique<OffSearchRandomAgent>(std::move(agent), seed ^ 0x9E3779B97F4A7C15ULL);
+        return std::make_unique<OffSearchRandomAgent>(std::move(agent), seed ^ 0x9E3779B97F4A7C15ULL,
+                                                      spec.offsearch_kind);
     return agent;
 }
 

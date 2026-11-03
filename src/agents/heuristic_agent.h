@@ -59,8 +59,11 @@ struct HeuristicConfig {
     long max_rollout_steps_per_turn = 40000;
     // Also search Showdown focus decisions (play an Action / Reaction or
     // pass) — 14% of real decisions in heuristic games, otherwise answered
-    // as ScriptedAgent — not only the main-phase priority decision.
-    bool search_showdowns = false;
+    // as ScriptedAgent — not only the main-phase priority decision. Against
+    // the same agent without it (2026-11, 600 games each, sign test on
+    // decisive pairs): 65-19 and 76-20 with mirrored decks, 38-20 with mixed
+    // ones (p from 1e-9 to 0.01), for ~13% more thinking time.
+    bool search_showdowns = true;
     EvalWeights weights;
     // When set, positions are scored by this model's win probability
     // instead of `evaluate(weights)`.
