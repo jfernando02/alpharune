@@ -398,6 +398,7 @@ TEST_F(HeuristicAgentTest, TightBudgetSearchesWithFewerGuesses) {
     for (const auto& [state, legal] : cleanPoints(23, 8)) {
         HeuristicConfig config;
         config.guesses = 4;
+        config.plan_followups = 0;  // one candidate per legal action
         // Priced at 20 steps a simulation before the first: room for 2 guesses.
         config.max_rollout_steps_per_turn = 20L * static_cast<long>(legal.size()) * 2;
         HeuristicAgent agent(card_db, card_registry, config);
@@ -408,6 +409,34 @@ TEST_F(HeuristicAgentTest, TightBudgetSearchesWithFewerGuesses) {
         EXPECT_LE(agent.stats().simulations, 2 * static_cast<int>(legal.size()));
         EXPECT_GE(agent.stats().rollout_steps, agent.stats().simulations);
     }
+}
+
+// With plan_followups the agent branches over the decisions that finish an
+// action (rune payment, targets, optional costs), plays the chosen plan's
+// follow-ups when the engine asks for them, and every simulation still runs.
+TEST_F(HeuristicAgentTest, PlansAndFollowsFollowups) {
+    HeuristicConfig config;
+    config.guesses = 2;
+    config.plan_followups = 2;
+    int followed = 0, abandoned = 0;
+    for (int g = 0; g < 4; ++g) {
+        EventBus bus;
+        GameEngine engine(card_db, bus, card_registry);
+        config.seed = 500 + g;
+        HeuristicAgent agent(card_db, card_registry, config);
+        ScriptedAgent scripted(card_db);
+        const GameResult r = (g % 2 == 0)
+            ? engine.runGame(deck1, deck2, agent, scripted, 600 + g)
+            : engine.runGame(deck1, deck2, scripted, agent, 600 + g);
+        (void)r;
+        EXPECT_EQ(agent.stats().failed_simulations, 0) << "game " << g;
+        followed += agent.stats().planned_followups;
+        abandoned += agent.stats().abandoned_plans;
+    }
+    EXPECT_GT(followed, 0);
+    // A plan is dropped only when the engine asks something it did not
+    // foresee (a different guess of the hidden cards); that should be rare.
+    EXPECT_LT(abandoned, followed);
 }
 
 TEST_F(HeuristicAgentTest, BeatsRandom) {

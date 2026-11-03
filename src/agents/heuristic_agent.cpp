@@ -20,6 +20,16 @@ HeuristicAgent::HeuristicAgent(const CardDB& card_db,
       scripted_(card_db),
       rng_(config.seed == 0 ? std::random_device{}() : config.seed) {}
 
+namespace {
+
+int indexOf(const std::vector<Intent>& legal, const Intent& action) {
+    for (size_t j = 0; j < legal.size(); ++j)
+        if (legal[j] == action) return static_cast<int>(j);
+    return -1;
+}
+
+} // namespace
+
 bool HeuristicAgent::isLookaheadPoint(const GameState& state,
                                       const std::vector<Intent>& legal) {
     if (!isCleanResumePoint(state)) return false;
@@ -43,7 +53,24 @@ Intent HeuristicAgent::selectAction(const GameState& state,
     ++stats_.decisions;
 
     const bool showdown = config_.search_showdowns && isShowdownLookaheadPoint(state, legal);
-    if (!showdown && !isLookaheadPoint(state, legal)) return scripted_.selectAction(state, legal);
+    const bool searchable = showdown || isLookaheadPoint(state, legal);
+
+    // The follow-ups of the action last chosen, in the order it planned them.
+    if (!plan_.empty()) {
+        if (searchable) {
+            plan_.clear();  // the action is over
+        } else {
+            const int i = indexOf(legal, plan_.front());
+            if (i >= 0) {
+                plan_.erase(plan_.begin());
+                ++stats_.planned_followups;
+                return legal[i];
+            }
+            plan_.clear();
+            ++stats_.abandoned_plans;
+        }
+    }
+    if (!searchable) return scripted_.selectAction(state, legal);
     ++stats_.lookahead_decisions;
     if (showdown) ++stats_.showdown_searches;
 
@@ -62,6 +89,26 @@ Intent HeuristicAgent::selectAction(const GameState& state,
         return end != legal.end() ? *end : scripted_.selectAction(state, legal);
     }
 
+    const PlayerId me = legal[0].player;
+
+    // The first guess, drawn before the budget check so the plans can be
+    // found in it (follow-ups are about public objects: runes, targets).
+    GameState first_guess = state;
+    determinize(first_guess, me, rng_);
+    // Nonzero: resumeFromSnapshot treats 0 as "seed from random_device".
+    const uint64_t first_seed = rng_() | 1;
+
+    // Candidate plans: each legal action, with its follow-ups if planned.
+    std::vector<std::vector<Intent>> plans;
+    for (const Intent& action : legal) {
+        if (action.type == IntentType::Concede) continue;
+        if (config_.plan_followups > 0)
+            expandPlans(first_guess, first_seed, me, {action}, plans);
+        else
+            plans.push_back({action});
+    }
+    if (plans.empty()) return scripted_.selectAction(state, legal);
+
     // Fit the search to what is left of the turn's budget, pricing a
     // simulation at the average rollout so far (a guess before the first).
     int guesses = config_.guesses;
@@ -69,7 +116,7 @@ Intent HeuristicAgent::selectAction(const GameState& state,
         const long left = config_.max_rollout_steps_per_turn - steps_this_turn_;
         const double per_sim = stats_.simulations > 0
             ? static_cast<double>(stats_.rollout_steps) / stats_.simulations : 20.0;
-        const long affordable = static_cast<long>(left / (per_sim * legal.size()));
+        const long affordable = static_cast<long>(left / (per_sim * plans.size()));
         if (affordable < 1) {
             ++stats_.budget_fallbacks;
             return scripted_.selectAction(state, legal);
@@ -80,19 +127,23 @@ Intent HeuristicAgent::selectAction(const GameState& state,
         }
     }
 
-    const PlayerId me = legal[0].player;
-    const size_t n = legal.size();
+    const size_t n = plans.size();
     std::vector<double> total(n, 0.0);
     std::vector<int> samples(n, 0);
 
     for (int g = 0; g < guesses; ++g) {
-        GameState guess = state;
-        determinize(guess, me, rng_);
-        // Nonzero: resumeFromSnapshot treats 0 as "seed from random_device".
-        const uint64_t engine_seed = rng_() | 1;
+        GameState guess;
+        uint64_t engine_seed;
+        if (g == 0) {
+            guess = first_guess;
+            engine_seed = first_seed;
+        } else {
+            guess = state;
+            determinize(guess, me, rng_);
+            engine_seed = rng_() | 1;
+        }
         for (size_t i = 0; i < n; ++i) {
-            if (legal[i].type == IntentType::Concede) continue;
-            if (auto score = simulate(guess, legal[i], me, engine_seed)) {
+            if (auto score = simulate(guess, plans[i], me, engine_seed)) {
                 total[i] += *score;
                 ++samples[i];
             }
@@ -111,11 +162,13 @@ Intent HeuristicAgent::selectAction(const GameState& state,
     }
     // Every simulation failed: fall back rather than guess.
     if (best == n) return scripted_.selectAction(state, legal);
-    if (legal[best].type == IntentType::EndTurn) {
+    const Intent& chosen = plans[best][0];
+    plan_.assign(plans[best].begin() + 1, plans[best].end());
+    if (chosen.type == IntentType::EndTurn) {
         ++stats_.lookahead_end_turns;
         countUnspentEnergy(state, legal, me);
     }
-    return legal[best];
+    return chosen;
 }
 
 void HeuristicAgent::countUnspentEnergy(const GameState& state,
@@ -138,8 +191,67 @@ void HeuristicAgent::countUnspentEnergy(const GameState& state,
         ++stats_.end_turn_unspent_holding_instant;
 }
 
+bool HeuristicAgent::isFollowup(const GameState& state, const std::vector<Intent>& legal,
+                                PlayerId me) const {
+    if (legal.size() < 2 || legal[0].player != me) return false;
+    if (isLookaheadPoint(state, legal)) return false;
+    if (config_.search_showdowns && isShowdownLookaheadPoint(state, legal)) return false;
+    return true;
+}
+
+void HeuristicAgent::expandPlans(const GameState& guess, uint64_t engine_seed, PlayerId me,
+                                 std::vector<Intent> prefix,
+                                 std::vector<std::vector<Intent>>& out) {
+    // Play the prefix as simulate does, then look at the next decision.
+    std::vector<Intent> options;
+    try {
+        EventBus bus;
+        GameEngine engine(card_db_, bus, card_registry_);
+        StepResult step = engine.resumeFromSnapshot(guess, engine_seed);
+        const int last_turn = guess.turn.turn_number + config_.turns_ahead - 1;
+        const int root = step.kind == StepKind::NeedDecision ? indexOf(step.legal, prefix[0]) : -1;
+        if (root >= 0) {
+            step = engine.applyChoice(root);
+            size_t next = 1;
+            for (int s = 0; s < config_.max_rollout_steps && step.kind == StepKind::NeedDecision &&
+                            engine.state().turn.turn_number <= last_turn;
+                 ++s) {
+                if (isFollowup(engine.state(), step.legal, me)) {
+                    if (next == prefix.size()) {
+                        options = step.legal;  // the decision to branch on
+                        break;
+                    }
+                    const int i = indexOf(step.legal, prefix[next++]);
+                    if (i < 0) break;
+                    step = engine.applyChoice(i);
+                    continue;
+                }
+                // A fresh search point of mine: the action is over.
+                if (step.legal[0].player == me && step.legal.size() >= 2) break;
+                const int pick = scripted_.selectIndex(engine.state(), step.legal);
+                step = engine.applyChoice(pick < 0 ? 0 : pick);
+            }
+        }
+    } catch (const std::exception&) {
+        options.clear();
+    }
+
+    const int depth = static_cast<int>(prefix.size()) - 1;
+    if (options.empty() || depth >= config_.plan_followups ||
+        static_cast<int>(out.size()) >= config_.max_plans) {
+        out.push_back(std::move(prefix));
+        return;
+    }
+    const size_t width = std::min(options.size(), static_cast<size_t>(config_.max_followup_options));
+    for (size_t k = 0; k < width && static_cast<int>(out.size()) < config_.max_plans; ++k) {
+        std::vector<Intent> longer = prefix;
+        longer.push_back(options[k]);
+        expandPlans(guess, engine_seed, me, std::move(longer), out);
+    }
+}
+
 std::optional<double> HeuristicAgent::simulate(const GameState& guess,
-                                               const Intent& action,
+                                               const std::vector<Intent>& plan,
                                                PlayerId me,
                                                uint64_t engine_seed) {
     try {
@@ -147,15 +259,7 @@ std::optional<double> HeuristicAgent::simulate(const GameState& guess,
         GameEngine engine(card_db_, bus, card_registry_);
         StepResult step = engine.resumeFromSnapshot(guess, engine_seed);
 
-        int index = -1;
-        if (step.kind == StepKind::NeedDecision) {
-            for (size_t j = 0; j < step.legal.size(); ++j) {
-                if (step.legal[j] == action) {
-                    index = static_cast<int>(j);
-                    break;
-                }
-            }
-        }
+        const int index = step.kind == StepKind::NeedDecision ? indexOf(step.legal, plan[0]) : -1;
         if (index < 0) {
             ++stats_.failed_simulations;
             return std::nullopt;
@@ -163,11 +267,20 @@ std::optional<double> HeuristicAgent::simulate(const GameState& guess,
 
         const int last_turn = guess.turn.turn_number + config_.turns_ahead - 1;
         step = engine.applyChoice(index);
+        size_t next = 1;  // plan step to play at the next follow-up decision
         int s = 0;
         for (; s < config_.max_rollout_steps &&
                step.kind == StepKind::NeedDecision &&
                engine.state().turn.turn_number <= last_turn;
              ++s) {
+            if (next < plan.size() && isFollowup(engine.state(), step.legal, me)) {
+                const int i = indexOf(step.legal, plan[next]);
+                next = i >= 0 ? next + 1 : plan.size();  // a guess without it: play on as scripted
+                if (i >= 0) {
+                    step = engine.applyChoice(i);
+                    continue;
+                }
+            }
             const int pick = scripted_.selectIndex(engine.state(), step.legal);
             step = engine.applyChoice(pick < 0 ? 0 : pick);
         }

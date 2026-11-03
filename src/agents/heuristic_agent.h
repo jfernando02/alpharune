@@ -64,6 +64,18 @@ struct HeuristicConfig {
     // decisive pairs): 65-19 and 76-20 with mirrored decks, 38-20 with mixed
     // ones (p from 1e-9 to 0.01), for ~13% more thinking time.
     bool search_showdowns = true;
+    // Plan the follow-up decisions of an action with it: after a searched
+    // action, up to this many of the agent's own next decisions that finish
+    // it (rune payment, a target or mode, an optional cost, a play location)
+    // are branched over, each candidate plan simulated whole, and the chosen
+    // plan's follow-ups are played when the engine asks for them. 0 leaves
+    // them to ScriptedAgent. 1 vs 0 (2026-11, 600 games each, Showdown search
+    // on in both, decisive pairs): 63-36, 62-32 mirrored, 48-20 mixed decks
+    // (p 0.004 to 0.0005) for ~2.4x the thinking time; 2 vs 0 was no better
+    // than 1 (57-36) at ~4x.
+    int plan_followups = 1;
+    int max_followup_options = 6;   // options tried per follow-up decision
+    int max_plans = 96;             // candidate plans per search, at most
     EvalWeights weights;
     // When set, positions are scored by this model's win probability
     // instead of `evaluate(weights)`.
@@ -84,6 +96,8 @@ public:
         int thinned_searches = 0;    // searched with fewer guesses to fit the budget
         int budget_fallbacks = 0;    // answered as ScriptedAgent: turn budget spent
         int showdown_searches = 0;   // searched decisions that were Showdown focus
+        int planned_followups = 0;   // follow-up decisions answered from a plan
+        int abandoned_plans = 0;     // plans dropped: the engine asked something else
         // Searched EndTurn picks with a ready rune and a card still playable
         // ("left Energy unspent"), and how many of those held an [Action] or
         // [Reaction] card in hand.
@@ -110,10 +124,20 @@ public:
                                          const std::vector<Intent>& legal_actions);
 
 private:
-    /// Score of playing `action` from the already-determinized `guess`, or
-    /// nullopt when the simulation could not run.
-    std::optional<double> simulate(const GameState& guess, const Intent& action,
+    /// Score of playing `plan` from the already-determinized `guess`, or
+    /// nullopt when the simulation could not run. plan[0] is played at the
+    /// root; each later step at `me`'s next follow-up decision (see
+    /// isFollowup), everything else as ScriptedAgent.
+    std::optional<double> simulate(const GameState& guess, const std::vector<Intent>& plan,
                                    PlayerId me, uint64_t engine_seed);
+    /// A decision of `me` that finishes the action before it: not one the
+    /// agent searches from scratch, and with a real choice.
+    bool isFollowup(const GameState& state, const std::vector<Intent>& legal, PlayerId me) const;
+    /// Candidate plans starting with `action`: the action alone, or with each
+    /// option of its follow-up decisions, up to plan_followups deep, found
+    /// by playing them out in `guess`.
+    void expandPlans(const GameState& guess, uint64_t engine_seed, PlayerId me,
+                     std::vector<Intent> prefix, std::vector<std::vector<Intent>>& out);
     /// Stats for an EndTurn pick: was Energy left that could have been spent?
     void countUnspentEnergy(const GameState& state, const std::vector<Intent>& legal,
                             PlayerId me);
@@ -127,6 +151,7 @@ private:
     int lookahead_turn_ = -1;        // turn_number the counts below are for
     int lookaheads_this_turn_ = 0;
     long steps_this_turn_ = 0;       // rollout steps spent searching this turn
+    std::vector<Intent> plan_;       // follow-ups still to play, in order
 };
 
 } // namespace riftbound
