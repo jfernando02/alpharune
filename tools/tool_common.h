@@ -59,14 +59,36 @@ inline DeckSet loadLegalDecks(const std::string& dir, const CardDB& db) {
 
 /// An agent a tool can field, parsed from
 ///   random | scripted
-///   | heuristic[:model=FILE,guesses=N,turns_ahead=N,step_budget=N,<weight>=X]
-///   | ismcts[:sims=N,uct_c=X,turns_ahead=N,step_budget=N,model=FILE,<weight>=X]
+///   | heuristic[:model=FILE,guesses=N,turns_ahead=N,step_budget=N,showdowns=0/1,<weight>=X]
+///   | ismcts[:sims=N,uct_c=X,turns_ahead=N,step_budget=N,showdowns=0/1,model=FILE,<weight>=X]
 /// where <weight> is any EvalWeights field (agents/evaluator.h). A model is
 /// loaded once here and shared by every game (models are read-only).
+/// Either look-ahead agent also takes offsearch=random: the decisions it
+/// does not search (anything but the main-phase priority decision) are made
+/// at random instead of by ScriptedAgent, which measures how much those
+/// decisions matter.
 struct ToolAgentSpec {
     std::string kind = "heuristic";
     HeuristicConfig heuristic;  // kind == "heuristic"; the seed is set per game
     IsmctsConfig ismcts;        // kind == "ismcts"; likewise
+    bool offsearch_random = false;
+};
+
+/// A look-ahead agent whose unsearched decisions are made at random.
+class OffSearchRandomAgent : public AgentInterface {
+public:
+    OffSearchRandomAgent(std::unique_ptr<AgentInterface> inner, uint64_t seed)
+        : inner_(std::move(inner)), random_(seed | 1) {}
+    Intent selectAction(const GameState& s, const std::vector<Intent>& legal) override {
+        if (legal.size() >= 2 && !HeuristicAgent::isLookaheadPoint(s, legal))
+            return random_.selectAction(s, legal);
+        return inner_->selectAction(s, legal);
+    }
+    const AgentInterface& inner() const { return *inner_; }
+
+private:
+    std::unique_ptr<AgentInterface> inner_;
+    RandomAgent random_;
 };
 
 inline ToolAgentSpec parseToolAgent(const std::string& spec) {
@@ -86,10 +108,16 @@ inline ToolAgentSpec parseToolAgent(const std::string& spec) {
         const auto eq = kv.find('=');
         if (eq == std::string::npos) throw std::runtime_error("expected key=value, got '" + kv + "'");
         const std::string key = kv.substr(0, eq), val = kv.substr(eq + 1);
-        if (key == "model") (h ? out.heuristic.model : out.ismcts.model) = GbtModel::load(val);
+        if (key == "offsearch") {
+            if (val != "random" && val != "scripted")
+                throw std::runtime_error("offsearch must be random or scripted");
+            out.offsearch_random = val == "random";
+        }
+        else if (key == "model") (h ? out.heuristic.model : out.ismcts.model) = GbtModel::load(val);
         else if (key == "turns_ahead") (h ? out.heuristic.turns_ahead : out.ismcts.turns_ahead) = std::stoi(val);
         else if (key == "step_budget" && h) out.heuristic.max_rollout_steps_per_turn = std::stol(val);
         else if (key == "step_budget") out.ismcts.max_steps_per_turn = std::stol(val);
+        else if (key == "showdowns") (h ? out.heuristic.search_showdowns : out.ismcts.search_showdowns) = std::stoi(val) != 0;
         else if (key == "guesses" && h) out.heuristic.guesses = std::stoi(val);
         else if (key == "sims" && !h) out.ismcts.max_simulations = std::stoi(val);
         else if (key == "uct_c" && !h) out.ismcts.uct_c = std::stod(val);
@@ -103,20 +131,27 @@ inline std::unique_ptr<AgentInterface> makeToolAgent(const ToolAgentSpec& spec, 
                                                      const CardRegistry& reg, uint64_t seed) {
     if (spec.kind == "random") return std::make_unique<RandomAgent>(seed | 1);
     if (spec.kind == "scripted") return std::make_unique<ScriptedAgent>(db);
+    std::unique_ptr<AgentInterface> agent;
     if (spec.kind == "ismcts") {
         IsmctsConfig config = spec.ismcts;
         config.seed = seed | 1;
-        return std::make_unique<IsmctsBot>(db, reg, config);
+        agent = std::make_unique<IsmctsBot>(db, reg, config);
+    } else {
+        HeuristicConfig config = spec.heuristic;
+        config.seed = seed | 1;
+        agent = std::make_unique<HeuristicAgent>(db, reg, config);
     }
-    HeuristicConfig config = spec.heuristic;
-    config.seed = seed | 1;
-    return std::make_unique<HeuristicAgent>(db, reg, config);
+    if (spec.offsearch_random)
+        return std::make_unique<OffSearchRandomAgent>(std::move(agent), seed ^ 0x9E3779B97F4A7C15ULL);
+    return agent;
 }
 
 /// Searched decisions and budget fallbacks of a look-ahead agent (zeros for
 /// the others), for the tools' reports.
 struct SearchCounts { long searched = 0, fallbacks = 0; };
 inline SearchCounts searchCounts(const AgentInterface& agent) {
+    if (const auto* w = dynamic_cast<const OffSearchRandomAgent*>(&agent))
+        return searchCounts(w->inner());
     if (const auto* h = dynamic_cast<const HeuristicAgent*>(&agent))
         return {h->stats().lookahead_decisions, h->stats().budget_fallbacks};
     if (const auto* m = dynamic_cast<const IsmctsBot*>(&agent))

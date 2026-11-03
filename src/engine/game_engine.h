@@ -79,6 +79,14 @@ struct StepResult {
 /// callers must replay `action_history` instead.
 bool isCleanResumePoint(const GameState& state);
 
+/// True when `state` is a Showdown focus decision `resumeFromSnapshot` can
+/// re-enter: the showdown loop is waiting on the focus holder
+/// (`TurnState::awaiting_focus_at`), Open, with no chain and no cost payment,
+/// at a battlefield whose Showdown or Combat Showdown step is in progress.
+/// The resumed engine finishes that Showdown (and Combat) and the rest of
+/// the main phase's staged round exactly as the original would.
+bool isCleanShowdownPoint(const GameState& state);
+
 class GameEngine {
 public:
     GameEngine(const CardDB& card_db, EventBus& event_bus,
@@ -572,8 +580,24 @@ private:
 
     // ── Combat ──
     void runShowdown(BattlefieldId bf);
-    void runShowdownLoop(BattlefieldId bf);
+    /// `resume`: re-enter at the pending focus decision of a snapshot
+    /// (isCleanShowdownPoint) instead of starting with the turn player and
+    /// no passes.
+    void runShowdownLoop(BattlefieldId bf, bool resume = false);
+    /// The end of a non-combat Showdown, after its loop (CR 348.2.a).
+    void finishShowdown(BattlefieldId bf);
     void runCombat(BattlefieldId bf);
+    /// Combat after its Showdown step: damage if both sides remain, then
+    /// resolution (CR 460-461).
+    void finishCombatAfterShowdown(BattlefieldId bf);
+    /// Runs the staged Showdowns / Combats of battlefields [first, end), as
+    /// one round of advanceMainPhase does. Returns whether any ran; stops
+    /// when the game ends.
+    bool runStagedBattlefields(size_t first);
+    /// resumeFromSnapshot at a Showdown focus decision: finishes that
+    /// Showdown / Combat and the rest of its staged round, then the Cleanup
+    /// and chain that follow it in advanceMainPhase.
+    void resumeShowdown();
     void combatDamageStep(BattlefieldId bf);
     void combatResolutionStep(BattlefieldId bf);
 

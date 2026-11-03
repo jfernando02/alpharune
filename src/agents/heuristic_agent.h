@@ -57,6 +57,10 @@ struct HeuristicConfig {
     // (2026-10) ordinary turns peaked at ~2k steps (median game) and ~19k
     // (worst); the runaway turns spent 175k-970k before this cap.
     long max_rollout_steps_per_turn = 40000;
+    // Also search Showdown focus decisions (play an Action / Reaction or
+    // pass) — 14% of real decisions in heuristic games, otherwise answered
+    // as ScriptedAgent — not only the main-phase priority decision.
+    bool search_showdowns = false;
     EvalWeights weights;
     // When set, positions are scored by this model's win probability
     // instead of `evaluate(weights)`.
@@ -76,6 +80,7 @@ public:
         long rollout_steps = 0;      // decisions simulated, across all simulations
         int thinned_searches = 0;    // searched with fewer guesses to fit the budget
         int budget_fallbacks = 0;    // answered as ScriptedAgent: turn budget spent
+        int showdown_searches = 0;   // searched decisions that were Showdown focus
         // Searched EndTurn picks with a ready rune and a card still playable
         // ("left Energy unspent"), and how many of those held an [Action] or
         // [Reaction] card in hand.
@@ -96,6 +101,10 @@ public:
     /// decision) with EndTurn on offer, which the turn cap falls back to.
     static bool isLookaheadPoint(const GameState& state,
                                  const std::vector<Intent>& legal_actions);
+    /// The same for a Showdown focus decision (`isCleanShowdownPoint`, with
+    /// PassFocus on offer), searched when `search_showdowns` is set.
+    static bool isShowdownLookaheadPoint(const GameState& state,
+                                         const std::vector<Intent>& legal_actions);
 
 private:
     /// Score of playing `action` from the already-determinized `guess`, or

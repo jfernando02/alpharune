@@ -413,6 +413,12 @@ struct TurnState {
     // boundary. isCleanResumePoint requires it.
     bool awaiting_main_action = false;
 
+    // The battlefield whose Showdown (or Combat's Showdown step) is waiting
+    // on a focus decision — play an Action / Reaction, or pass focus — set
+    // only while runShowdownLoop waits on that decision. isCleanShowdownPoint
+    // requires it; resumeFromSnapshot re-enters the loop there.
+    std::optional<BattlefieldId> awaiting_focus_at;
+
     // True once any unit has died during the current turn (reset each runTurn).
     // Read by cards like Towering Pairofant ("if a unit died this turn, ...").
     bool any_unit_died_this_turn = false;

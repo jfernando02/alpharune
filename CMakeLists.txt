@@ -465,3 +465,6 @@ endif()
 
 include(GoogleTest)
 gtest_discover_tests(riftbound_tests)
+# Census of the decisions an agent faces, by kind (tools/decision_census.cpp).
+add_executable(riftbound_decision_census tools/decision_census.cpp)
+target_link_libraries(riftbound_decision_census PRIVATE riftbound_core)

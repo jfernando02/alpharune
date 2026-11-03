@@ -213,6 +213,23 @@ bool isCleanResumePoint(const GameState& state) {
     return true;
 }
 
+bool isCleanShowdownPoint(const GameState& state) {
+    if (state.game_over ||
+        !state.turn.awaiting_focus_at.has_value() ||
+        !state.turn.focus_holder.has_value() ||
+        state.turn.phase != TurnPhase::MainPhase ||
+        state.turn.oc_state != OpenClosedState::Open ||
+        state.chain.exists() ||
+        state.cost_cursor.has_value())
+        return false;
+    for (const auto& bf : state.battlefields) {
+        if (bf.id != *state.turn.awaiting_focus_at) continue;
+        return bf.showdown_in_progress ||
+               (bf.combat_in_progress && bf.combat_phase == CombatPhase::ShowdownStep);
+    }
+    return false;
+}
+
 StepResult GameEngine::resumeFromSnapshot(GameState snapshot_state,
                                             uint64_t engine_seed) {
     if (step_driver_) {
@@ -709,7 +726,12 @@ void GameEngine::runTurnFromPhase(PlayerId player, TurnPhase resume_at) {
             // (mainPhase() resets ns_state/oc_state/priority_holder
             // and emits PhaseChangedEvent — both clobber the snapshot).
             // Just re-enter the action loop. Once the loop drains, fall
-            // through to endingStep as normal.
+            // through to endingStep as normal. A snapshot taken at a
+            // Showdown focus decision first finishes that Showdown.
+            if (state_.turn.awaiting_focus_at.has_value()) {
+                resumeShowdown();
+                if (state_.game_over) return;
+            }
             mainPhaseLoop();
             if (state_.game_over) return;
             [[fallthrough]];
@@ -915,33 +937,10 @@ GameEngine::MainPhaseAdvance GameEngine::advanceMainPhase(int& action_count) {
             return adv;
         }
 
-        // Sub-calls still use the recursive path until C-1 commit 6
-        // converts the chain / combat subsystems. Indexed: a showdown can
-        // create a battlefield.
-        bool ran = false;
-        for (size_t i = 0; i < state_.battlefields.size(); ++i) {
-            const BattlefieldId bf_id = state_.battlefields[i].id;
-            if (state_.battlefields[i].showdown_staged &&
-                !state_.battlefields[i].showdown_in_progress &&
-                !state_.battlefields[i].combat_staged) {
-                runShowdown(bf_id);
-                ran = true;
-                if (state_.game_over) {
-                    adv.kind = MainPhaseAdvance::Kind::Done;
-                    return adv;
-                }
-                state_.battlefields[i].showdown_staged = false;
-            }
-            if (state_.battlefields[i].combat_staged &&
-                !state_.battlefields[i].combat_in_progress) {
-                runCombat(bf_id);
-                ran = true;
-                if (state_.game_over) {
-                    adv.kind = MainPhaseAdvance::Kind::Done;
-                    return adv;
-                }
-                state_.battlefields[i].combat_staged = false;
-            }
+        const bool ran = runStagedBattlefields(0);
+        if (state_.game_over) {
+            adv.kind = MainPhaseAdvance::Kind::Done;
+            return adv;
         }
         if (!ran) break;
 
@@ -962,6 +961,66 @@ GameEngine::MainPhaseAdvance GameEngine::advanceMainPhase(int& action_count) {
     adv.kind = MainPhaseAdvance::Kind::NeedDecision;
     adv.legal = std::move(actions);
     return adv;
+}
+
+bool GameEngine::runStagedBattlefields(size_t first) {
+    // Sub-calls still use the recursive path until C-1 commit 6 converts the
+    // chain / combat subsystems. Indexed: a showdown can create a battlefield.
+    bool ran = false;
+    for (size_t i = first; i < state_.battlefields.size(); ++i) {
+        const BattlefieldId bf_id = state_.battlefields[i].id;
+        if (state_.battlefields[i].showdown_staged &&
+            !state_.battlefields[i].showdown_in_progress &&
+            !state_.battlefields[i].combat_staged) {
+            runShowdown(bf_id);
+            ran = true;
+            if (state_.game_over) return ran;
+            state_.battlefields[i].showdown_staged = false;
+        }
+        if (state_.battlefields[i].combat_staged &&
+            !state_.battlefields[i].combat_in_progress) {
+            runCombat(bf_id);
+            ran = true;
+            if (state_.game_over) return ran;
+            state_.battlefields[i].combat_staged = false;
+        }
+    }
+    return ran;
+}
+
+void GameEngine::resumeShowdown() {
+    const BattlefieldId bf_id = *state_.turn.awaiting_focus_at;
+    size_t i = 0;
+    while (i < state_.battlefields.size() && state_.battlefields[i].id != bf_id) ++i;
+    if (i == state_.battlefields.size())
+        throw std::logic_error("resumeShowdown: no battlefield " + std::to_string(bf_id));
+
+    // The rest of runStagedBattlefields' body for battlefield i, entered
+    // inside the loop the snapshot was taken in.
+    if (state_.battlefields[i].combat_in_progress) {
+        runShowdownLoop(bf_id, /*resume=*/true);
+        finishCombatAfterShowdown(bf_id);
+        if (state_.game_over) return;
+        state_.battlefields[i].combat_staged = false;
+    } else {
+        runShowdownLoop(bf_id, /*resume=*/true);
+        finishShowdown(bf_id);
+        if (state_.game_over) return;
+        state_.battlefields[i].showdown_staged = false;
+        if (state_.battlefields[i].combat_staged &&
+            !state_.battlefields[i].combat_in_progress) {
+            runCombat(bf_id);
+            if (state_.game_over) return;
+            state_.battlefields[i].combat_staged = false;
+        }
+    }
+    runStagedBattlefields(i + 1);
+    if (state_.game_over) return;
+
+    // The end of advanceMainPhase's round; mainPhaseLoop's next
+    // advanceMainPhase goes on to the next round.
+    cleanup();
+    if (chain_manager_->chainExists()) runChain();
 }
 
 bool GameEngine::resolveMainPhaseDecision(const Intent& intent,
@@ -3728,7 +3787,11 @@ void GameEngine::runShowdown(BattlefieldId bf_id) {
     // Showdown loop: players alternate focus, playing Action/Reaction spells.
     // Showdown closes when all players pass focus consecutively (CR 348.1).
     runShowdownLoop(bf_id);
+    finishShowdown(bf_id);
+}
 
+void GameEngine::finishShowdown(BattlefieldId bf_id) {
+    auto& bf = getBattlefield(bf_id);
     bf.showdown_in_progress = false;
     state_.turn.ns_state = NeutralShowdownState::Neutral;
     state_.turn.oc_state = OpenClosedState::Open;
@@ -3843,7 +3906,7 @@ std::optional<PlayerId> GameEngine::resolveShowdownDecision(
     }
 }
 
-void GameEngine::runShowdownLoop(BattlefieldId bf_id) {
+void GameEngine::runShowdownLoop(BattlefieldId bf_id, bool resume) {
     // Focus passing loop (CR 313, CR 348.1).
     // Turn player gets focus first. Players alternate.
     // When both pass focus consecutively without adding chain items, showdown closes.
@@ -3852,8 +3915,17 @@ void GameEngine::runShowdownLoop(BattlefieldId bf_id) {
     // The step-machine path (C-1 commit 9) will surface advance's legal
     // actions out to applyChoice() and feed the chosen intent back into
     // resolve — no thread, no condvar.
-    state_.turn.players_passed_focus.clear();
-    PlayerId current_focus = state_.turn.turn_player;
+    //
+    // Resuming a snapshot taken at a focus decision keeps its focus holder
+    // and the passes already made.
+    PlayerId current_focus;
+    if (resume) {
+        current_focus = *state_.turn.focus_holder;
+        state_.turn.awaiting_focus_at.reset();
+    } else {
+        state_.turn.players_passed_focus.clear();
+        current_focus = state_.turn.turn_player;
+    }
 
     int action_count = 0;
     while (action_count < kMaxShowdownActions && !state_.game_over) {
@@ -3861,7 +3933,10 @@ void GameEngine::runShowdownLoop(BattlefieldId bf_id) {
         if (adv.kind == ShowdownAdvance::Kind::Done) return;
 
         state_.decision_index++;
+        // Marks the decision resumeFromSnapshot can re-enter.
+        state_.turn.awaiting_focus_at = bf_id;
         auto chosen = getAgent(current_focus).selectAction(state_, adv.legal);
+        state_.turn.awaiting_focus_at.reset();
         recordAppliedIntent(chosen);
         if (on_decision) {
             on_decision(state_, adv.legal, chosen);
@@ -3942,7 +4017,11 @@ void GameEngine::runCombat(BattlefieldId bf_id) {
     // Step 1: Combat Showdown — players can play Action/Reaction spells
     bf.combat_phase = CombatPhase::ShowdownStep;
     runShowdownLoop(bf_id);
+    finishCombatAfterShowdown(bf_id);
+}
 
+void GameEngine::finishCombatAfterShowdown(BattlefieldId bf_id) {
+    auto& bf = getBattlefield(bf_id);
     // After showdown: check if combat can continue (CR 460.1)
     // Damage step only occurs if both sides still have units
     auto att_check = state_.unitsAt(BattlefieldLocation{bf_id}, *bf.attacker);

@@ -98,6 +98,8 @@ struct IsmctsConfig {
     // wide. Simulations stop when it is spent and later decisions that turn
     // are answered as ScriptedAgent.
     long max_steps_per_turn = 300000;
+    // Also search Showdown focus decisions (see HeuristicConfig).
+    bool search_showdowns = false;
     uint64_t seed = 1;               // 0 picks a random seed
 };
 

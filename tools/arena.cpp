@@ -2,7 +2,7 @@
 /// Head-to-head match between two agents over the legal decks of a directory.
 ///
 ///   riftbound_arena --a SPEC --b SPEC [--games N] [--threads T] [--seed S]
-///                   [--decks DIR] [--mirror]
+///                   [--decks DIR] [--mirror] [--game-seconds N]
 ///
 /// SPEC is any agent tools/tool_common.h parses (random, scripted,
 /// heuristic[:...], ismcts[:...]). Games are played in pairs on the same random
@@ -10,6 +10,12 @@
 /// going first or from a lucky draw of decks; N is rounded up to an even
 /// number. --mirror gives both seats the same deck, so fewer pairs are decided
 /// by one deck being stronger and more of them by the agents.
+///
+/// A game still going after --game-seconds (default 300; 0 = no limit) is
+/// finished by ScriptedAgent for both seats, so neither gains from it. A
+/// board flooded with tokens (Eye of the Herald Recruits) makes every engine
+/// step slow, and a look-ahead agent can then spend hours on one game even
+/// within its per-turn step budget.
 ///
 /// Progress goes to stderr; the last line of stdout is the result as JSON:
 ///   games, a_wins, b_wins, draws, errors, a_score = (a_wins + draws/2) / games,
@@ -20,7 +26,8 @@
 ///     games (so it grows with --threads' worth of parallel games);
 ///   a_searched, b_searched, a_fallbacks, b_fallbacks: a look-ahead agent's
 ///     searched decisions and those answered without search because its
-///     turn's budget was spent.
+///     turn's budget was spent;
+///   time_limited: games finished by ScriptedAgent after --game-seconds.
 
 #include "tool_common.h"
 
@@ -49,6 +56,7 @@ struct Options {
     int threads = 0;
     uint64_t seed = 1;
     bool mirror = false;
+    double game_seconds = 300.0;
 };
 
 Options parse(int argc, char** argv) {
@@ -66,6 +74,7 @@ Options parse(int argc, char** argv) {
         else if (arg == "--threads") o.threads = std::stoi(next());
         else if (arg == "--seed") o.seed = std::stoull(next());
         else if (arg == "--mirror") o.mirror = true;
+        else if (arg == "--game-seconds") o.game_seconds = std::stod(next());
         else throw std::runtime_error("unknown argument " + arg);
     }
     if (o.a.empty() || o.b.empty()) throw std::runtime_error("--a and --b are required");
@@ -74,11 +83,28 @@ Options parse(int argc, char** argv) {
     return o;
 }
 
-/// Adds the time the wrapped agent spends choosing to `seconds`.
+/// One game's wall clock, shared by both seats: past the limit both play as
+/// ScriptedAgent.
+struct GameClock {
+    std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+    double limit = 0.0;  // seconds; 0 = none
+    bool tripped = false;
+    bool over() {
+        if (!tripped && limit > 0.0 &&
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() > limit)
+            tripped = true;
+        return tripped;
+    }
+};
+
+/// Adds the time the wrapped agent spends choosing to `seconds`, and hands its
+/// decisions to ScriptedAgent once the game is over its time limit.
 class TimedAgent : public AgentInterface {
 public:
-    TimedAgent(AgentInterface& inner, double& seconds) : inner_(inner), seconds_(seconds) {}
+    TimedAgent(AgentInterface& inner, double& seconds, GameClock& clock, const CardDB& db)
+        : inner_(inner), seconds_(seconds), clock_(clock), scripted_(db) {}
     Intent selectAction(const GameState& state, const std::vector<Intent>& legal) override {
+        if (clock_.over()) return scripted_.selectAction(state, legal);
         const auto t = std::chrono::steady_clock::now();
         Intent out = inner_.selectAction(state, legal);
         seconds_ += std::chrono::duration<double>(std::chrono::steady_clock::now() - t).count();
@@ -88,6 +114,8 @@ public:
 private:
     AgentInterface& inner_;
     double& seconds_;
+    GameClock& clock_;
+    ScriptedAgent scripted_;
 };
 
 } // namespace
@@ -102,7 +130,7 @@ int main(int argc, char** argv) {
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n"
                   << "usage: riftbound_arena --a SPEC --b SPEC [--games N] [--threads T] "
-                     "[--seed S] [--decks DIR] [--mirror]\n"
+                     "[--seed S] [--decks DIR] [--mirror] [--game-seconds N]\n"
                   << "  SPEC: random | scripted\n"
                      "      | heuristic[:model=FILE,guesses=N,turns_ahead=N,step_budget=N,<weight>=X]\n"
                      "      | ismcts[:sims=N,uct_c=X,turns_ahead=N,step_budget=N,model=FILE,<weight>=X]\n";
@@ -130,6 +158,7 @@ int main(int argc, char** argv) {
     std::mutex mutex;  // stderr, and the totals below
     double a_think = 0.0, b_think = 0.0;
     long a_searched = 0, b_searched = 0, a_fallbacks = 0, b_fallbacks = 0;
+    int time_limited = 0;
     const auto start = std::chrono::steady_clock::now();
 
     const auto worker = [&] {
@@ -147,7 +176,9 @@ int main(int argc, char** argv) {
                 auto agent_a = tools::makeToolAgent(spec_a, db, registry, seed_a);
                 auto agent_b = tools::makeToolAgent(spec_b, db, registry, seed_b);
                 double think_a = 0.0, think_b = 0.0;
-                TimedAgent timed_a(*agent_a, think_a), timed_b(*agent_b, think_b);
+                GameClock clock;
+                clock.limit = opt.game_seconds;
+                TimedAgent timed_a(*agent_a, think_a, clock, db), timed_b(*agent_b, think_b, clock, db);
                 AgentInterface& p1 = swap ? static_cast<AgentInterface&>(timed_b) : timed_a;
                 AgentInterface& p2 = swap ? static_cast<AgentInterface&>(timed_a) : timed_b;
                 const PlayerId a_seat = swap ? PlayerId::Player2 : PlayerId::Player1;
@@ -176,6 +207,7 @@ int main(int argc, char** argv) {
                 b_searched += cb.searched;
                 a_fallbacks += ca.fallbacks;
                 b_fallbacks += cb.fallbacks;
+                if (clock.tripped) ++time_limited;
                 const int done = ++games_done;
                 if (done % 50 == 0) {
                     const double secs = std::chrono::duration<double>(
@@ -207,6 +239,6 @@ int main(int argc, char** argv) {
               << ", \"a_think_s\": " << a_think << ", \"b_think_s\": " << b_think
               << ", \"a_searched\": " << a_searched << ", \"b_searched\": " << b_searched
               << ", \"a_fallbacks\": " << a_fallbacks << ", \"b_fallbacks\": " << b_fallbacks
-              << "}\n";
+              << ", \"time_limited\": " << time_limited << "}\n";
     return 0;
 }

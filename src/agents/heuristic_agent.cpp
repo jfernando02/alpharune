@@ -28,14 +28,24 @@ bool HeuristicAgent::isLookaheadPoint(const GameState& state,
     });
 }
 
+bool HeuristicAgent::isShowdownLookaheadPoint(const GameState& state,
+                                              const std::vector<Intent>& legal) {
+    if (!isCleanShowdownPoint(state)) return false;
+    return std::any_of(legal.begin(), legal.end(), [](const Intent& a) {
+        return a.type == IntentType::PassFocus;
+    });
+}
+
 Intent HeuristicAgent::selectAction(const GameState& state,
                                     const std::vector<Intent>& legal) {
     if (legal.empty()) return Intent::concede(state.turn.turn_player);
     if (legal.size() == 1) return legal[0];
     ++stats_.decisions;
 
-    if (!isLookaheadPoint(state, legal)) return scripted_.selectAction(state, legal);
+    const bool showdown = config_.search_showdowns && isShowdownLookaheadPoint(state, legal);
+    if (!showdown && !isLookaheadPoint(state, legal)) return scripted_.selectAction(state, legal);
     ++stats_.lookahead_decisions;
+    if (showdown) ++stats_.showdown_searches;
 
     if (state.turn.turn_number != lookahead_turn_) {
         lookahead_turn_ = state.turn.turn_number;
@@ -43,11 +53,13 @@ Intent HeuristicAgent::selectAction(const GameState& state,
         steps_this_turn_ = 0;
     }
     if (++lookaheads_this_turn_ > config_.max_lookaheads_per_turn) {
-        // isLookaheadPoint guarantees an EndTurn is present.
         ++stats_.turn_cap_hits;
-        return *std::find_if(legal.begin(), legal.end(), [](const Intent& a) {
+        // A main-phase decision ends the turn; a Showdown one is answered as
+        // ScriptedAgent (it has no EndTurn).
+        const auto end = std::find_if(legal.begin(), legal.end(), [](const Intent& a) {
             return a.type == IntentType::EndTurn;
         });
+        return end != legal.end() ? *end : scripted_.selectAction(state, legal);
     }
 
     // Fit the search to what is left of the turn's budget, pricing a

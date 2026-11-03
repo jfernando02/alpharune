@@ -73,7 +73,9 @@ Intent IsmctsBot::selectAction(const GameState& state, const std::vector<Intent>
     if (legal.size() == 1) return legal[0];
     ++stats_.decisions;
 
-    if (!HeuristicAgent::isLookaheadPoint(state, legal))
+    const bool showdown = config_.search_showdowns &&
+                          HeuristicAgent::isShowdownLookaheadPoint(state, legal);
+    if (!showdown && !HeuristicAgent::isLookaheadPoint(state, legal))
         return scripted_.selectAction(state, legal);
     ++stats_.searched_decisions;
 
@@ -87,11 +89,13 @@ Intent IsmctsBot::selectAction(const GameState& state, const std::vector<Intent>
         return scripted_.selectAction(state, legal);
     }
     if (++lookaheads_this_turn_ > config_.max_lookaheads_per_turn) {
-        // isLookaheadPoint guarantees an EndTurn is present.
         ++stats_.turn_cap_hits;
-        return *std::find_if(legal.begin(), legal.end(), [](const Intent& a) {
+        // A main-phase decision ends the turn; a Showdown one is answered as
+        // ScriptedAgent (it has no EndTurn).
+        const auto end = std::find_if(legal.begin(), legal.end(), [](const Intent& a) {
             return a.type == IntentType::EndTurn;
         });
+        return end != legal.end() ? *end : scripted_.selectAction(state, legal);
     }
 
     // Step: sample from the final policy (a point mass unless the policy is
