@@ -77,6 +77,8 @@ struct PlayerState {
     // uses the Intent's `chosen_battlefield` field (carrying the
     // index into this vector) for slot encoding.
     std::vector<CardDefId> battlefield_pool;
+    // The pick from battlefield_pool, held until both players have picked.
+    CardDefId chosen_battlefield = kInvalidId;
 
     // Special zones (single card or empty)
     GameObjectId champion_zone = kInvalidId;
@@ -393,6 +395,9 @@ struct BattlefieldState {
 
 // ─── Turn State ──────────────────────────────────────────────────────────────
 
+/// See TurnState::chain_step.
+enum class ChainStep : uint8_t { None, MainAction, MainActionCleanedUp, ShowdownAction };
+
 struct TurnState {
     PlayerId turn_player = PlayerId::Player1;
     PlayerId starting_player = PlayerId::Player1;  // who won the coin toss
@@ -418,6 +423,20 @@ struct TurnState {
     // only while runShowdownLoop waits on that decision. isCleanShowdownPoint
     // requires it; resumeFromSnapshot re-enters the loop there.
     std::optional<BattlefieldId> awaiting_focus_at;
+
+    // The step whose chain is running, so a snapshot taken at a chain
+    // priority decision (ChainState::awaiting_priority) can finish the
+    // chain and then that step: a main-phase action (before or after its
+    // Cleanup), or a Showdown focus action at `chain_step_bf`. None where
+    // the engine cannot resume one (beginning / ending step triggers, the
+    // start of a combat, a chain run inside another chain's resolution).
+    ChainStep chain_step = ChainStep::None;
+    std::optional<BattlefieldId> chain_step_bf;
+
+    // Setup decisions of the current phase already made: battlefield picks
+    // (Setup, Player1 then Player2) or mulligans (Mulligan, in turn order).
+    // resumeFromSnapshot asks the rest.
+    int setup_step = 0;
 
     // True once any unit has died during the current turn (reset each runTurn).
     // Read by cards like Towering Pairofant ("if a unit died this turn, ...").
@@ -574,6 +593,11 @@ struct ChainState {
     // progress across re-entry. Counter spells continue to use
     // `items.back()` to find their target — `resuming` is a separate slot.
     std::optional<ChainItem> resuming;
+
+    // True only while the FEPR loop waits on a priority decision (add an
+    // item or pass), with priority_holder deciding. With TurnState::
+    // chain_step set, resumeFromSnapshot re-enters the loop there.
+    bool awaiting_priority = false;
 
     bool exists() const { return !items.empty(); }
 

@@ -17,9 +17,12 @@
 /// guesses, so their scores differ because of the action, not because one
 /// was lucky. Ties go to the earlier legal action.
 ///
-/// Everywhere else (reactions, targets, combat damage, rune payment,
-/// mulligans) it answers as ScriptedAgent does. Looking ahead there would
-/// need the replay path, which restores the real hidden cards.
+/// The same search covers, when configured, Showdown focus decisions, chain
+/// priority decisions and the setup decisions (battlefield pick, mulligan),
+/// and the follow-ups of a searched action (rune payment, targets, ...) are
+/// planned with it. Everywhere else (targets of resolving effects, combat
+/// damage, triggers outside those steps) it answers as ScriptedAgent does:
+/// a resumed engine cannot re-enter those decisions.
 
 #include "agent_interface.h"
 #include "evaluator.h"
@@ -76,6 +79,19 @@ struct HeuristicConfig {
     int plan_followups = 1;
     int max_followup_options = 6;   // options tried per follow-up decision
     int max_plans = 96;             // candidate plans per search, at most
+    // Also search chain priority decisions — add a Reaction / ability to
+    // the chain or pass — inside a main-phase action or a Showdown focus
+    // action (isCleanChainPoint). The simulation plays to the end of the
+    // turn the chain is in, as for the other decisions.
+    bool search_chain = false;
+    // Also search the setup decisions: the battlefield pick and the
+    // mulligan. Their simulations play the game from setup to the end of
+    // turn `setup_turns - 1` (turn 0 is the first player's first turn),
+    // with `setup_guesses` determinizations: the hand drawn afterwards
+    // varies far more than a mid-game turn does.
+    bool search_setup = false;
+    int setup_guesses = 8;
+    int setup_turns = 2;
     EvalWeights weights;
     // When set, positions are scored by this model's win probability
     // instead of `evaluate(weights)`.
@@ -96,6 +112,8 @@ public:
         int thinned_searches = 0;    // searched with fewer guesses to fit the budget
         int budget_fallbacks = 0;    // answered as ScriptedAgent: turn budget spent
         int showdown_searches = 0;   // searched decisions that were Showdown focus
+        int chain_searches = 0;      // ... chain priority
+        int setup_searches = 0;      // ... battlefield pick or mulligan
         int planned_followups = 0;   // follow-up decisions answered from a plan
         int abandoned_plans = 0;     // plans dropped: the engine asked something else
         // Searched EndTurn picks with a ready rune and a card still playable
@@ -122,8 +140,23 @@ public:
     /// PassFocus on offer), searched when `search_showdowns` is set.
     static bool isShowdownLookaheadPoint(const GameState& state,
                                          const std::vector<Intent>& legal_actions);
+    /// The same for a chain priority decision (`isCleanChainPoint`, with
+    /// PassPriority on offer), searched when `search_chain` is set.
+    static bool isChainLookaheadPoint(const GameState& state,
+                                      const std::vector<Intent>& legal_actions);
+    /// The same for a battlefield pick or a mulligan (`isCleanSetupPoint`),
+    /// searched when `search_setup` is set.
+    static bool isSetupLookaheadPoint(const GameState& state,
+                                      const std::vector<Intent>& legal_actions);
 
 private:
+    enum class SearchKind : uint8_t { None, Main, Showdown, Chain, Setup };
+    /// Which kind of searched decision this is, given the config; None for
+    /// the decisions answered as ScriptedAgent (or from a plan).
+    SearchKind searchKind(const GameState& state, const std::vector<Intent>& legal) const;
+    /// The last turn a simulation from `state` plays before scoring.
+    int lastTurn(const GameState& state) const;
+
     /// Score of playing `plan` from the already-determinized `guess`, or
     /// nullopt when the simulation could not run. plan[0] is played at the
     /// root; each later step at `me`'s next follow-up decision (see

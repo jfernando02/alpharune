@@ -230,6 +230,40 @@ bool isCleanShowdownPoint(const GameState& state) {
     return false;
 }
 
+bool isCleanChainPoint(const GameState& state) {
+    if (state.game_over ||
+        !state.chain.awaiting_priority ||
+        !state.chain.exists() ||
+        state.chain.resuming.has_value() ||
+        state.chain.hasPending() ||
+        !state.turn.priority_holder.has_value() ||
+        state.turn.phase != TurnPhase::MainPhase ||
+        state.cost_cursor.has_value())
+        return false;
+    switch (state.turn.chain_step) {
+        case ChainStep::MainAction:
+        case ChainStep::MainActionCleanedUp:
+            return true;
+        case ChainStep::ShowdownAction:
+            if (!state.turn.chain_step_bf.has_value() || !state.turn.focus_holder.has_value())
+                return false;
+            for (const auto& bf : state.battlefields) {
+                if (bf.id != *state.turn.chain_step_bf) continue;
+                return bf.showdown_in_progress ||
+                       (bf.combat_in_progress && bf.combat_phase == CombatPhase::ShowdownStep);
+            }
+            return false;
+        case ChainStep::None:
+            break;
+    }
+    return false;
+}
+
+bool isCleanSetupPoint(const GameState& state) {
+    return !state.game_over &&
+           (state.turn.phase == TurnPhase::Setup || state.turn.phase == TurnPhase::Mulligan);
+}
+
 StepResult GameEngine::resumeFromSnapshot(GameState snapshot_state,
                                             uint64_t engine_seed) {
     if (step_driver_) {
@@ -263,10 +297,21 @@ StepResult GameEngine::resumeFromSnapshot(GameState snapshot_state,
         // the normal turn loop. Mirrors the body of runTurnLoop minus
         // the first-turn entry.
         try {
-            if (!state_.game_over) {
+            if (resume_at == TurnPhase::Setup || resume_at == TurnPhase::Mulligan) {
+                // The rest of runGame from the setup decision it paused at.
+                if (resume_at == TurnPhase::Setup) {
+                    pickBattlefields();
+                    drawOpeningHands();
+                }
+                runMulligans();
+                events_.emit(PhaseChangedEvent{TurnPhase::Setup, TurnPhase::AwakenPhase,
+                                               state_.turn.turn_player});
+                runTurnLoop();
+            } else if (!state_.game_over) {
                 runTurnFromPhase(turn_player, resume_at);
             }
-            if (!state_.game_over) {
+            if (!state_.game_over && resume_at != TurnPhase::Setup &&
+                resume_at != TurnPhase::Mulligan) {
                 // Apply the same turn-transition logic runTurnLoop uses.
                 auto& p1 = state_.players[0];
                 auto& p2 = state_.players[1];
@@ -399,13 +444,21 @@ void GameEngine::setupBattlefields(const DeckSubmission& deck1,
     // deck's battlefield list (0..N-1) here, NOT a runtime BattlefieldId
     // — no live BFs exist on the board yet at this point. Action-vocab
     // encoding via bfSlot handles 0..2 (well within its 0..7 range).
-    auto pickFromDeck = [&](PlayerId player,
-                             const std::vector<CardDefId>& bfs) -> CardDefId {
+    //
+    // The candidate pools go on PlayerState so the legal-action renderer
+    // can label each ChooseBattlefield by its printed name ("Vilemaw's
+    // Lair", "Rockfall Path", …) instead of just "BF #N", and so a
+    // snapshot taken at a pick can finish the setup (pickBattlefields).
+    state_.player(PlayerId::Player1).battlefield_pool = deck1.battlefields;
+    state_.player(PlayerId::Player2).battlefield_pool = deck2.battlefields;
+    state_.turn.setup_step = 0;
+    pickBattlefields();
+}
+
+void GameEngine::pickBattlefields() {
+    auto pickFromDeck = [&](PlayerId player) -> CardDefId {
+        const auto& bfs = state_.player(player).battlefield_pool;
         if (bfs.empty()) return kInvalidId;
-        // Publish the candidate pool to PlayerState so the legal-action
-        // renderer can label each ChooseBattlefield by its printed name
-        // ("Vilemaw's Lair", "Rockfall Path", …) instead of just "BF #N".
-        state_.player(player).battlefield_pool = bfs;
         // Do NOT short-circuit on bfs.size() == 1. Per the project
         // contract, every engine-asked decision MUST be surfaced to
         // the agent — including forced single-option ones — so that
@@ -427,9 +480,8 @@ void GameEngine::setupBattlefields(const DeckSubmission& deck1,
 
         // Briefly mark this player as the decision-maker so HumanAgent's
         // UI snapshot (which reads state.turn.turn_player) shows the
-        // correct seat. Restore turn_player after the query — the real
-        // turn order isn't owned by this setup step.
-        PlayerId saved_turn = state_.turn.turn_player;
+        // correct seat. The real turn order (starting_player) isn't owned
+        // by this setup step; it is restored after the picks.
         state_.turn.turn_player = player;
         state_.decision_index++;
         events_.logTrace("DECISION #" + std::to_string(state_.decision_index) +
@@ -437,7 +489,6 @@ void GameEngine::setupBattlefields(const DeckSubmission& deck1,
                           std::to_string(choices.size()) + " options");
         auto chosen = getAgent(player).selectAction(state_, choices);
         recordAppliedIntent(chosen);
-        state_.turn.turn_player = saved_turn;
 
         size_t idx = static_cast<size_t>(chosen.chosen_battlefield);
         if (idx >= bfs.size()) idx = 0;  // defensive — fall back to first
@@ -446,8 +497,15 @@ void GameEngine::setupBattlefields(const DeckSubmission& deck1,
         return bfs[idx];
     };
 
-    auto bf1_def = pickFromDeck(PlayerId::Player1, deck1.battlefields);
-    auto bf2_def = pickFromDeck(PlayerId::Player2, deck2.battlefields);
+    for (int k = state_.turn.setup_step; k < 2; ++k) {
+        state_.turn.setup_step = k;
+        const PlayerId player = k == 0 ? PlayerId::Player1 : PlayerId::Player2;
+        state_.player(player).chosen_battlefield = pickFromDeck(player);
+    }
+    state_.turn.setup_step = 0;
+    state_.turn.turn_player = state_.turn.starting_player;
+    auto bf1_def = state_.player(PlayerId::Player1).chosen_battlefield;
+    auto bf2_def = state_.player(PlayerId::Player2).chosen_battlefield;
 
     // Create battlefield game objects and state
     BattlefieldId next_bf_id = 0;
@@ -554,8 +612,10 @@ void GameEngine::runMulligans() {
     events_.logTrace("── Mulligan Phase ──");
     state_.turn.phase = TurnPhase::Mulligan;
 
-    for (auto player : {state_.turn.turn_player,
-                        opponent(state_.turn.turn_player)}) {
+    for (int k = state_.turn.setup_step; k < 2; ++k) {
+        state_.turn.setup_step = k;
+        const PlayerId player = k == 0 ? state_.turn.turn_player
+                                       : opponent(state_.turn.turn_player);
         auto adv = advanceMulligan(player);
         if (adv.kind == MulliganAdvance::Kind::Done) continue;
 
@@ -576,6 +636,7 @@ void GameEngine::runMulligans() {
 
         resolveMulliganDecision(chosen);
     }
+    state_.turn.setup_step = 0;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -727,9 +788,13 @@ void GameEngine::runTurnFromPhase(PlayerId player, TurnPhase resume_at) {
             // and emits PhaseChangedEvent — both clobber the snapshot).
             // Just re-enter the action loop. Once the loop drains, fall
             // through to endingStep as normal. A snapshot taken at a
-            // Showdown focus decision first finishes that Showdown.
-            if (state_.turn.awaiting_focus_at.has_value()) {
-                resumeShowdown();
+            // Showdown focus decision first finishes that Showdown; one
+            // taken at a chain priority decision, the chain and its step.
+            if (state_.chain.awaiting_priority) {
+                resumeChain();
+                if (state_.game_over) return;
+            } else if (state_.turn.awaiting_focus_at.has_value()) {
+                resumeShowdown(*state_.turn.awaiting_focus_at);
                 if (state_.game_over) return;
             }
             mainPhaseLoop();
@@ -988,8 +1053,7 @@ bool GameEngine::runStagedBattlefields(size_t first) {
     return ran;
 }
 
-void GameEngine::resumeShowdown() {
-    const BattlefieldId bf_id = *state_.turn.awaiting_focus_at;
+void GameEngine::resumeShowdown(BattlefieldId bf_id) {
     size_t i = 0;
     while (i < state_.battlefields.size() && state_.battlefields[i].id != bf_id) ++i;
     if (i == state_.battlefields.size())
@@ -1027,19 +1091,47 @@ bool GameEngine::resolveMainPhaseDecision(const Intent& intent,
                                           int& action_count) {
     if (intent.type == IntentType::EndTurn) return false;
 
+    // Every chain the action starts runs at the end of executeIntent (or in
+    // finishMainAction), so a resumed chain finishes with finishMainAction.
+    state_.turn.chain_step = ChainStep::MainAction;
     executeIntent(intent);
-
-    // Process any triggered abilities that were queued during execution
-    // (play triggers, spell resolution triggers, etc.)
-    if (chain_manager_->chainExists()) runChain();
-
-    cleanup();
-
-    // Process death triggers / cleanup triggers
-    if (chain_manager_->chainExists()) runChain();
+    finishMainAction();
 
     action_count++;
     return !state_.game_over;
+}
+
+void GameEngine::finishMainAction() {
+    if (state_.turn.chain_step == ChainStep::MainAction) {
+        // Process any triggered abilities that were queued during execution
+        // (play triggers, spell resolution triggers, etc.)
+        if (chain_manager_->chainExists()) runChain();
+
+        cleanup();
+        state_.turn.chain_step = ChainStep::MainActionCleanedUp;
+    }
+
+    // Process death triggers / cleanup triggers
+    if (chain_manager_->chainExists()) runChain();
+    state_.turn.chain_step = ChainStep::None;
+}
+
+void GameEngine::resumeChain() {
+    const ChainStep step = state_.turn.chain_step;
+    runChain(/*resume=*/true);
+    if (state_.game_over) return;
+    if (step == ChainStep::ShowdownAction) {
+        // The rest of resolveShowdownDecision, then the Showdown loop with
+        // focus passed to the opponent of the player who acted.
+        cleanup();
+        state_.turn.chain_step = ChainStep::None;
+        const BattlefieldId bf_id = *state_.turn.chain_step_bf;
+        state_.turn.chain_step_bf.reset();
+        state_.turn.focus_holder = opponent(*state_.turn.focus_holder);
+        resumeShowdown(bf_id);
+    } else {
+        finishMainAction();
+    }
 }
 
 void GameEngine::mainPhase() {
@@ -2043,7 +2135,20 @@ void GameEngine::executePlaySpell(const Intent& intent) {
     runChain();
 }
 
-void GameEngine::runChain() {
+void GameEngine::runChain(bool resume) {
+    // A chain run while another is resolving has no step resumeChain could
+    // finish, so its priority decisions are not resume points.
+    const ChainStep outer_step = state_.turn.chain_step;
+    if (chain_depth_ > 0) state_.turn.chain_step = ChainStep::None;
+    ++chain_depth_;
+    struct DepthGuard {
+        GameEngine& e;
+        ChainStep step;
+        ~DepthGuard() {
+            if (--e.chain_depth_ > 0) e.state_.turn.chain_step = step;
+        }
+    } guard{*this, outer_step};
+
     chain_manager_->processFEPR(
         // Agent query callback
         [this](PlayerId player, const std::vector<Intent>& actions) -> Intent {
@@ -2060,7 +2165,8 @@ void GameEngine::runChain() {
         // Closed State action generator (handles targeting + affordability)
         [this](PlayerId player) -> std::vector<Intent> {
             return generateClosedStateActions(player);
-        }
+        },
+        resume
     );
 }
 
@@ -3851,7 +3957,7 @@ GameEngine::ShowdownAdvance GameEngine::advanceShowdown(BattlefieldId bf_id,
 }
 
 std::optional<PlayerId> GameEngine::resolveShowdownDecision(
-    BattlefieldId /*bf_id*/, const Intent& chosen, PlayerId current_focus,
+    BattlefieldId bf_id, const Intent& chosen, PlayerId current_focus,
     int& action_count) {
     action_count++;
 
@@ -3893,7 +3999,13 @@ std::optional<PlayerId> GameEngine::resolveShowdownDecision(
         case IntentType::ActivateReactionAbility: // [Reaction] [E]: abilities
         case IntentType::ActivateAbility: {  // generic activate (safety)
             state_.turn.players_passed_focus.clear();  // reset passes
+            // A chain priority decision inside this action resumes with
+            // resumeChain: the chain, this Cleanup, then the focus loop.
+            state_.turn.chain_step = ChainStep::ShowdownAction;
+            state_.turn.chain_step_bf = bf_id;
             executeIntent(chosen);
+            state_.turn.chain_step = ChainStep::None;
+            state_.turn.chain_step_bf.reset();
             cleanup();
             // After chain resolves, focus passes to opponent
             return opponent(current_focus);

@@ -58,11 +58,15 @@ public:
     /// resolve_permanent is called when a permanent finalizes (bypasses chain).
     /// resolve_spell is called when a spell resolves.
     /// gen_closed_actions generates legal actions during Closed State.
+    /// resume_priority re-enters a loop that was waiting on a priority
+    /// decision (ChainState::awaiting_priority): the priority holder decides
+    /// again, keeping the passes already made.
     void processFEPR(
         AgentQuery query_agent,
         std::function<void(const ChainItem&)> resolve_permanent,
         std::function<void(const ChainItem&)> resolve_spell,
-        ClosedActionsGen gen_closed_actions = nullptr
+        ClosedActionsGen gen_closed_actions = nullptr,
+        bool resume_priority = false
     );
 
     /// Check if the chain currently exists.
@@ -115,7 +119,8 @@ private:
     /// Steps 2-3: Execute (player acts) and Pass (check all passed).
     /// Returns true if an item was added (restart from Finalize).
     bool stepExecuteAndPass(AgentQuery query_agent,
-                            ClosedActionsGen gen_closed_actions);
+                            ClosedActionsGen gen_closed_actions,
+                            bool resume = false);
 
     /// Step 4: Resolve the top item on the chain. Drives a resumable loop:
     /// while the resolving Card publishes a pending choice via

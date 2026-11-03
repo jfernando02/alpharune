@@ -11,6 +11,7 @@
 #include "agents/scripted_agent.h"
 #include "cards/card_registry.h"
 #include "core/card_db.h"
+#include "engine/game_engine.h"
 #include "rules/deck_validator.h"
 
 #include <algorithm>
@@ -60,7 +61,7 @@ inline DeckSet loadLegalDecks(const std::string& dir, const CardDB& db) {
 /// An agent a tool can field, parsed from
 ///   random | scripted
 ///   | heuristic[:model=FILE,guesses=N,turns_ahead=N,step_budget=N,showdowns=0/1,followups=N,
-///                <weight>=X]
+///                chain=0/1,setup=0/1,setup_guesses=N,setup_turns=N,<weight>=X]
 ///   | ismcts[:sims=N,uct_c=X,turns_ahead=N,step_budget=N,showdowns=0/1,model=FILE,<weight>=X]
 /// where <weight> is any EvalWeights field (agents/evaluator.h). A model is
 /// loaded once here and shared by every game (models are read-only).
@@ -79,7 +80,8 @@ struct ToolAgentSpec {
 /// What kind of decision `legal` is, by the actions on offer:
 ///   main (main-phase priority, resumable), main_mid (asked partway through a
 ///   main-phase action), mulligan, damage (combat damage assignment),
-///   showdown (focus: play or pass), chain (react or pass), trigger
+///   showdown (focus: play or pass), chain (react or pass, resumable),
+///   chain_mid (react or pass where a resumed engine cannot re-enter), trigger
 ///   (optional trigger), trigger_cost, battlefield, rune (rune payment),
 ///   resolve (a choice while a chain item resolves: target / mode / X),
 ///   choice (any other MakeChoice: play location, optional cost, ...).
@@ -92,7 +94,7 @@ inline std::string decisionKind(const GameState& s, const std::vector<Intent>& l
     if (offers(legal, IntentType::MulliganDecision)) return "mulligan";
     if (offers(legal, IntentType::AssignCombatDamage)) return "damage";
     if (offers(legal, IntentType::PassFocus)) return "showdown";
-    if (offers(legal, IntentType::PassPriority)) return "chain";
+    if (offers(legal, IntentType::PassPriority)) return isCleanChainPoint(s) ? "chain" : "chain_mid";
     if (offers(legal, IntentType::PlaceOptionalTrigger) || offers(legal, IntentType::DeclineOptionalTrigger))
         return "trigger";
     if (offers(legal, IntentType::PayTriggeredCost) || offers(legal, IntentType::DeclineTriggeredCost))
@@ -157,6 +159,10 @@ inline ToolAgentSpec parseToolAgent(const std::string& spec) {
         else if (key == "showdowns") (h ? out.heuristic.search_showdowns : out.ismcts.search_showdowns) = std::stoi(val) != 0;
         else if (key == "guesses" && h) out.heuristic.guesses = std::stoi(val);
         else if (key == "followups" && h) out.heuristic.plan_followups = std::stoi(val);
+        else if (key == "chain" && h) out.heuristic.search_chain = std::stoi(val) != 0;
+        else if (key == "setup" && h) out.heuristic.search_setup = std::stoi(val) != 0;
+        else if (key == "setup_guesses" && h) out.heuristic.setup_guesses = std::stoi(val);
+        else if (key == "setup_turns" && h) out.heuristic.setup_turns = std::stoi(val);
         else if (key == "sims" && !h) out.ismcts.max_simulations = std::stoi(val);
         else if (key == "uct_c" && !h) out.ismcts.uct_c = std::stod(val);
         else if (!setWeight(h ? out.heuristic.weights : out.ismcts.weights, key, std::stod(val)))

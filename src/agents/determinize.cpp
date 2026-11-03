@@ -23,6 +23,14 @@ void determinize(GameState& state, PlayerId me, std::mt19937_64& rng) {
 
     auto& my_deck = state.player(me).main_deck;
     std::shuffle(my_deck.begin(), my_deck.end(), rng);
+
+    // A battlefield the opponent picked during setup stays secret until both
+    // have picked.
+    if (state.turn.phase == TurnPhase::Setup && theirs.chosen_battlefield != kInvalidId &&
+        !theirs.battlefield_pool.empty()) {
+        std::uniform_int_distribution<size_t> pick(0, theirs.battlefield_pool.size() - 1);
+        theirs.chosen_battlefield = theirs.battlefield_pool[pick(rng)];
+    }
 }
 
 } // namespace riftbound

@@ -46,14 +46,45 @@ bool HeuristicAgent::isShowdownLookaheadPoint(const GameState& state,
     });
 }
 
+bool HeuristicAgent::isChainLookaheadPoint(const GameState& state,
+                                           const std::vector<Intent>& legal) {
+    if (!isCleanChainPoint(state)) return false;
+    return std::any_of(legal.begin(), legal.end(), [](const Intent& a) {
+        return a.type == IntentType::PassPriority;
+    });
+}
+
+bool HeuristicAgent::isSetupLookaheadPoint(const GameState& state,
+                                           const std::vector<Intent>& legal) {
+    if (!isCleanSetupPoint(state)) return false;
+    return std::all_of(legal.begin(), legal.end(), [](const Intent& a) {
+        return a.type == IntentType::ChooseBattlefield || a.type == IntentType::MulliganDecision;
+    });
+}
+
+HeuristicAgent::SearchKind HeuristicAgent::searchKind(const GameState& state,
+                                                      const std::vector<Intent>& legal) const {
+    if (isLookaheadPoint(state, legal)) return SearchKind::Main;
+    if (config_.search_showdowns && isShowdownLookaheadPoint(state, legal))
+        return SearchKind::Showdown;
+    if (config_.search_chain && isChainLookaheadPoint(state, legal)) return SearchKind::Chain;
+    if (config_.search_setup && isSetupLookaheadPoint(state, legal)) return SearchKind::Setup;
+    return SearchKind::None;
+}
+
+int HeuristicAgent::lastTurn(const GameState& state) const {
+    if (isCleanSetupPoint(state)) return config_.setup_turns - 1;
+    return state.turn.turn_number + config_.turns_ahead - 1;
+}
+
 Intent HeuristicAgent::selectAction(const GameState& state,
                                     const std::vector<Intent>& legal) {
     if (legal.empty()) return Intent::concede(state.turn.turn_player);
     if (legal.size() == 1) return legal[0];
     ++stats_.decisions;
 
-    const bool showdown = config_.search_showdowns && isShowdownLookaheadPoint(state, legal);
-    const bool searchable = showdown || isLookaheadPoint(state, legal);
+    const SearchKind kind = searchKind(state, legal);
+    const bool searchable = kind != SearchKind::None;
 
     // The follow-ups of the action last chosen, in the order it planned them.
     if (!plan_.empty()) {
@@ -72,16 +103,21 @@ Intent HeuristicAgent::selectAction(const GameState& state,
     }
     if (!searchable) return scripted_.selectAction(state, legal);
     ++stats_.lookahead_decisions;
-    if (showdown) ++stats_.showdown_searches;
+    if (kind == SearchKind::Showdown) ++stats_.showdown_searches;
+    if (kind == SearchKind::Chain) ++stats_.chain_searches;
+    if (kind == SearchKind::Setup) ++stats_.setup_searches;
 
-    if (state.turn.turn_number != lookahead_turn_) {
-        lookahead_turn_ = state.turn.turn_number;
+    // Setup decisions have a budget of their own (turn "-1"), so they do not
+    // eat into the first turn's.
+    const int turn_key = kind == SearchKind::Setup ? -1 : state.turn.turn_number;
+    if (turn_key != lookahead_turn_) {
+        lookahead_turn_ = turn_key;
         lookaheads_this_turn_ = 0;
         steps_this_turn_ = 0;
     }
     if (++lookaheads_this_turn_ > config_.max_lookaheads_per_turn) {
         ++stats_.turn_cap_hits;
-        // A main-phase decision ends the turn; a Showdown one is answered as
+        // A main-phase decision ends the turn; any other is answered as
         // ScriptedAgent (it has no EndTurn).
         const auto end = std::find_if(legal.begin(), legal.end(), [](const Intent& a) {
             return a.type == IntentType::EndTurn;
@@ -111,7 +147,7 @@ Intent HeuristicAgent::selectAction(const GameState& state,
 
     // Fit the search to what is left of the turn's budget, pricing a
     // simulation at the average rollout so far (a guess before the first).
-    int guesses = config_.guesses;
+    int guesses = kind == SearchKind::Setup ? config_.setup_guesses : config_.guesses;
     if (config_.max_rollout_steps_per_turn > 0) {
         const long left = config_.max_rollout_steps_per_turn - steps_this_turn_;
         const double per_sim = stats_.simulations > 0
@@ -194,9 +230,7 @@ void HeuristicAgent::countUnspentEnergy(const GameState& state,
 bool HeuristicAgent::isFollowup(const GameState& state, const std::vector<Intent>& legal,
                                 PlayerId me) const {
     if (legal.size() < 2 || legal[0].player != me) return false;
-    if (isLookaheadPoint(state, legal)) return false;
-    if (config_.search_showdowns && isShowdownLookaheadPoint(state, legal)) return false;
-    return true;
+    return searchKind(state, legal) == SearchKind::None;
 }
 
 void HeuristicAgent::expandPlans(const GameState& guess, uint64_t engine_seed, PlayerId me,
@@ -208,8 +242,8 @@ void HeuristicAgent::expandPlans(const GameState& guess, uint64_t engine_seed, P
         EventBus bus;
         GameEngine engine(card_db_, bus, card_registry_);
         StepResult step = engine.resumeFromSnapshot(guess, engine_seed);
-        const int last_turn = guess.turn.turn_number + config_.turns_ahead - 1;
-        const int root = step.kind == StepKind::NeedDecision ? indexOf(step.legal, prefix[0]) : -1;
+        const int last_turn = lastTurn(guess);
+        const int root =step.kind == StepKind::NeedDecision ? indexOf(step.legal, prefix[0]) : -1;
         if (root >= 0) {
             step = engine.applyChoice(root);
             size_t next = 1;
@@ -265,7 +299,7 @@ std::optional<double> HeuristicAgent::simulate(const GameState& guess,
             return std::nullopt;
         }
 
-        const int last_turn = guess.turn.turn_number + config_.turns_ahead - 1;
+        const int last_turn = lastTurn(guess);
         step = engine.applyChoice(index);
         size_t next = 1;  // plan step to play at the next follow-up decision
         int s = 0;

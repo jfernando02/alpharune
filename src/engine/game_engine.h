@@ -87,6 +87,21 @@ bool isCleanResumePoint(const GameState& state);
 /// the main phase's staged round exactly as the original would.
 bool isCleanShowdownPoint(const GameState& state);
 
+/// True when `state` is a chain priority decision (add a Reaction / ability
+/// or pass) `resumeFromSnapshot` can re-enter: the FEPR loop is waiting on
+/// the priority holder (`ChainState::awaiting_priority`), every item is
+/// finalized and nothing is resolving or being paid for, and the chain runs
+/// in a step the engine knows how to finish (`TurnState::chain_step`: a
+/// main-phase action, or a Showdown focus action at a battlefield still in
+/// its Showdown). The resumed engine finishes the chain, then that step.
+bool isCleanChainPoint(const GameState& state);
+
+/// True when `state` is a setup decision `resumeFromSnapshot` can re-enter:
+/// the battlefield picks (TurnPhase::Setup) or the mulligans
+/// (TurnPhase::Mulligan), the only decisions asked before the first turn.
+/// `TurnState::setup_step` counts the ones already made.
+bool isCleanSetupPoint(const GameState& state);
+
 class GameEngine {
 public:
     GameEngine(const CardDB& card_db, EventBus& event_bus,
@@ -303,7 +318,11 @@ private:
     void setupGame(const DeckSubmission& deck1, const DeckSubmission& deck2);
     void setupPlayer(PlayerId player, const DeckSubmission& deck);
     void setupBattlefields(const DeckSubmission& deck1, const DeckSubmission& deck2);
+    /// Asks the players who have not yet picked (from setup_step on) for
+    /// their battlefield, then creates the battlefields.
+    void pickBattlefields();
     void drawOpeningHands();
+    /// The mulligans of the players from setup_step on, in turn order.
     void runMulligans();
     void determineTurnOrder();
 
@@ -380,6 +399,9 @@ private:
     /// the main phase loop should continue; false on EndTurn or if the
     /// game ended during resolution.
     bool resolveMainPhaseDecision(const Intent& intent, int& action_count);
+    /// The chain and Cleanup that follow a main-phase action's
+    /// executeIntent, from the point TurnState::chain_step records.
+    void finishMainAction();
 
     // ── Showdown loop, structured for step-machine resumability (C-1 commit 7) ──
     //
@@ -522,7 +544,13 @@ private:
     void executePlayFromHidden(const Intent& intent);
 
     // ── Chain ──
-    void runChain();
+    /// `resume`: re-enter at the pending priority decision of a snapshot
+    /// (isCleanChainPoint) instead of finalizing first.
+    void runChain(bool resume = false);
+    /// resumeFromSnapshot at a chain priority decision: finishes the chain,
+    /// then the step it ran in (TurnState::chain_step).
+    void resumeChain();
+    int chain_depth_ = 0;   // runChain calls in progress (nested: > 1)
     void resolveSpell(const ChainItem& item);
     void resolvePermanent(const ChainItem& item);
     Intent queryAgentForChain(PlayerId player,
@@ -594,10 +622,11 @@ private:
     /// one round of advanceMainPhase does. Returns whether any ran; stops
     /// when the game ends.
     bool runStagedBattlefields(size_t first);
-    /// resumeFromSnapshot at a Showdown focus decision: finishes that
-    /// Showdown / Combat and the rest of its staged round, then the Cleanup
-    /// and chain that follow it in advanceMainPhase.
-    void resumeShowdown();
+    /// resumeFromSnapshot at a Showdown focus decision of `bf` (focus_holder
+    /// to decide): finishes that Showdown / Combat and the rest of its
+    /// staged round, then the Cleanup and chain that follow it in
+    /// advanceMainPhase.
+    void resumeShowdown(BattlefieldId bf);
     void combatDamageStep(BattlefieldId bf);
     void combatResolutionStep(BattlefieldId bf);
 

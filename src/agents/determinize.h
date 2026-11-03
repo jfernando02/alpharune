@@ -11,6 +11,8 @@
 ///   - The opponent's hand and Main Deck are pooled, shuffled and dealt back
 ///     into the same two piles at the same sizes.
 ///   - `me`'s own Main Deck is shuffled (its order is unknown to `me`).
+///   - During setup, a battlefield the opponent already picked is replaced
+///     by a random one of their pool.
 /// Whole objects move between the piles, so nothing derived from a card's
 /// definition goes stale.
 ///
