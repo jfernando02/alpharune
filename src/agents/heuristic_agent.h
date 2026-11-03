@@ -23,15 +23,21 @@
 /// planned with it. Everywhere else (targets of resolving effects, combat
 /// damage, triggers outside those steps) it answers as ScriptedAgent does:
 /// a resumed engine cannot re-enter those decisions.
+///
+/// A learned policy (`HeuristicConfig::policy`, trained on this agent's own
+/// search results) can stand in for ScriptedAgent — in the simulations and
+/// for the unsearched decisions — at the decision kinds it covers.
 
 #include "agent_interface.h"
 #include "evaluator.h"
+#include "policy_model.h"
 #include "scripted_agent.h"
 
 #include "cards/card_registry.h"
 #include "core/card_db.h"
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <random>
@@ -97,6 +103,14 @@ struct HeuristicConfig {
     // When set, positions are scored by this model's win probability
     // instead of `evaluate(weights)`.
     std::shared_ptr<const PositionModel> model;
+    // Learned policy (agents/policy_model), trained to rank actions as this
+    // agent's search does. When set it replaces ScriptedAgent at the
+    // decision kinds it covers: in the simulations (`policy_rollouts`, both
+    // seats) and for the agent's own decisions it does not search
+    // (`policy_offsearch`).
+    std::shared_ptr<const PolicyModel> policy;
+    bool policy_rollouts = true;
+    bool policy_offsearch = true;
     uint64_t seed = 1;              // 0 picks a random seed
 };
 
@@ -131,6 +145,15 @@ public:
                         const std::vector<Intent>& legal_actions) override;
 
     const Stats& stats() const { return stats_; }
+
+    /// Told of every searched decision, and of every follow-up decision
+    /// answered from a plan, with the search's score of each legal action
+    /// (the best plan's score starting with it; NaN where none was
+    /// simulated). The state is the real one, before the action. Training
+    /// data for the policy and value models (tools/value_data.cpp).
+    using SearchObserver = std::function<void(const GameState&, const std::vector<Intent>&,
+                                              const std::vector<double>&)>;
+    void setSearchObserver(SearchObserver observer) { observer_ = std::move(observer); }
 
     /// True when a resumed copy of `state` reproduces this decision, so the
     /// agent may search it: `isCleanResumePoint` (the main-phase priority
@@ -185,7 +208,16 @@ private:
     int lookahead_turn_ = -1;        // turn_number the counts below are for
     int lookaheads_this_turn_ = 0;
     long steps_this_turn_ = 0;       // rollout steps spent searching this turn
+    /// ScriptedAgent's answer, or the policy's where it covers the decision
+    /// and `use_policy` is set.
+    int defaultIndex(const GameState& state, const std::vector<Intent>& legal,
+                     bool use_policy) const;
+    Intent defaultAction(const GameState& state, const std::vector<Intent>& legal) const;
+
     std::vector<Intent> plan_;       // follow-ups still to play, in order
+    // For each step of plan_: the score of each option searched there.
+    std::vector<std::vector<std::pair<Intent, double>>> plan_scores_;
+    SearchObserver observer_;
 };
 
 } // namespace riftbound

@@ -10,7 +10,8 @@
 /// of nodes; a row goes left when its value is <= the split threshold
 /// (missing-value rules as LightGBM's: "Zero" sends zeros the default way,
 /// "NaN" sends NaN). The raw score is the sum of the leaves, the win
-/// probability sigmoid(raw * sigmoid_coefficient).
+/// probability sigmoid(raw * sigmoid_coefficient). A model trained on soft
+/// labels (objective "cross_entropy") is read the same way, coefficient 1.
 
 #include "evaluator.h"
 
@@ -22,16 +23,16 @@
 
 namespace riftbound {
 
-class GbtModel : public PositionModel {
+/// The trees of a LightGBM model with one output, as read from its
+/// dump_model() JSON; shared by the value and the policy model.
+class GbtTrees {
 public:
-    /// Load an exported model; throws std::runtime_error on a bad file or a
-    /// feature-layout version mismatch.
-    static std::shared_ptr<const GbtModel> load(const std::string& path);
+    /// Parse `lightgbm` (a nlohmann::json*, kept out of the header); throws
+    /// std::runtime_error when the model needs a feature index >= `dim`.
+    void load(const void* lightgbm, int dim, const std::string& path);
 
-    /// Sum of the trees' leaves for one encoded position.
+    /// Sum of the trees' leaves for one encoded row (indices < dim).
     double rawScore(const ml::SparseRow& row) const;
-
-    double winProbability(const GameState& state, PlayerId me) const override;
 
     int numTrees() const { return static_cast<int>(tree_roots_.size()); }
 
@@ -45,10 +46,28 @@ private:
         double leaf_value = 0.0;
     };
 
-    int addNode(const void* json_node);  // nlohmann::json*, kept out of the header
+    int addNode(const void* json_node);
 
     std::vector<Node> nodes_;
     std::vector<int> tree_roots_;
+    int dim_ = 0;
+};
+
+class GbtModel : public PositionModel {
+public:
+    /// Load an exported model; throws std::runtime_error on a bad file or a
+    /// feature-layout version mismatch.
+    static std::shared_ptr<const GbtModel> load(const std::string& path);
+
+    /// Sum of the trees' leaves for one encoded position.
+    double rawScore(const ml::SparseRow& row) const { return trees_.rawScore(row); }
+
+    double winProbability(const GameState& state, PlayerId me) const override;
+
+    int numTrees() const { return trees_.numTrees(); }
+
+private:
+    GbtTrees trees_;
     double sigmoid_ = 1.0;
 };
 

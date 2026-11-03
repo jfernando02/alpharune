@@ -347,8 +347,10 @@ add_library(riftbound_core
     src/agents/heuristic_agent.cpp
     src/agents/ismcts_bot.cpp
     src/agents/gbt_evaluator.cpp
+    src/agents/policy_model.cpp
     src/ml/feature_extractor.cpp
     src/ml/value_features.cpp
+    src/ml/policy_features.cpp
     src/ml/cfr_util.cpp
     src/openspiel/action_vocab.cpp
 )

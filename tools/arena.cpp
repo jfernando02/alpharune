@@ -134,7 +134,8 @@ int main(int argc, char** argv) {
                   << "  SPEC: random | scripted\n"
                      "      | heuristic[:model=FILE,guesses=N,turns_ahead=N,step_budget=N,showdowns=0/1,\n"
                      "                   followups=N,chain=0/1,setup=0/1,battlefield=0/1,mulligan=0/1,\n"
-                     "                   setup_guesses=N,setup_turns=N,\n"
+                     "                   setup_guesses=N,setup_turns=N,policy=FILE,\n"
+                     "                   policy_rollouts=0/1,policy_offsearch=0/1,\n"
                      "                   <weight>=X]\n"
                      "      | ismcts[:sims=N,uct_c=X,turns_ahead=N,step_budget=N,model=FILE,<weight>=X]\n";
         return 2;

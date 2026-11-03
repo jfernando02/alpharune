@@ -6,6 +6,7 @@
 #include "engine/game_engine.h"
 
 #include <algorithm>
+#include <cmath>
 #include <exception>
 #include <limits>
 
@@ -62,6 +63,21 @@ bool HeuristicAgent::isSetupLookaheadPoint(const GameState& state,
     });
 }
 
+int HeuristicAgent::defaultIndex(const GameState& state, const std::vector<Intent>& legal,
+                                 bool use_policy) const {
+    const int scripted = scripted_.selectIndex(state, legal);
+    if (use_policy && config_.policy) {
+        const int pick = config_.policy->pick(state, card_db_, legal, scripted);
+        if (pick >= 0) return pick;
+    }
+    return scripted;
+}
+
+Intent HeuristicAgent::defaultAction(const GameState& state, const std::vector<Intent>& legal) const {
+    const int i = defaultIndex(state, legal, config_.policy_offsearch);
+    return legal[i < 0 ? 0 : i];
+}
+
 HeuristicAgent::SearchKind HeuristicAgent::searchKind(const GameState& state,
                                                       const std::vector<Intent>& legal) const {
     if (isLookaheadPoint(state, legal)) return SearchKind::Main;
@@ -93,18 +109,30 @@ Intent HeuristicAgent::selectAction(const GameState& state,
     if (!plan_.empty()) {
         if (searchable) {
             plan_.clear();  // the action is over
+            plan_scores_.clear();
         } else {
             const int i = indexOf(legal, plan_.front());
             if (i >= 0) {
+                if (observer_) {
+                    std::vector<double> scores(legal.size(), std::nan(""));
+                    int known = 0;
+                    for (const auto& [option, score] : plan_scores_.front()) {
+                        const int j = indexOf(legal, option);
+                        if (j >= 0) { scores[j] = score; ++known; }
+                    }
+                    if (known >= 2) observer_(state, legal, scores);
+                }
                 plan_.erase(plan_.begin());
+                plan_scores_.erase(plan_scores_.begin());
                 ++stats_.planned_followups;
                 return legal[i];
             }
             plan_.clear();
+            plan_scores_.clear();
             ++stats_.abandoned_plans;
         }
     }
-    if (!searchable) return scripted_.selectAction(state, legal);
+    if (!searchable) return defaultAction(state, legal);
     ++stats_.lookahead_decisions;
     if (kind == SearchKind::Showdown) ++stats_.showdown_searches;
     if (kind == SearchKind::Chain) ++stats_.chain_searches;
@@ -125,7 +153,7 @@ Intent HeuristicAgent::selectAction(const GameState& state,
         const auto end = std::find_if(legal.begin(), legal.end(), [](const Intent& a) {
             return a.type == IntentType::EndTurn;
         });
-        return end != legal.end() ? *end : scripted_.selectAction(state, legal);
+        return end != legal.end() ? *end : defaultAction(state, legal);
     }
 
     const PlayerId me = legal[0].player;
@@ -146,7 +174,7 @@ Intent HeuristicAgent::selectAction(const GameState& state,
         else
             plans.push_back({action});
     }
-    if (plans.empty()) return scripted_.selectAction(state, legal);
+    if (plans.empty()) return defaultAction(state, legal);
 
     // Fit the search to what is left of the turn's budget, pricing a
     // simulation at the average rollout so far (a guess before the first).
@@ -158,7 +186,7 @@ Intent HeuristicAgent::selectAction(const GameState& state,
         const long affordable = static_cast<long>(left / (per_sim * plans.size()));
         if (affordable < 1) {
             ++stats_.budget_fallbacks;
-            return scripted_.selectAction(state, legal);
+            return defaultAction(state, legal);
         }
         if (affordable < guesses) {
             guesses = static_cast<int>(affordable);
@@ -191,18 +219,48 @@ Intent HeuristicAgent::selectAction(const GameState& state,
 
     size_t best = n;
     double best_score = -std::numeric_limits<double>::infinity();
+    std::vector<double> mean(n, std::nan(""));
     for (size_t i = 0; i < n; ++i) {
         if (samples[i] == 0) continue;
-        const double mean = total[i] / samples[i];
-        if (mean > best_score) {
-            best_score = mean;
+        mean[i] = total[i] / samples[i];
+        if (mean[i] > best_score) {
+            best_score = mean[i];
             best = i;
         }
     }
     // Every simulation failed: fall back rather than guess.
-    if (best == n) return scripted_.selectAction(state, legal);
+    if (best == n) return defaultAction(state, legal);
     const Intent& chosen = plans[best][0];
     plan_.assign(plans[best].begin() + 1, plans[best].end());
+
+    // Each option's score at each step of the chosen plan: the best plan
+    // that agrees with the chosen one before that step and takes the option
+    // there. Step 0 is this decision.
+    plan_scores_.clear();
+    for (size_t d = 0; d < plans[best].size(); ++d) {
+        std::vector<std::pair<Intent, double>> options;
+        for (size_t i = 0; i < n; ++i) {
+            if (std::isnan(mean[i]) || plans[i].size() <= d ||
+                !std::equal(plans[i].begin(), plans[i].begin() + d, plans[best].begin()))
+                continue;
+            auto it = std::find_if(options.begin(), options.end(),
+                                   [&](const auto& o) { return o.first == plans[i][d]; });
+            if (it == options.end()) options.emplace_back(plans[i][d], mean[i]);
+            else it->second = std::max(it->second, mean[i]);
+        }
+        if (d == 0) {
+            if (observer_) {
+                std::vector<double> scores(legal.size(), std::nan(""));
+                for (const auto& [option, score] : options) {
+                    const int j = indexOf(legal, option);
+                    if (j >= 0) scores[j] = score;
+                }
+                observer_(state, legal, scores);
+            }
+        } else {
+            plan_scores_.push_back(std::move(options));
+        }
+    }
     if (chosen.type == IntentType::EndTurn) {
         ++stats_.lookahead_end_turns;
         countUnspentEnergy(state, legal, me);
@@ -265,7 +323,7 @@ void HeuristicAgent::expandPlans(const GameState& guess, uint64_t engine_seed, P
                 }
                 // A fresh search point of mine: the action is over.
                 if (step.legal[0].player == me && step.legal.size() >= 2) break;
-                const int pick = scripted_.selectIndex(engine.state(), step.legal);
+                const int pick = defaultIndex(engine.state(), step.legal, config_.policy_rollouts);
                 step = engine.applyChoice(pick < 0 ? 0 : pick);
             }
         }
@@ -318,7 +376,7 @@ std::optional<double> HeuristicAgent::simulate(const GameState& guess,
                     continue;
                 }
             }
-            const int pick = scripted_.selectIndex(engine.state(), step.legal);
+            const int pick = defaultIndex(engine.state(), step.legal, config_.policy_rollouts);
             step = engine.applyChoice(pick < 0 ? 0 : pick);
         }
         stats_.rollout_steps += s + 1;  // + the action itself

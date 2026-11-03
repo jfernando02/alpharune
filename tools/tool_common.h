@@ -62,7 +62,8 @@ inline DeckSet loadLegalDecks(const std::string& dir, const CardDB& db) {
 ///   random | scripted
 ///   | heuristic[:model=FILE,guesses=N,turns_ahead=N,step_budget=N,showdowns=0/1,followups=N,
 ///                chain=0/1,setup=0/1 (both of:) battlefield=0/1,mulligan=0/1,
-///                setup_guesses=N,setup_turns=N,<weight>=X]
+///                setup_guesses=N,setup_turns=N,policy=FILE,policy_rollouts=0/1,
+///                policy_offsearch=0/1,<weight>=X]
 ///   | ismcts[:sims=N,uct_c=X,turns_ahead=N,step_budget=N,showdowns=0/1,model=FILE,<weight>=X]
 /// where <weight> is any EvalWeights field (agents/evaluator.h). A model is
 /// loaded once here and shared by every game (models are read-only).
@@ -167,6 +168,9 @@ inline ToolAgentSpec parseToolAgent(const std::string& spec) {
         else if (key == "mulligan" && h) out.heuristic.search_mulligan = std::stoi(val) != 0;
         else if (key == "setup_guesses" && h) out.heuristic.setup_guesses = std::stoi(val);
         else if (key == "setup_turns" && h) out.heuristic.setup_turns = std::stoi(val);
+        else if (key == "policy" && h) out.heuristic.policy = PolicyModel::load(val);
+        else if (key == "policy_rollouts" && h) out.heuristic.policy_rollouts = std::stoi(val) != 0;
+        else if (key == "policy_offsearch" && h) out.heuristic.policy_offsearch = std::stoi(val) != 0;
         else if (key == "sims" && !h) out.ismcts.max_simulations = std::stoi(val);
         else if (key == "uct_c" && !h) out.ismcts.uct_c = std::stod(val);
         else if (!setWeight(h ? out.heuristic.weights : out.ismcts.weights, key, std::stod(val)))
