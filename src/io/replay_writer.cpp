@@ -4,6 +4,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -46,6 +47,191 @@ std::map<std::string, std::string> ReplayWriter::loadCardImageMap() {
         if (!out.empty()) return out;
     }
     return out;  // empty if no gallery file found
+}
+
+namespace {
+
+int seatOf(PlayerId p) {
+    if (p == PlayerId::Player1) return 0;
+    if (p == PlayerId::Player2) return 1;
+    return -1;
+}
+
+/// Keywords worth a badge on a card in play, with their values.
+std::string boardKeywords(const GameObject& obj) {
+    std::string out;
+    auto add = [&](Keyword kw, const char* label, int value = 0) {
+        if (!obj.keywords.has(kw)) return;
+        if (!out.empty()) out += ' ';
+        out += label;
+        if (value > 1) out += std::to_string(value);
+    };
+    add(Keyword::Assault, "Assault", obj.assault_value);
+    add(Keyword::Shield, "Shield", obj.shield_value);
+    add(Keyword::Deflect, "Deflect", obj.deflect_value);
+    add(Keyword::Tank, "Tank");
+    add(Keyword::Backline, "Backline");
+    add(Keyword::Ganking, "Ganking");
+    add(Keyword::Accelerate, "Accelerate");
+    add(Keyword::Deathknell, "Deathknell");
+    add(Keyword::Temporary, "Temporary");
+    add(Keyword::Hidden, "Hidden");
+    return out;
+}
+
+} // namespace
+
+std::string ReplayWriter::boardJson(const GameState& state, const Intent* chosen) {
+    using nlohmann::json;
+    std::set<GameObjectId> acted;
+    if (chosen) {
+        auto mark = [&](GameObjectId id) { if (id != kInvalidId) acted.insert(id); };
+        mark(chosen->card);
+        mark(chosen->ability_source);
+        for (auto id : chosen->targets) mark(id);
+        for (auto id : chosen->units_to_move) mark(id);
+        for (auto id : chosen->chosen_objects) mark(id);
+        for (auto id : chosen->cards_to_mulligan) mark(id);
+    }
+
+    // c = card definition (its name and image are in CARDS), n = a name
+    // when there is no definition or it differs, x = exhausted, m / bm =
+    // might now / printed, d = damage, b = buffs, k = keywords, cd =
+    // attacker / defender, e = attached gear, h = facedown, s = acted on.
+    auto obj = [&](GameObjectId id) -> json {
+        json j = json::object();
+        if (!state.objectExists(id)) return j;
+        const auto& o = state.getObject(id);
+        j["id"] = id;
+        if (o.card_def_id != kInvalidId) {
+            used_defs_.insert(o.card_def_id);
+            j["c"] = o.card_def_id;
+            if (o.name != db_.get(o.card_def_id).name) j["n"] = o.name;
+        } else {
+            j["n"] = o.name.empty() ? std::string("Token") : o.name;
+        }
+        if (o.is_exhausted) j["x"] = 1;
+        if (o.isUnit()) {
+            j["m"] = o.current_might;
+            j["bm"] = o.base_might;
+            if (o.damage_marked > 0) j["d"] = o.damage_marked;
+        }
+        if (o.buff_count + o.temp_buff_count > 0) j["b"] = o.buff_count + o.temp_buff_count;
+        if (o.is_token) j["tok"] = 1;
+        if (o.empowered > 0) j["emp"] = o.empowered;
+        if (o.is_hidden) j["h"] = 1;
+        if (o.is_hidden || o.zone == ZoneType::FacedownZone) j["ctrl"] = seatOf(o.controller);
+        auto kws = boardKeywords(o);
+        if (!kws.empty()) j["k"] = kws;
+        if (o.combat_designation == CombatDesignation::Attacker) j["cd"] = "A";
+        if (o.combat_designation == CombatDesignation::Defender) j["cd"] = "D";
+        if (acted.count(id)) j["s"] = 1;
+        if (!o.attachments.empty()) {
+            json e = json::array();
+            for (auto a : o.attachments) {
+                if (!state.objectExists(a)) continue;
+                const auto& g = state.getObject(a);
+                json gj = {{"id", a}, {"n", g.name}};
+                if (g.card_def_id != kInvalidId) {
+                    used_defs_.insert(g.card_def_id);
+                    gj["c"] = g.card_def_id;
+                }
+                e.push_back(std::move(gj));
+            }
+            j["e"] = std::move(e);
+        }
+        return j;
+    };
+    auto list = [&](const std::vector<GameObjectId>& ids) {
+        json a = json::array();
+        for (auto id : ids) if (state.objectExists(id)) a.push_back(obj(id));
+        return a;
+    };
+
+    json players = json::array();
+    for (auto pid : {PlayerId::Player1, PlayerId::Player2}) {
+        const auto& ps = state.player(pid);
+        std::vector<GameObjectId> units, gear, runes;
+        for (const auto& [id, o] : state.objects) {
+            if (!o.location || *o.location != LocationId{BaseLocation{pid}}) continue;
+            if (o.isUnit()) units.push_back(id);
+            else if (o.isGear() && !o.attached_to) gear.push_back(id);
+            else if (o.isRune()) runes.push_back(id);
+        }
+        for (auto* v : {&units, &gear, &runes}) std::sort(v->begin(), v->end());
+        json p = {
+            {"score", ps.score},
+            {"deck", ps.main_deck.size()},
+            {"rdeck", ps.rune_deck.size()},
+            {"energy", ps.rune_pool.energy},
+            {"power", ps.rune_pool.totalPower()},
+            {"hand", list(ps.hand)},
+            {"units", list(units)},
+            {"gear", list(gear)},
+            {"runes", list(runes)},
+            {"trash", list(ps.trash)},
+            {"ban", list(ps.banishment)},
+        };
+        if (state.objectExists(ps.legend_zone)) p["legend"] = obj(ps.legend_zone);
+        if (ps.champion_zone != kInvalidId && state.objectExists(ps.champion_zone) &&
+            state.getObject(ps.champion_zone).zone == ZoneType::ChampionZone) {
+            p["champ"] = obj(ps.champion_zone);
+        }
+        players.push_back(std::move(p));
+    }
+
+    json bfs = json::array();
+    for (const auto& bf : state.battlefields) {
+        std::string flags;
+        auto flag = [&](bool on, const char* f) {
+            if (!on) return;
+            if (!flags.empty()) flags += " \xC2\xB7 ";
+            flags += f;
+        };
+        flag(bf.is_contested, "Contested");
+        flag(bf.combat_in_progress, "Combat");
+        flag(bf.showdown_in_progress, "Showdown");
+        flag(bf.combat_staged, "Combat staged");
+        flag(bf.showdown_staged, "Showdown staged");
+        bfs.push_back(json{
+            {"card", obj(bf.card_object_id)},
+            {"name", StateRenderer::battlefieldLabel(state, bf.id)},
+            {"ctrl", bf.controller ? seatOf(*bf.controller) : -1},
+            {"flags", flags},
+            {"p1", list(state.unitsAt(BattlefieldLocation{bf.id}, PlayerId::Player1))},
+            {"p2", list(state.unitsAt(BattlefieldLocation{bf.id}, PlayerId::Player2))},
+            {"fd", list(bf.facedown)},
+        });
+    }
+
+    json chain = json::array();
+    auto chainItem = [&](const ChainItem& item, bool resolving) {
+        json c = obj(item.source);
+        if (!c.contains("c") && item.card_def_id != kInvalidId) {
+            used_defs_.insert(item.card_def_id);
+            c["c"] = item.card_def_id;
+        }
+        c["ctrl"] = seatOf(item.controller);
+        if (item.is_ability) c["ab"] = 1;
+        if (resolving) c["r"] = 1;
+        chain.push_back(std::move(c));
+    };
+    if (state.chain.resuming) chainItem(*state.chain.resuming, true);
+    for (int i = static_cast<int>(state.chain.items.size()) - 1; i >= 0; --i) {
+        chainItem(state.chain.items[i], false);
+    }
+
+    json board = {
+        {"turn", state.turn.turn_number},
+        {"tp", seatOf(state.turn.turn_player)},
+        {"phase", toString(state.turn.phase)},
+        {"showdown", state.turn.ns_state == NeutralShowdownState::Showdown},
+        {"players", std::move(players)},
+        {"bfs", std::move(bfs)},
+        {"chain", std::move(chain)},
+    };
+    if (state.game_over) board["over"] = state.game_over_reason;
+    return board.dump();
 }
 
 ReplayWriter::ReplayWriter(const CardDB& db, const std::string& output_path)
@@ -124,6 +310,7 @@ void ReplayWriter::recordPhaseSeam(const GameState& state,
 
     if (new_phase != TurnPhase::Mulligan) {
         snap.board_ascii = renderer.render(state);
+        snap.board_json = boardJson(state, nullptr);
     }
 
     std::ostringstream dec;
@@ -170,6 +357,7 @@ void ReplayWriter::recordDecision(const GameState& state,
     // Board ASCII (only for non-mulligan)
     if (state.turn.phase != TurnPhase::Mulligan) {
         snap.board_ascii = renderer.render(state);
+        snap.board_json = boardJson(state, &chosen_action);
     }
 
     // Decision text
@@ -344,6 +532,139 @@ pre {
     white-space: pre; font-family: inherit; font-size: 12px; line-height: 1.4;
 }
 #board-panel pre { color: #c8d6e5; }
+/* Picture view of the board (default; T or the toggle switches to the
+   text board). Cards are the official images, thumbnailed by the CDN;
+   exhausted cards are turned sideways, the decision's cards outlined. */
+body:not(.textview) #board-panel { flex: 5; }
+body.textview #vboard { display: none; }
+body:not(.textview) #board { display: none; }
+.board-label { display: flex; justify-content: space-between; align-items: center; }
+#view-toggle button {
+    background: #16213e; color: #a0a0a0; border: 1px solid #0f3460;
+    padding: 1px 8px; font: inherit; font-size: 10px; cursor: pointer;
+    text-transform: uppercase;
+}
+#view-toggle button.on { background: #0f3460; color: #feca57; border-color: #feca57; }
+#vboard {
+    display: flex; flex-direction: column; gap: 6px;
+    font-family: system-ui, 'Segoe UI', Roboto, sans-serif; font-size: 12px;
+}
+#vboard .empty-note { color: #5a6985; font-style: italic; padding: 24px; text-align: center; }
+.pstrip {
+    display: flex; align-items: center; gap: 12px; padding: 6px 10px;
+    background: #16213e; border-radius: 6px; flex-wrap: wrap;
+}
+.pstrip.p1 { border-left: 4px solid #54a0ff; }
+.pstrip.p2 { border-left: 4px solid #ff6b6b; }
+.pstrip.turn { box-shadow: 0 0 0 1px #feca57 inset, 0 0 10px #feca5730; }
+.pname { font-weight: 800; font-size: 15px; }
+.pname small { display: block; font-size: 9px; font-weight: 400; color: #feca57; }
+.c0 { color: #54a0ff; } .c1 { color: #ff6b6b; }
+.score {
+    font-size: 26px; font-weight: 800; color: #feca57; text-align: center; line-height: 1;
+    min-width: 46px;
+}
+.score small { display: block; font-size: 9px; color: #888; font-weight: 400; }
+.stat { font-size: 11px; color: #a0a0a0; line-height: 1.6; white-space: nowrap; }
+.stat b { color: #e0e0e0; }
+.zone { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.zone > .zl {
+    font-size: 9px; color: #5a6985; text-transform: uppercase; letter-spacing: .5px;
+}
+.row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; min-height: 18px; }
+.base {
+    display: flex; gap: 18px; padding: 6px 10px; background: #121a33;
+    border-radius: 6px; align-items: flex-start; flex-wrap: wrap; min-height: 40px;
+}
+.base.p1 { border-left: 4px solid #54a0ff55; }
+.base.p2 { border-left: 4px solid #ff6b6b55; }
+.chainrow {
+    display: flex; gap: 8px; align-items: center; padding: 6px 10px;
+    background: #2a1e08; border: 1px solid #feca57; border-radius: 6px;
+}
+.chainrow .zl { color: #feca57; font-size: 10px; text-transform: uppercase; }
+.bfs { display: flex; gap: 8px; }
+.bf {
+    flex: 1; min-width: 0; background: #101830; border: 2px solid #0f3460;
+    border-radius: 8px; overflow: hidden; display: flex; flex-direction: column;
+}
+.bf.ctrl0 { border-color: #54a0ff; }
+.bf.ctrl1 { border-color: #ff6b6b; }
+.bf.hot { box-shadow: 0 0 12px #f9ca2480; }
+.bfhead {
+    position: relative; height: calc(64px * var(--k, 1)); background: #22304f center/cover no-repeat;
+    cursor: pointer;
+}
+.bfname {
+    position: absolute; left: 0; right: 0; bottom: 0; padding: 3px 8px;
+    background: linear-gradient(transparent, rgba(0,0,0,.9));
+    font-size: 12px; font-weight: 600; color: #fff;
+}
+.bfname .ctl { float: right; font-size: 10px; }
+.bfflags { color: #f9ca24; font-size: 10px; margin-left: 6px; font-weight: 700; }
+.side {
+    padding: 6px; min-height: calc(96px * var(--k, 1)); display: flex; flex-wrap: wrap; gap: 6px;
+    align-items: center; justify-content: center;
+}
+.side.s0 { background: rgba(84,160,255,.07); }
+.side.s1 { background: rgba(255,107,107,.07); }
+.pile { position: relative; cursor: pointer; }
+/* A card: .slot holds the badges upright while .art turns when exhausted. */
+.slot {
+    position: relative; flex: none; width: var(--w); height: calc(var(--w) * 1.4);
+    cursor: pointer;
+}
+.slot.exh { width: calc(var(--w) * 1.4); }
+.slot.land { width: calc(var(--w) * 1.4); height: var(--w); }
+.art {
+    position: absolute; left: 50%; top: 50%; width: var(--w); height: calc(var(--w) * 1.4);
+    transform: translate(-50%, -50%); border-radius: calc(var(--w) * .06);
+    background: #2d3a5c center/cover no-repeat; box-shadow: 0 1px 4px rgba(0,0,0,.7);
+    transition: transform .15s;
+}
+.slot.land .art { width: calc(var(--w) * 1.4); height: var(--w); }
+.slot.exh .art { transform: translate(-50%, -50%) rotate(90deg); filter: brightness(.6); }
+.art.txt {
+    display: flex; align-items: center; justify-content: center; text-align: center;
+    font-size: 9px; padding: 3px; color: #ddd; overflow: hidden;
+    border: 1px solid #54a0ff55;
+}
+.slot:hover .art { outline: 2px solid #feca57; }
+.slot.sel .art { outline: 3px solid #feca57; box-shadow: 0 0 14px #feca57; }
+.slot.fd .art { filter: brightness(.45) saturate(.4); }
+.badge {
+    position: absolute; font: 700 11px/1 system-ui, sans-serif; padding: 2px 5px;
+    border-radius: 9px; pointer-events: none; z-index: 2; white-space: nowrap;
+}
+.b-might { right: -5px; bottom: -5px; background: #1e272e; border: 1px solid #c8d6e5; color: #fff; }
+.b-might.up { color: #1dd1a1; border-color: #1dd1a1; }
+.b-might.down { color: #ff9f43; border-color: #ff9f43; }
+.b-dmg { right: -5px; top: -5px; background: #ee5253; color: #fff; }
+.b-cd { left: -5px; top: -5px; background: #f9ca24; color: #222; }
+.b-count { right: -5px; top: -5px; background: #0f3460; color: #feca57; border: 1px solid #feca57; }
+.b-tag { left: -5px; bottom: -5px; background: #5f27cd; color: #fff; font-size: 9px; }
+.b-res { left: 50%; top: -7px; transform: translateX(-50%); background: #feca57; color: #222; font-size: 9px; }
+.kws {
+    position: absolute; left: 2px; right: 2px; top: 34%; display: flex; flex-direction: column;
+    gap: 1px; align-items: flex-start; pointer-events: none; z-index: 2;
+}
+.kws span {
+    font: 700 8px/1 system-ui, sans-serif; background: rgba(0,0,0,.78); color: #feca57;
+    padding: 1px 3px; border-radius: 3px;
+}
+.att {
+    position: absolute; left: -6px; bottom: 16%; width: calc(var(--w) * .42);
+    height: calc(var(--w) * .59); border-radius: 3px; background: #2d3a5c center/cover;
+    border: 1px solid #feca57; z-index: 3; box-shadow: 0 1px 3px #000;
+}
+.ctrlc0 .art { box-shadow: 0 0 0 2px #54a0ff; }
+.ctrlc1 .art { box-shadow: 0 0 0 2px #ff6b6b; }
+.gameover {
+    padding: 8px; text-align: center; font-weight: 800; color: #00d2d3;
+    border: 1px solid #00d2d3; border-radius: 6px; background: #00d2d310;
+}
+#card-details-pile { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+#card-details-pile:empty { display: none; }
 #decision-panel pre { color: #feca57; }
 #trace-panel pre { color: #a0a0a0; }
 .trace-line { margin: 0; }
@@ -369,7 +690,13 @@ pre {
 </div>
 <div id="turn-info"></div>
 <div id="main">
-    <div id="board-panel"><div class="label">Board State</div><pre id="board"></pre></div>
+    <div id="board-panel">
+        <div class="label board-label">Board State
+            <span id="view-toggle" title="T switches"><button data-view="pic">Cards</button><button data-view="text">Text</button></span>
+        </div>
+        <div id="vboard"></div>
+        <pre id="board"></pre>
+    </div>
     <div class="resize-handle-v" data-target="board-panel" data-axis="x"></div>
     <div id="right-panel">
         <div id="decision-panel"><div class="label">Decision</div><pre id="decision"></pre></div>
@@ -381,7 +708,8 @@ pre {
         <div class="label">Card Details</div>
         <div id="card-details-name"></div>
         <img id="card-details-image" alt="" />
-        <div id="card-details-placeholder">Click any card name to view its image.</div>
+        <div id="card-details-placeholder">Click any card or card name to view its image.</div>
+        <div id="card-details-pile"></div>
     </div>
 </div>
 <script>
@@ -406,6 +734,22 @@ pre {
             first = false;
         }
         file << "\n};\n\n";
+
+        file << "const CARDS = {\n";
+        first = true;
+        for (CardDefId id : used_defs_) {
+            const auto& def = db_.get(id);
+            std::string url = def.image_url;
+            if (url.empty()) {
+                auto it = image_map.find(def.name);
+                if (it != image_map.end()) url = it->second;
+            }
+            if (!first) file << ",\n";
+            file << "  " << id << ":{\"n\":\"" << escapeJs(def.name) << "\",\"i\":\""
+                 << escapeJs(url) << "\",\"t\":\"" << toString(def.card_type) << "\"}";
+            first = false;
+        }
+        file << "\n};\n\n";
     }
 
     file << "const SNAPSHOTS = [\n";
@@ -416,6 +760,7 @@ pre {
         file << "  idx: " << snap.decision_index << ",\n";
         file << "  turn: \"" << escapeJs(snap.turn_info) << "\",\n";
         file << "  board: \"" << escapeJs(snap.board_ascii) << "\",\n";
+        file << "  b: " << (snap.board_json.empty() ? std::string("null") : snap.board_json) << ",\n";
         file << "  decision: \"" << escapeJs(snap.decision_text) << "\",\n";
         file << "  trace: [";
         for (size_t j = 0; j < snap.trace_lines.size(); ++j) {
@@ -536,21 +881,234 @@ function wrapCardNames(elem) {
 // Single delegated click handler for all card-link spans across the
 // three panels. Updates the side-pane image + name; tracks the active
 // link with a class so the user can see what they just clicked.
+// ── Picture view of the board ──────────────────────────────────────────
+// Each snapshot's `b` is the board as JSON (ReplayWriter::boardJson);
+// CARDS maps a card definition id to its name, image and type.
+function thumb(url, w) {
+    if (!url) return '';
+    if (url.indexOf('rgpub.io/sanity') < 0) return url;  // only that CDN resizes
+    return url + (url.indexOf('?') < 0 ? '?' : '&') + 'w=' + w + '&fm=webp';
+}
+function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function cardInfo(o) {
+    const d = (o.c !== undefined && CARDS[o.c]) || null;
+    const name = o.n || (d ? d.n : '?');
+    return { name: name, img: d ? d.i : (CARD_IMAGES[name] || ''), type: d ? d.t : '' };
+}
+
+// One card. opts: w (width px), land (landscape image), count (stack
+// size), noTurn (draw exhausted cards upright), ctrl (controller tint).
+let SCALE = 1;  // card sizes follow the board panel's width
+function cardHtml(o, opts) {
+    const w = Math.round(opts.w * SCALE);
+    const ci = cardInfo(o);
+    let cls = 'slot';
+    if (o.x && !opts.noTurn) cls += ' exh';
+    if (opts.land) cls += ' land';
+    if (o.s) cls += ' sel';
+    if (o.h) cls += ' fd';
+    if (opts.ctrl === 0 || opts.ctrl === 1) cls += ' ctrlc' + opts.ctrl;
+    const tw = opts.land ? 420 : (w > 70 ? 300 : 200);
+    let html = ci.img
+        ? '<div class="art" style="background-image:url(\'' + thumb(ci.img, tw) + '\')"></div>'
+        : '<div class="art txt">' + esc(ci.name) + '</div>';
+    const tip = [ci.name];
+    if (o.m !== undefined) {
+        const cls2 = o.m > o.bm ? ' up' : (o.m < o.bm ? ' down' : '');
+        html += '<span class="badge b-might' + cls2 + '">' + o.m + '</span>';
+        tip.push('Might ' + o.m + (o.m !== o.bm ? ' (printed ' + o.bm + ')' : ''));
+    }
+    if (o.d) { html += '<span class="badge b-dmg">' + o.d + ' dmg</span>'; tip.push(o.d + ' damage'); }
+    if (o.cd) {
+        html += '<span class="badge b-cd">' + (o.cd === 'A' ? '⚔ ATK' : '\u{1F6E1} DEF') + '</span>';
+        tip.push(o.cd === 'A' ? 'Attacking' : 'Defending');
+    }
+    if (opts.count > 1) html += '<span class="badge b-count">×' + opts.count + '</span>';
+    const tags = [];
+    if (o.b) tags.push('+' + o.b);
+    if (o.emp) tags.push('Empowered');
+    if (o.tok) tags.push('Token');
+    if (o.h) tags.push('Facedown');
+    if (tags.length) { html += '<span class="badge b-tag">' + tags.join(' ') + '</span>'; tip.push(tags.join(', ')); }
+    if (o.r) html += '<span class="badge b-res">resolving</span>';
+    if (o.ab) tip.push('ability');
+    if (o.k) {
+        html += '<div class="kws">' + o.k.split(' ').map(k => '<span>' + esc(k) + '</span>').join('') + '</div>';
+        tip.push(o.k);
+    }
+    if (o.x) tip.push('exhausted');
+    for (const g of (o.e || [])) {
+        const gi = cardInfo(g);
+        html += '<div class="att" title="' + esc(gi.name) + '" data-card="' + esc(gi.name) +
+                '" data-img="' + esc(gi.img) + '" style="background-image:url(\'' + thumb(gi.img, 120) + '\')"></div>';
+        tip.push('equipped: ' + gi.name);
+    }
+    return '<div class="' + cls + '" style="--w:' + w + 'px" data-card="' + esc(ci.name) +
+           '" data-img="' + esc(ci.img) + '" title="' + esc(tip.join(' · ')) + '">' + html + '</div>';
+}
+function cardsHtml(list, opts) { return list.map(o => cardHtml(o, opts)).join(''); }
+
+// Runes: one card per kind and state, with a count.
+function runesHtml(runes) {
+    const groups = [];
+    const byKey = {};
+    for (const r of runes) {
+        const key = (r.c !== undefined ? r.c : r.n) + (r.x ? 'x' : 'r');
+        if (!(key in byKey)) { byKey[key] = groups.length; groups.push({ o: r, n: 0 }); }
+        groups[byKey[key]].n++;
+    }
+    groups.sort((a, b) => (a.o.x ? 1 : 0) - (b.o.x ? 1 : 0));
+    return groups.map(g => cardHtml(g.o, { w: 34, count: g.n })).join('');
+}
+
+// Trash or banishment: the top card with the count; click lists them all.
+let PILES = {};
+function pileHtml(key, label, list) {
+    if (!list.length) return '<div class="zone"><div class="zl">' + label + '</div><div class="stat">0</div></div>';
+    PILES[key] = { label: label, list: list };
+    const top = list[list.length - 1];
+    return '<div class="zone"><div class="zl">' + label + '</div><div class="pile" data-pile="' + key + '">' +
+           cardHtml(Object.assign({}, top, { x: 0, s: 0 }), { w: 40, count: list.length }) + '</div></div>';
+}
+
+function playerStrip(b, seat) {
+    const p = b.players[seat];
+    const turn = b.tp === seat;
+    let h = '<div class="pstrip p' + (seat + 1) + (turn ? ' turn' : '') + '">';
+    h += '<div class="pname c' + seat + '">P' + (seat + 1) + (turn ? '<small>to play</small>' : '') + '</div>';
+    h += '<div class="score">' + p.score + '<small>/ 8 pts</small></div>';
+    if (p.legend) h += '<div class="zone"><div class="zl">Legend</div>' + cardHtml(p.legend, { w: 44 }) + '</div>';
+    if (p.champ) h += '<div class="zone"><div class="zl">Champion</div>' + cardHtml(p.champ, { w: 44 }) + '</div>';
+    h += '<div class="stat">Deck <b>' + p.deck + '</b><br>Runes left <b>' + p.rdeck + '</b><br>Pool <b>' +
+         p.energy + '</b> E · <b>' + p.power + '</b> P</div>';
+    h += '<div class="zone" style="flex:1"><div class="zl">Hand (' + p.hand.length + ')</div><div class="row">' +
+         cardsHtml(p.hand, { w: 48, noTurn: true }) + '</div></div>';
+    h += pileHtml('t' + seat, 'Trash', p.trash);
+    h += pileHtml('b' + seat, 'Banished', p.ban);
+    return h + '</div>';
+}
+
+function baseRow(b, seat) {
+    const p = b.players[seat];
+    let h = '<div class="base p' + (seat + 1) + '">';
+    h += '<div class="zone"><div class="zl">Runes (' + p.runes.filter(r => !r.x).length + ' ready / ' +
+         p.runes.length + ')</div><div class="row">' + runesHtml(p.runes) + '</div></div>';
+    if (p.gear.length) h += '<div class="zone"><div class="zl">Gear</div><div class="row">' + cardsHtml(p.gear, { w: 50 }) + '</div></div>';
+    h += '<div class="zone"><div class="zl">Base</div><div class="row">' +
+         (p.units.length ? cardsHtml(p.units, { w: 62 }) : '<span class="stat">no units</span>') + '</div></div>';
+    return h + '</div>';
+}
+
+function battlefieldsRow(b) {
+    let h = '<div class="bfs">';
+    for (const bf of b.bfs) {
+        const ci = cardInfo(bf.card || {});
+        const ctl = bf.ctrl >= 0 ? '<span class="ctl c' + bf.ctrl + '">P' + (bf.ctrl + 1) + ' controls</span>' : '';
+        h += '<div class="bf' + (bf.ctrl >= 0 ? ' ctrl' + bf.ctrl : '') + (bf.flags ? ' hot' : '') + '">';
+        const side = (seat, units) => '<div class="side s' + seat + '">' +
+            cardsHtml(units, { w: 62 }) +
+            cardsHtml(bf.fd.filter(f => f.ctrl === seat), { w: 44 }) + '</div>';
+        h += side(0, bf.p1);
+        h += '<div class="bfhead" data-card="' + esc(ci.name) + '" data-img="' + esc(ci.img) + '" ' +
+             'style="background-image:url(\'' + thumb(ci.img, 480) + '\')">' +
+             '<div class="bfname">' + esc(bf.name) + (bf.flags ? '<span class="bfflags">' + esc(bf.flags) + '</span>' : '') +
+             ctl + '</div></div>';
+        h += side(1, bf.p2);
+        // Facedown cards whose controller isn't recorded go under the header.
+        const other = bf.fd.filter(f => f.ctrl !== 0 && f.ctrl !== 1);
+        if (other.length) h += '<div class="side">' + cardsHtml(other, { w: 44 }) + '</div>';
+        h += '</div>';
+    }
+    return h + '</div>';
+}
+
+function chainRow(b) {
+    if (!b.chain.length) return '';
+    return '<div class="chainrow"><div class="zl">Chain<br>(top first)</div><div class="row">' +
+        b.chain.map(o => cardHtml(o, { w: 50, ctrl: o.ctrl })).join('') + '</div></div>';
+}
+
+function renderPictureBoard(s) {
+    const el = document.getElementById('vboard');
+    SCALE = Math.max(0.8, Math.min(2, el.clientWidth / 720));
+    el.style.setProperty('--k', SCALE);
+    PILES = {};
+    const b = s.b;
+    if (!b) {
+        el.innerHTML = '<div class="empty-note">No board yet (mulligan). The decision panel shows the choice.</div>';
+        return;
+    }
+    let h = '';
+    if (b.over) h += '<div class="gameover">GAME OVER — ' + esc(b.over) + '</div>';
+    h += playerStrip(b, 0) + baseRow(b, 0) + chainRow(b) + battlefieldsRow(b) + baseRow(b, 1) + playerStrip(b, 1);
+    el.innerHTML = h;
+}
+
+function setView(view) {
+    document.body.classList.toggle('textview', view === 'text');
+    for (const btn of document.querySelectorAll('#view-toggle button')) {
+        btn.classList.toggle('on', btn.dataset.view === view);
+    }
+    try { localStorage.setItem('rb-replay-view', view); } catch (e) {}
+}
+// Redraw at the new size when the window or the board pane is resized.
+let resizeTimer = null;
+new ResizeObserver(function() {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function() { if (SNAPSHOTS.length) renderPictureBoard(SNAPSHOTS[pos]); }, 80);
+}).observe(document.getElementById('board-panel'));
+document.getElementById('view-toggle').addEventListener('click', function(e) {
+    const btn = e.target.closest('button');
+    if (btn) setView(btn.dataset.view);
+});
+(function() {
+    let v = 'pic';
+    try { v = localStorage.getItem('rb-replay-view') || 'pic'; } catch (e) {}
+    setView(v);
+})();
+
+// Show a card (or a pile's list) in the details pane.
+function showDetails(name, url, pile) {
+    const img = document.getElementById('card-details-image');
+    const nameLabel = document.getElementById('card-details-name');
+    const placeholder = document.getElementById('card-details-placeholder');
+    const pileEl = document.getElementById('card-details-pile');
+    if (placeholder) placeholder.style.display = 'none';
+    nameLabel.textContent = name;
+    if (pile) {
+        img.style.display = 'none';
+        pileEl.innerHTML = pile.slice().reverse().map(o => cardHtml(Object.assign({}, o, { x: 0, s: 0 }), { w: 70 })).join('');
+    } else {
+        pileEl.innerHTML = '';
+        img.src = url;
+        img.alt = name;
+        img.style.display = 'block';
+    }
+}
+
 let activeLink = null;
 document.addEventListener('click', function(e) {
-    const link = e.target.closest && e.target.closest('.card-link');
+    if (!e.target.closest) return;
+    const pile = e.target.closest('[data-pile]');
+    if (pile && PILES[pile.dataset.pile]) {
+        const pl = PILES[pile.dataset.pile];
+        showDetails(pl.label + ' (' + pl.list.length + ', newest first)', '', pl.list);
+        return;
+    }
+    const pic = e.target.closest('[data-img]');
+    if (pic && pic.dataset.img) {
+        showDetails(pic.dataset.card, pic.dataset.img, null);
+        return;
+    }
+    const link = e.target.closest('.card-link');
     if (!link) return;
     const name = link.dataset.card;
     const url = CARD_IMAGES[name];
     if (!url) return;
-    const img = document.getElementById('card-details-image');
-    const nameLabel = document.getElementById('card-details-name');
-    const placeholder = document.getElementById('card-details-placeholder');
-    img.src = url;
-    img.alt = name;
-    img.style.display = 'block';
-    nameLabel.textContent = name;
-    if (placeholder) placeholder.style.display = 'none';
+    showDetails(name, url, null);
     if (activeLink && activeLink !== link) activeLink.classList.remove('active');
     link.classList.add('active');
     activeLink = link;
@@ -651,6 +1209,7 @@ function show(i) {
     }
     document.getElementById('turn-info').innerHTML = turnLine;
     document.getElementById('board').textContent = s.board;
+    renderPictureBoard(s);
     document.getElementById('decision').textContent = s.decision || '(no decision recorded)';
     wrapCardNames(document.getElementById('board'));
     wrapCardNames(document.getElementById('decision'));
@@ -693,6 +1252,7 @@ document.addEventListener('keydown', function(e) {
     else if (e.key === 'End') show(SNAPSHOTS.length - 1);
     else if (e.key === 'PageDown') go(10);
     else if (e.key === 'PageUp') go(-10);
+    else if (e.key === 't' || e.key === 'T') setView(document.body.classList.contains('textview') ? 'pic' : 'text');
 });
 
 document.getElementById('title').textContent =

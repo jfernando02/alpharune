@@ -252,6 +252,16 @@ std::shared_ptr<const PositionModel> loadModelCached(const std::string& path) {
     return slot;
 }
 
+/// The same for a learned policy (agents/policy_model).
+std::shared_ptr<const PolicyModel> loadPolicyCached(const std::string& path) {
+    static std::mutex mutex;
+    static std::map<std::string, std::shared_ptr<const PolicyModel>> cache;
+    std::lock_guard<std::mutex> lock(mutex);
+    auto& slot = cache[path];
+    if (!slot) slot = PolicyModel::load(path);
+    return slot;
+}
+
 /// `game_seed` MUST be the engine's runGame seed — MctsAgent and IsMctsAgent
 /// forward it into the internal OpenSpiel state so the replayed
 /// action_history reproduces the same state as the live engine. If you
@@ -280,6 +290,7 @@ std::unique_ptr<AgentInterface> buildAgent(const AgentSpec& spec,
         if (spec.turns_ahead > 0) config.turns_ahead = spec.turns_ahead;
         for (const auto& [name, value] : spec.weights) setWeight(config.weights, name, value);
         if (!spec.model.empty()) config.model = loadModelCached(spec.model);
+        if (!spec.policy.empty()) config.policy = loadPolicyCached(spec.policy);
         config.seed = derived_seed | 1;
         return std::make_unique<HeuristicAgent>(card_db, card_registry, config);
     }
@@ -375,6 +386,8 @@ int main(int argc, char* argv[]) {
         "                    (names as in agents/evaluator.h EvalWeights).\n"
         "                    model=FILE scores positions with a learned\n"
         "                    value model (riftbound-trainer value_gbt.py).\n"
+        "                    policy=FILE plays its simulations and unsearched\n"
+        "                    decisions with a learned policy (policy_gbt.py).\n"
         "  ismcts-native[:sims=N,uct_c=X,turns_ahead=N]\n"
         "                    Information Set MCTS on the engine (OpenSpiel's\n"
         "                    is_mcts.cc design) with real hidden-card\n"

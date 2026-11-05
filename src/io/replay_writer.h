@@ -13,6 +13,7 @@
 #include "io/state_renderer.h"
 
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -69,6 +70,8 @@ private:
         int decision_index;
         std::string turn_info;       // "Turn 5 | MainPhase | P1"
         std::string board_ascii;     // full ASCII board render
+        std::string board_json;      // the same board for the picture view
+                                     // (boardJson), "null" before the game
         std::string decision_text;   // decision block (options + chosen)
         std::vector<std::string> trace_lines; // events caused BY this
                                               // decision's chosen_action
@@ -92,6 +95,14 @@ private:
     };
 
     std::vector<Snapshot> snapshots_;
+    // Card definitions that appear on any snapshot's board; their names
+    // and images are written once, as CARDS, for the picture view.
+    std::set<CardDefId> used_defs_;
+
+    /// The board as compact JSON for the picture view: both players'
+    /// zones, the battlefields, the chain. `chosen` (may be null) marks
+    /// the objects the decision acted on.
+    std::string boardJson(const GameState& state, const Intent* chosen);
     std::vector<std::string> pending_trace_; // trace lines not yet assigned
     // Pending MCTS root value for the next recordDecision call. Same
     // sentinel convention as Snapshot::mcts_value.
