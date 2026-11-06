@@ -568,7 +568,7 @@ void TriggerManager::onCombatEnded(const CombatEndedEvent& e) {
     }
 
     // No fire on indecisive combat (both sides emptied, or no recall outcome).
-    if (!e.winner.has_value()) return;
+    if (!e.winner.has_value() || *e.winner == PlayerId::None) return;
     PlayerId winner = *e.winner;
 
     // Legend-zone sweep: legends like Glorious Executioner / Voidreaver use

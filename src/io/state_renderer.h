@@ -47,7 +47,7 @@ public:
                                 const Intent& chosen) const;
 
     // Configuration
-    int max_width = 80;
+    int max_width = 80;            // 0: legal actions one per line, untruncated
     bool show_hand = false;        // show hand contents (debug only)
     bool show_legal_actions = true;
 

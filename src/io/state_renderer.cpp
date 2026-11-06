@@ -940,6 +940,11 @@ std::string StateRenderer::renderActions(const GameState& state,
     int cols = std::max(1, (max_width - 4) / col_width);
 
     ss << "  " << actions.size() << " options:\n";
+    if (max_width <= 0) {
+        for (size_t i = 0; i < labels.size(); ++i)
+            ss << "    [" << i << "] " << labels[i] << "\n";
+        return ss.str();
+    }
     for (size_t i = 0; i < labels.size(); ++i) {
         if (i % cols == 0) ss << "    ";
         ss << padRight("[" + std::to_string(i) + "] " + labels[i], col_width);

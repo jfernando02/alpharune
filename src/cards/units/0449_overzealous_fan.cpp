@@ -40,17 +40,20 @@ public:
         auto still_legal = [&]() { return get_attacker() != kInvalidId; };
 
         int conf = confirmOptional(ctx,
-            "Overzealous Fan: kill self to bounce attacker?", still_legal);
-        if (finalizingChoices(ctx)) return;   // choices end here (CR 383.3)
-        if (conf == -1) return;
-        if (conf == 0) return;
+            "Overzealous Fan: kill me to move the attacker to its base?", still_legal);
+        // "Kill me" is the ability's base cost (CR 204.1.c): paid as it is
+        // finalized, so the Fan is gone before anyone can respond.
+        if (conf == 1 && costDueNow(ctx)) ctx.executor.killObject(ctx.source);
+        if (finalizingChoices(ctx)) return;   // choices and costs end here (CR 383.3)
+        if (conf != 1) return;
 
+        // The dead Fan keeps its counters, so the captured attacker is still known.
         GameObjectId attacker = get_attacker();
         if (attacker == kInvalidId) return;
+        if (!ctx.state.getObject(attacker).isAtBattlefield()) return;
         std::string attacker_name = ctx.state.getObject(attacker).name;
-        ctx.executor.killObject(ctx.source);
-        ctx.executor.bounceToHand(attacker);
-        ctx.events.logTrace("OVERZEALOUS FAN: killed self, bounced " + attacker_name);
+        ctx.executor.moveToBase(attacker);
+        ctx.events.logTrace("OVERZEALOUS FAN: killed me, moved " + attacker_name + " to its base");
     }
 private:
     const CardDef def_ = [] {

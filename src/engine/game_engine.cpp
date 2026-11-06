@@ -4419,7 +4419,8 @@ void GameEngine::combatResolutionStep(BattlefieldId bf_id) {
     auto att_remaining = state_.unitsAt(BattlefieldLocation{bf_id}, *bf.attacker);
     auto def_remaining = state_.unitsAt(BattlefieldLocation{bf_id}, *bf.defender);
 
-    if (!att_remaining.empty() && !def_remaining.empty()) {
+    const bool recalled = !att_remaining.empty() && !def_remaining.empty();
+    if (recalled) {
         // Both still have units = a tie. Normally only attackers recall
         // (CR 461.1.a.2). Symbol of the Solari (227): if the attacker controls
         // it, recall ALL units (attackers AND defenders) instead.
@@ -4443,12 +4444,21 @@ void GameEngine::combatResolutionStep(BattlefieldId bf_id) {
     att_remaining = state_.unitsAt(BattlefieldLocation{bf_id}, *bf.attacker);
     def_remaining = state_.unitsAt(BattlefieldLocation{bf_id}, *bf.defender);
 
-    PlayerId combat_winner = PlayerId::None;
+    // The only player with units left here (CR 468.5) — and, unless units
+    // were recalled, the combat's winner (CR 468.3.a / 468.3.d).
+    PlayerId holder = PlayerId::None;
     if (!att_remaining.empty() && def_remaining.empty()) {
-        combat_winner = *bf.attacker;
+        holder = *bf.attacker;
     } else if (att_remaining.empty() && !def_remaining.empty()) {
-        combat_winner = *bf.defender;
+        holder = *bf.defender;
     }
+    const PlayerId combat_winner = recalled ? PlayerId::None : holder;
+
+    events_.logTrace("COMBAT_RESULT: BF#" + std::to_string(bf_id) + " " +
+                     (combat_winner == PlayerId::None ? std::string("no result")
+                                                      : std::string(toString(combat_winner)) + " wins") +
+                     " (attackers left " + std::to_string(att_remaining.size()) +
+                     ", defenders left " + std::to_string(def_remaining.size()) + ")");
 
     // Clear combat designations
     for (auto& [id, obj] : state_.objects) {
@@ -4465,16 +4475,20 @@ void GameEngine::combatResolutionStep(BattlefieldId bf_id) {
     bf.attacker = std::nullopt;
     bf.defender = std::nullopt;
 
-    events_.emit(CombatEndedEvent{bf_id, combat_winner});
+    // "No Result" (CR 468.3.d) is an empty winner, not PlayerId::None:
+    // a None winner would reach every "when you win a combat" legend.
+    std::optional<PlayerId> result;
+    if (combat_winner != PlayerId::None) result = combat_winner;
+    events_.emit(CombatEndedEvent{bf_id, result});
 
-    // Establish control (CR 461.5)
-    if (combat_winner != PlayerId::None) {
+    // Establish control (CR 468.5): whoever has units remaining, won or not.
+    if (holder != PlayerId::None) {
         auto old_controller = bf.controller;
-        bf.controller = combat_winner;
-        events_.emit(ControlChangedEvent{bf_id, old_controller, combat_winner});
+        bf.controller = holder;
+        events_.emit(ControlChangedEvent{bf_id, old_controller, holder});
         // CR 468.5 / 471.1: a defender who wins already controlled it — no Conquer.
-        if (!old_controller.has_value() || *old_controller != combat_winner)
-            scoreConquer(combat_winner, bf_id);
+        if (!old_controller.has_value() || *old_controller != holder)
+            scoreConquer(holder, bf_id);
     } else if (att_remaining.empty() && def_remaining.empty()) {
         bf.controller = std::nullopt;
     }

@@ -308,10 +308,8 @@ void ReplayWriter::recordPhaseSeam(const GameState& state,
        << " P2=" << state.players[1].score;
     snap.turn_info = ti.str();
 
-    if (new_phase != TurnPhase::Mulligan) {
-        snap.board_ascii = renderer.render(state);
-        snap.board_json = boardJson(state, nullptr);
-    }
+    if (new_phase != TurnPhase::Mulligan) snap.board_ascii = renderer.render(state);
+    snap.board_json = boardJson(state, nullptr);
 
     std::ostringstream dec;
     dec << "  ── Phase transition ──\n";
@@ -354,14 +352,15 @@ void ReplayWriter::recordDecision(const GameState& state,
        << " P2=" << state.players[1].score;
     snap.turn_info = ti.str();
 
-    // Board ASCII (only for non-mulligan)
-    if (state.turn.phase != TurnPhase::Mulligan) {
-        snap.board_ascii = renderer.render(state);
-        snap.board_json = boardJson(state, &chosen_action);
-    }
+    // Board ASCII (only for non-mulligan); the picture board also shows the
+    // opening hands while they are mulliganed.
+    if (state.turn.phase != TurnPhase::Mulligan) snap.board_ascii = renderer.render(state);
+    snap.board_json = boardJson(state, &chosen_action);
 
-    // Decision text
-    snap.decision_text = renderer.renderDecision(state, legal_actions, chosen_action);
+    // Decision text, one option per line: the panel wraps them to its width.
+    StateRenderer listing = renderer;
+    listing.max_width = 0;
+    snap.decision_text = listing.renderDecision(state, legal_actions, chosen_action);
 
     // Pre-game trace (anything emitted before the very first decision —
     // mulligan setup, opening hand, etc.) lives on snapshot 0 since there
@@ -438,22 +437,29 @@ body {
     background: #1a1a2e; color: #e0e0e0;
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
     font-size: 13px; overflow: hidden; height: 100vh;
+    display: flex; flex-direction: column;
 }
+/* The header and turn bar keep to one line each (the full game header is
+   the title's tooltip) so #main gets the rest of the window. */
 #header {
-    background: #16213e; padding: 8px 16px; border-bottom: 2px solid #0f3460;
-    display: flex; justify-content: space-between; align-items: center;
+    flex: none; background: #16213e; padding: 6px 16px; border-bottom: 2px solid #0f3460;
+    display: flex; justify-content: space-between; align-items: center; gap: 16px;
 }
-#header h1 { font-size: 16px; color: #e94560; }
-#nav { display: flex; gap: 8px; align-items: center; }
+#header h1 {
+    font-size: 14px; color: #e94560; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#nav { flex: none; display: flex; gap: 8px; align-items: center; }
 #nav button {
-    background: #0f3460; color: #e0e0e0; border: 1px solid #e94560;
+    background: #0f3460; color: #e0e0e0; border: 1px solid #e94560; white-space: nowrap;
     padding: 4px 12px; cursor: pointer; font-family: inherit; font-size: 12px;
 }
 #nav button:hover { background: #e94560; }
-#counter { color: #a0a0a0; font-size: 13px; min-width: 120px; text-align: center; }
+#counter { color: #a0a0a0; font-size: 12px; min-width: 120px; text-align: center; white-space: nowrap; }
 #turn-info {
-    background: #0f3460; padding: 6px 16px; font-size: 13px;
+    flex: none; background: #0f3460; padding: 5px 16px; font-size: 13px;
     color: #e94560; font-weight: bold; border-bottom: 1px solid #333;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 /* Phase-seam visual treatment — distinct from decision snapshots so a
    reader scrubbing through with arrow keys can spot phase boundaries
@@ -468,7 +474,7 @@ body.seam #decision-panel {
     border-bottom: 2px solid #ffd166;
 }
 body.seam #decision-panel pre { color: #ffd166; }
-#main { display: flex; height: calc(100vh - 80px); }
+#main { display: flex; flex: 1; min-height: 0; }
 #board-panel {
     flex: 3; overflow-y: auto; padding: 8px; border-right: 2px solid #0f3460;
     min-width: 0;
@@ -494,7 +500,7 @@ body.seam #decision-panel pre { color: #ffd166; }
     margin-bottom: 8px; text-align: center; min-height: 1.4em;
 }
 #card-details-image {
-    max-width: 100%; max-height: calc(100vh - 200px);
+    flex: 0 1 auto; min-height: 0; max-width: 100%;
     object-fit: contain; border: 1px solid #0f3460;
     background: #16213e;
     display: none;  /* hidden until first click */
@@ -531,6 +537,8 @@ body.dragging-pane-v { cursor: row-resize; user-select: none; }
 pre {
     white-space: pre; font-family: inherit; font-size: 12px; line-height: 1.4;
 }
+/* Decision and trace text wrap to the panel instead of scrolling sideways. */
+#decision-panel pre, #trace-panel pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 #board-panel pre { color: #c8d6e5; }
 /* Picture view of the board (default; T or the toggle switches to the
    text board). Cards are the official images, thumbnailed by the CDN;
@@ -1031,20 +1039,30 @@ function chainRow(b) {
         b.chain.map(o => cardHtml(o, { w: 50, ctrl: o.ctrl })).join('') + '</div></div>';
 }
 
+// Cards follow the board panel's width, then shrink until the board fits
+// its height (down to 0.55; below that the panel scrolls).
 function renderPictureBoard(s) {
     const el = document.getElementById('vboard');
-    SCALE = Math.max(0.8, Math.min(2, el.clientWidth / 720));
-    el.style.setProperty('--k', SCALE);
-    PILES = {};
+    const panel = document.getElementById('board-panel');
     const b = s.b;
+    PILES = {};
     if (!b) {
-        el.innerHTML = '<div class="empty-note">No board yet (mulligan). The decision panel shows the choice.</div>';
+        el.innerHTML = '<div class="empty-note">No board yet. The decision panel shows the choice.</div>';
         return;
     }
-    let h = '';
-    if (b.over) h += '<div class="gameover">GAME OVER — ' + esc(b.over) + '</div>';
-    h += playerStrip(b, 0) + baseRow(b, 0) + chainRow(b) + battlefieldsRow(b) + baseRow(b, 1) + playerStrip(b, 1);
-    el.innerHTML = h;
+    const avail = panel.getBoundingClientRect().bottom - el.getBoundingClientRect().top - 8;
+    SCALE = Math.max(0.8, Math.min(2, el.clientWidth / 720));
+    for (let pass = 0; pass < 4; pass++) {
+        el.style.setProperty('--k', SCALE);
+        PILES = {};
+        let h = '';
+        if (b.over) h += '<div class="gameover">GAME OVER — ' + esc(b.over) + '</div>';
+        h += playerStrip(b, 0) + baseRow(b, 0) + chainRow(b) + battlefieldsRow(b) + baseRow(b, 1) + playerStrip(b, 1);
+        el.innerHTML = h;
+        const need = el.scrollHeight;
+        if (need <= avail || SCALE <= 0.55) break;
+        SCALE = Math.max(0.55, SCALE * avail / need);
+    }
 }
 
 function setView(view) {
@@ -1258,6 +1276,7 @@ document.addEventListener('keydown', function(e) {
 document.getElementById('title').textContent =
     'Riftbound Replay — ' + HEADER + '  [engine ' + ENGINE_VERSION +
     ', built ' + ENGINE_BUILD + ']';
+document.getElementById('title').title = document.getElementById('title').textContent;
 show(0);
 </script>
 </body>

@@ -189,4 +189,60 @@ TEST_F(TriggerEventTest, RevealedFromHand_DoesNotFireNocturne) {
     EXPECT_EQ(chainSize(), before);
 }
 
+// ── "When you win a combat" legends (Glorious Executioner 552) fire only for
+//    the player who won (CR 468.3.a); "No Result" (468.3.d) fires nobody's. ──
+class CombatResultTest : public TriggerEventTest {
+protected:
+    void giveLegend(PlayerId p, CardDefId def_id) {
+        auto id = state.createObject();
+        auto& obj = state.getObject(id);
+        obj.owner = obj.controller = p;
+        obj.card_def_id = def_id;
+        obj.card_type = CardType::Legend;
+        obj.zone = ZoneType::LegendZone;
+        obj.name = card_db.get(def_id).name;
+        state.player(p).legend_zone = id;
+    }
+};
+
+TEST_F(CombatResultTest, NoResultFiresNoWinCombatLegend) {
+    giveLegend(P1, 552);
+    giveLegend(P2, 552);
+    ChainManager cm(state, events, card_db);
+    TriggerManager tm(state, events, card_db, cm, card_registry);
+    tm.subscribe();
+    events.emit(CombatEndedEvent{0, std::nullopt});
+    events.emit(CombatEndedEvent{0, PlayerId::None});
+    EXPECT_EQ(chainSize(), 0u);
+}
+
+TEST_F(CombatResultTest, WinnerFiresOnlyTheirLegend) {
+    giveLegend(P1, 552);
+    giveLegend(P2, 552);
+    addUnit(P2, kInvalidId, 3, 0);
+    ChainManager cm(state, events, card_db);
+    TriggerManager tm(state, events, card_db, cm, card_registry);
+    tm.subscribe();
+    events.emit(CombatEndedEvent{0, P2});
+    ASSERT_EQ(chainSize(), 1u);
+    EXPECT_EQ(state.chain.items[0].controller, P2);
+}
+
+// ── Overzealous Fan (449): "When I defend, you may kill me to move an
+//    attacking unit to its base." The attacker goes to its base, not to hand.
+TEST_F(TriggerEventTest, OverzealousFanMovesTheAttackerToItsBase) {
+    auto fan = addUnit(P1, 449, 2, 0);
+    auto attacker = addUnit(P2, kInvalidId, 3, 0);
+    state.getObject(attacker).combat_designation = CombatDesignation::Attacker;
+    state.getObject(fan).card_counters["__defend_attacker_id"] = static_cast<int>(attacker);
+    EffectExecutor exec(state, events, card_db);
+    driveResumableTrigger(449, P1, fan,
+        [](const std::vector<Intent>& legal) { return legal.back(); },   // yes
+        exec, TriggerType::WhenIDefend);
+    EXPECT_TRUE(inTrash(P1, fan));
+    EXPECT_FALSE(inHand(P2, attacker));
+    ASSERT_TRUE(state.getObject(attacker).location.has_value());
+    EXPECT_EQ(*state.getObject(attacker).location, LocationId{BaseLocation{P2}});
+}
+
 }  // namespace
