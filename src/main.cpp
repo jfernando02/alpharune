@@ -185,7 +185,23 @@ struct AgentSpec {
     std::string model;     // heuristic / ismcts-native: learned value model (JSON)
     // heuristic only: EvalWeights overrides, e.g. "hand=3" (see setWeight)
     std::vector<std::pair<std::string, double>> weights;
+    // heuristic only: tree search options, e.g. "tree=1" (see applyTreeOption)
+    std::vector<std::pair<std::string, double>> tree;
 };
+
+/// HeuristicConfig's tree search options by their spec keys (as the tools'
+/// specs, tools/tool_common.h); false for any other key.
+bool applyTreeOption(HeuristicConfig& c, const std::string& key, double v) {
+    if (key == "tree") c.tree = v != 0;
+    else if (key == "tree_sims") c.tree_sims = static_cast<int>(v);
+    else if (key == "tree_per_action") c.tree_sims_per_action = static_cast<int>(v);
+    else if (key == "tree_c") c.tree_c = v;
+    else if (key == "tree_temp") c.tree_temperature = v;
+    else if (key == "tree_width") c.tree_width = static_cast<int>(v);
+    else if (key == "tree_reuse") c.tree_min_reuse = static_cast<int>(v);
+    else return false;
+    return true;
+}
 
 AgentSpec parseAgentSpec(const std::string& s) {
     AgentSpec out;
@@ -224,6 +240,12 @@ AgentSpec parseAgentSpec(const std::string& s) {
                 else if (key == "cut") out.cut = std::stoi(val);
                 else if (key == "depth") out.depth = std::stoi(val);
                 else if (key == "model") out.model = val;
+                else if (out.kind == "heuristic" && key.rfind("tree", 0) == 0) {
+                    HeuristicConfig probe;
+                    if (!applyTreeOption(probe, key, std::stod(val)))
+                        throw std::runtime_error("Unknown heuristic option '" + key + "'.");
+                    out.tree.emplace_back(key, std::stod(val));
+                }
                 else if (out.kind == "heuristic" || out.kind == "ismcts-native") {
                     EvalWeights probe;
                     if (!setWeight(probe, key, std::stod(val)))
@@ -289,6 +311,7 @@ std::unique_ptr<AgentInterface> buildAgent(const AgentSpec& spec,
         if (spec.guesses > 0) config.guesses = spec.guesses;
         if (spec.turns_ahead > 0) config.turns_ahead = spec.turns_ahead;
         for (const auto& [name, value] : spec.weights) setWeight(config.weights, name, value);
+        for (const auto& [name, value] : spec.tree) applyTreeOption(config, name, value);
         if (!spec.model.empty()) config.model = loadModelCached(spec.model);
         if (!spec.policy.empty()) config.policy = loadPolicyCached(spec.policy);
         config.seed = derived_seed | 1;

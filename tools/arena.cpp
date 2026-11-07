@@ -28,6 +28,7 @@
 ///     searched decisions and those answered without search because its
 ///     turn's budget was spent;
 ///   time_limited: games finished by ScriptedAgent after --game-seconds.
+/// Before it, stderr gets each agent's search counts (tools::SearchCounts).
 
 #include "tool_common.h"
 
@@ -162,6 +163,7 @@ int main(int argc, char** argv) {
     std::mutex mutex;  // stderr, and the totals below
     double a_think = 0.0, b_think = 0.0;
     long a_searched = 0, b_searched = 0, a_fallbacks = 0, b_fallbacks = 0;
+    tools::SearchCounts a_counts, b_counts;
     int time_limited = 0;
     const auto start = std::chrono::steady_clock::now();
 
@@ -211,6 +213,8 @@ int main(int argc, char** argv) {
                 b_searched += cb.searched;
                 a_fallbacks += ca.fallbacks;
                 b_fallbacks += cb.fallbacks;
+                a_counts.add(ca);
+                b_counts.add(cb);
                 if (clock.tripped) ++time_limited;
                 const int done = ++games_done;
                 if (done % 50 == 0) {
@@ -234,6 +238,7 @@ int main(int argc, char** argv) {
     const int games = pairs * 2;
     const double score = (a_wins.load() + 0.5 * draws.load()) / games;
     if (errors.load() > 0) std::cerr << errors.load() << " games threw (scored as draws)\n";
+    std::cerr << "A: " << a_counts.describe() << "\nB: " << b_counts.describe() << "\n";
     std::cout << std::fixed << std::setprecision(4)
               << "{\"games\": " << games << ", \"a_wins\": " << a_wins.load()
               << ", \"b_wins\": " << b_wins.load() << ", \"draws\": " << draws.load()

@@ -1,6 +1,7 @@
 #include "heuristic_agent.h"
 
 #include "determinize.h"
+#include "heuristic_tree.h"
 
 #include "core/events.h"
 #include "engine/game_engine.h"
@@ -20,6 +21,8 @@ HeuristicAgent::HeuristicAgent(const CardDB& card_db,
       config_(config),
       scripted_(card_db),
       rng_(config.seed == 0 ? std::random_device{}() : config.seed) {}
+
+HeuristicAgent::~HeuristicAgent() = default;
 
 namespace {
 
@@ -132,7 +135,11 @@ Intent HeuristicAgent::selectAction(const GameState& state,
             ++stats_.abandoned_plans;
         }
     }
-    if (!searchable) return defaultAction(state, legal);
+    if (!searchable) {
+        if (config_.tree)
+            if (auto answer = treeAnswer(state, legal)) return *answer;
+        return defaultAction(state, legal);
+    }
     ++stats_.lookahead_decisions;
     if (kind == SearchKind::Showdown) ++stats_.showdown_searches;
     if (kind == SearchKind::Chain) ++stats_.chain_searches;
@@ -157,6 +164,7 @@ Intent HeuristicAgent::selectAction(const GameState& state,
     }
 
     const PlayerId me = legal[0].player;
+    if (config_.tree && kind != SearchKind::Setup) return treeSearch(state, legal, me);
 
     // The first guess, drawn before the budget check so the plans can be
     // found in it (follow-ups are about public objects: runes, targets).

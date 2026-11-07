@@ -171,6 +171,13 @@ inline ToolAgentSpec parseToolAgent(const std::string& spec) {
         else if (key == "policy" && h) out.heuristic.policy = PolicyModel::load(val);
         else if (key == "policy_rollouts" && h) out.heuristic.policy_rollouts = std::stoi(val) != 0;
         else if (key == "policy_offsearch" && h) out.heuristic.policy_offsearch = std::stoi(val) != 0;
+        else if (key == "tree" && h) out.heuristic.tree = std::stoi(val) != 0;
+        else if (key == "tree_sims" && h) out.heuristic.tree_sims = std::stoi(val);
+        else if (key == "tree_per_action" && h) out.heuristic.tree_sims_per_action = std::stoi(val);
+        else if (key == "tree_c" && h) out.heuristic.tree_c = std::stod(val);
+        else if (key == "tree_temp" && h) out.heuristic.tree_temperature = std::stod(val);
+        else if (key == "tree_width" && h) out.heuristic.tree_width = std::stoi(val);
+        else if (key == "tree_reuse" && h) out.heuristic.tree_min_reuse = std::stoi(val);
         else if (key == "sims" && !h) out.ismcts.max_simulations = std::stoi(val);
         else if (key == "uct_c" && !h) out.ismcts.uct_c = std::stod(val);
         else if (!setWeight(h ? out.heuristic.weights : out.ismcts.weights, key, std::stod(val)))
@@ -201,12 +208,47 @@ inline std::unique_ptr<AgentInterface> makeToolAgent(const ToolAgentSpec& spec, 
 
 /// Searched decisions and budget fallbacks of a look-ahead agent (zeros for
 /// the others), for the tools' reports.
-struct SearchCounts { long searched = 0, fallbacks = 0; };
+struct SearchCounts {
+    long searched = 0, fallbacks = 0;
+    // HeuristicAgent only: simulations and their decisions, and the tree
+    // search's (HeuristicConfig::tree) searches, in-tree decisions, answers
+    // from the tree and sum of the roots' largest priors.
+    long sims = 0, sim_steps = 0, tree_searches = 0, tree_steps = 0, tree_answers = 0;
+    double root_max_prior = 0.0;
+    void add(const SearchCounts& o) {
+        searched += o.searched; fallbacks += o.fallbacks; sims += o.sims;
+        sim_steps += o.sim_steps; tree_searches += o.tree_searches; tree_steps += o.tree_steps;
+        tree_answers += o.tree_answers; root_max_prior += o.root_max_prior;
+    }
+    /// One line for a report, e.g. "1200 sims (14.2 steps), tree: ...".
+    std::string describe() const {
+        std::ostringstream out;
+        out << searched << " searched, " << fallbacks << " fallbacks, " << sims << " sims ("
+            << (sims ? static_cast<double>(sim_steps) / sims : 0.0) << " steps each)";
+        if (tree_searches > 0)
+            out << ", " << tree_searches << " tree searches (" << static_cast<double>(sims) / tree_searches
+                << " sims, " << (sims ? static_cast<double>(tree_steps) / sims : 0.0)
+                << " tree steps each, root max prior " << root_max_prior / tree_searches << "), "
+                << tree_answers << " answers from the tree";
+        return out.str();
+    }
+};
 inline SearchCounts searchCounts(const AgentInterface& agent) {
     if (const auto* w = dynamic_cast<const OffSearchRandomAgent*>(&agent))
         return searchCounts(w->inner());
-    if (const auto* h = dynamic_cast<const HeuristicAgent*>(&agent))
-        return {h->stats().lookahead_decisions, h->stats().budget_fallbacks};
+    if (const auto* h = dynamic_cast<const HeuristicAgent*>(&agent)) {
+        const auto& s = h->stats();
+        SearchCounts c;
+        c.searched = s.lookahead_decisions;
+        c.fallbacks = s.budget_fallbacks;
+        c.sims = s.simulations;
+        c.sim_steps = s.rollout_steps;
+        c.tree_searches = s.tree_searches;
+        c.tree_steps = s.tree_steps;
+        c.tree_answers = s.tree_answers;
+        c.root_max_prior = s.root_max_prior;
+        return c;
+    }
     if (const auto* m = dynamic_cast<const IsmctsBot*>(&agent))
         return {m->stats().searched_decisions, m->stats().budget_fallbacks};
     return {};

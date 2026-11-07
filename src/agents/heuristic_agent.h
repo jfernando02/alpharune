@@ -27,6 +27,11 @@
 /// A learned policy (`HeuristicConfig::policy`, trained on this agent's own
 /// search results) can stand in for ScriptedAgent — in the simulations and
 /// for the unsearched decisions — at the decision kinds it covers.
+///
+/// With `HeuristicConfig::tree` the same decisions are searched with a tree
+/// instead (heuristic_tree.cpp), which spends its simulations where the
+/// policy and the results so far point and branches on both players'
+/// decisions inside the turn.
 
 #include "agent_interface.h"
 #include "evaluator.h"
@@ -111,6 +116,27 @@ struct HeuristicConfig {
     std::shared_ptr<const PolicyModel> policy;
     bool policy_rollouts = true;
     bool policy_offsearch = true;
+    // Search the Main / Showdown / Chain decisions with a tree instead of
+    // trying every plan `guesses` times (heuristic_tree.cpp). Each
+    // simulation draws a new guess of the hidden cards and walks down from
+    // the decision: at each node (any decision of either player with two or
+    // more options, keyed by what the searcher can see) it takes the option
+    // with the best value + tree_c * prior * sqrt(times available) /
+    // (1 + visits), PUCT as in AlphaZero, values min-max normalized over the
+    // tree as in MuZero, priors the policy's scores through a softmax at
+    // `tree_temperature`. At the first decision not yet in the tree the
+    // simulation plays on as in the flat search (the policy, both seats) to
+    // the end of the horizon turn and scores it with `model`. The decision
+    // goes to the most visited option; the agent's later decisions in the
+    // same turn (follow-ups, chain answers) come from the tree when its node
+    // has `tree_min_reuse` visits, and the tree is kept until the turn ends.
+    bool tree = false;
+    int tree_sims = 200;            // simulations per searched decision, at most
+    int tree_sims_per_action = 8;   // ... and at most this many per legal action
+    double tree_c = 1.25;
+    double tree_temperature = 1.0;
+    int tree_width = 8;             // options per node below the root (best priors)
+    int tree_min_reuse = 4;
     uint64_t seed = 1;              // 0 picks a random seed
 };
 
@@ -136,10 +162,17 @@ public:
         // [Reaction] card in hand.
         int end_turn_unspent = 0;
         int end_turn_unspent_holding_instant = 0;
+        // Tree search (HeuristicConfig::tree).
+        int tree_searches = 0;
+        long tree_steps = 0;         // decisions taken inside the tree, all simulations
+        int tree_answers = 0;        // unsearched decisions answered from the tree
+        int max_tree_nodes = 0;
+        double root_max_prior = 0;   // sum over tree searches of the root's largest prior
     };
 
     HeuristicAgent(const CardDB& card_db, const CardRegistry& card_registry,
                    HeuristicConfig config = {});
+    ~HeuristicAgent() override;
 
     Intent selectAction(const GameState& state,
                         const std::vector<Intent>& legal_actions) override;
@@ -218,6 +251,22 @@ private:
     // For each step of plan_: the score of each option searched there.
     std::vector<std::vector<std::pair<Intent, double>>> plan_scores_;
     SearchObserver observer_;
+
+    // Tree search (heuristic_tree.cpp).
+    struct Tree;
+    std::unique_ptr<Tree> tree_;
+    Intent treeSearch(const GameState& state, const std::vector<Intent>& legal, PlayerId me);
+    /// The tree's answer to an unsearched decision of the agent's, if its
+    /// node there was visited enough.
+    std::optional<Intent> treeAnswer(const GameState& state, const std::vector<Intent>& legal);
+    /// One simulation from `state`; false when it could not run.
+    bool treeSimulation(const GameState& state, PlayerId me, uint64_t root_key,
+                        const std::vector<Intent>& root_legal,
+                        const std::vector<double>& root_priors);
+    uint64_t treeKey(const GameState& state, const std::vector<Intent>& legal, PlayerId me) const;
+    std::vector<double> treePriors(const GameState& state, const std::vector<Intent>& legal) const;
+    /// The searcher's value of a simulation's end state, in [0, 1].
+    double leafValue(const GameState& end, PlayerId me) const;
 };
 
 } // namespace riftbound

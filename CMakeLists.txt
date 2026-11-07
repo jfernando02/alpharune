@@ -345,6 +345,7 @@ add_library(riftbound_core
     src/agents/evaluator.cpp
     src/agents/determinize.cpp
     src/agents/heuristic_agent.cpp
+    src/agents/heuristic_tree.cpp
     src/agents/ismcts_bot.cpp
     src/agents/gbt_evaluator.cpp
     src/agents/policy_model.cpp

@@ -439,6 +439,72 @@ TEST_F(HeuristicAgentTest, PlansAndFollowsFollowups) {
     EXPECT_LT(abandoned, followed);
 }
 
+// ─── Tree search ─────────────────────────────────────────────────────────────
+
+TEST_F(HeuristicAgentTest, TreeReturnsALegalActionAndIsDeterministic) {
+    HeuristicConfig config;
+    config.tree = true;
+    config.tree_sims = 24;
+    config.seed = 123;
+    for (const auto& [state, legal] : cleanPoints(23, 8)) {
+        HeuristicAgent a(card_db, card_registry, config);
+        HeuristicAgent b(card_db, card_registry, config);
+        const Intent pick = a.selectAction(state, legal);
+        EXPECT_NE(std::find(legal.begin(), legal.end(), pick), legal.end());
+        EXPECT_EQ(b.selectAction(state, legal), pick);
+        EXPECT_EQ(a.stats().tree_searches, 1);
+        EXPECT_EQ(a.stats().failed_simulations, 0);
+        const int options = static_cast<int>(legal.size()) -
+            static_cast<int>(std::count_if(legal.begin(), legal.end(), [](const Intent& i) {
+                return i.type == IntentType::Concede;
+            }));
+        EXPECT_EQ(a.stats().simulations, std::min(24, config.tree_sims_per_action * options));
+        EXPECT_GE(a.stats().tree_steps, a.stats().simulations);  // the root, at least
+    }
+}
+
+// The turn's budget stops a tree search between simulations.
+TEST_F(HeuristicAgentTest, TreeStopsAtTheTurnBudget) {
+    HeuristicConfig config;
+    config.tree = true;
+    config.max_rollout_steps_per_turn = 1;  // spent by the first simulation
+    for (const auto& [state, legal] : cleanPoints(23, 4)) {
+        HeuristicAgent agent(card_db, card_registry, config);
+        const Intent pick = agent.selectAction(state, legal);
+        EXPECT_NE(std::find(legal.begin(), legal.end(), pick), legal.end());
+        EXPECT_EQ(agent.stats().simulations, 1);
+        EXPECT_EQ(agent.stats().budget_fallbacks, 0);
+    }
+}
+
+// Whole games: the tree search plays legal moves, every simulation runs, and
+// some of the agent's unsearched decisions (follow-ups, chain answers) come
+// from the tree its searches grew.
+TEST_F(HeuristicAgentTest, TreeSearchPlaysWholeGamesAndBeatsRandom) {
+    HeuristicConfig config;
+    config.tree = true;
+    config.tree_sims = 32;
+    int wins = 0, answers = 0;
+    const int games = 6;
+    for (int g = 0; g < games; ++g) {
+        EventBus bus;
+        GameEngine engine(card_db, bus, card_registry);
+        config.seed = 1100 + g;
+        HeuristicAgent tree(card_db, card_registry, config);
+        RandomAgent random(2100 + g);
+        const bool tree_first = g % 2 == 0;
+        const GameResult r = tree_first
+            ? engine.runGame(deck1, deck2, tree, random, 3100 + g)
+            : engine.runGame(deck1, deck2, random, tree, 3100 + g);
+        if (r.winner == (tree_first ? PlayerId::Player1 : PlayerId::Player2)) ++wins;
+        EXPECT_EQ(tree.stats().failed_simulations, 0) << "game " << g;
+        EXPECT_GT(tree.stats().tree_searches, 0) << "game " << g;
+        answers += tree.stats().tree_answers;
+    }
+    EXPECT_GE(wins, games - 1) << wins << "/" << games;
+    EXPECT_GT(answers, 0);
+}
+
 TEST_F(HeuristicAgentTest, BeatsRandom) {
     HeuristicConfig config;
     config.guesses = 2;
