@@ -23,6 +23,26 @@ using namespace riftbound;
 
 namespace {
 
+/// Where a chain priority decision was asked: the phase, the step it ran in,
+/// and any combat or showdown.
+std::string chainContext(const GameState& s) {
+    static const char* steps[] = {"none",          "main_action", "main_action_cleaned",
+                                  "showdown_action", "beginning",  "scoring",
+                                  "staged_round",  "combat_start", "ending",
+                                  "expiration"};
+    std::string out = std::string(toString(s.turn.phase)) + " step=" +
+                      steps[static_cast<int>(s.turn.chain_step)];
+    for (const auto& bf : s.battlefields) {
+        if (bf.combat_in_progress)
+            out += " combat=" + std::to_string(static_cast<int>(bf.combat_phase));
+        else if (bf.showdown_in_progress)
+            out += " showdown";
+    }
+    if (s.chain.resuming.has_value()) out += " resolving";
+    if (s.chain.hasPending()) out += " pending";
+    return out;
+}
+
 /// tools::decisionKind with a description (offsearch=random:<kind> takes the kind).
 std::string kindOf(const GameState& s, const std::vector<Intent>& legal) {
     static const std::map<std::string, std::string> describe = {
@@ -41,6 +61,7 @@ std::string kindOf(const GameState& s, const std::vector<Intent>& legal) {
         {"choice", "choice: other (play location, optional cost, ...)"},
     };
     const std::string kind = tools::decisionKind(s, legal);
+    if (kind == "chain" || kind == "chain_mid") return kind + "  " + chainContext(s);
     const auto it = describe.find(kind);
     return kind + "  " + (it != describe.end() ? it->second : "");
 }

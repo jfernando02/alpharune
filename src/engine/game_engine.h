@@ -92,8 +92,9 @@ bool isCleanShowdownPoint(const GameState& state);
 /// the priority holder (`ChainState::awaiting_priority`), every item is
 /// finalized and nothing is resolving or being paid for, and the chain runs
 /// in a step the engine knows how to finish (`TurnState::chain_step`: a
-/// main-phase action, or a Showdown focus action at a battlefield still in
-/// its Showdown). The resumed engine finishes the chain, then that step.
+/// main-phase or Showdown action, the start of a combat, the end of a round
+/// of staged combats, the beginning / scoring / ending / expiration step).
+/// The resumed engine finishes the chain, then that step and the turn.
 bool isCleanChainPoint(const GameState& state);
 
 /// True when `state` is a setup decision `resumeFromSnapshot` can re-enter:
@@ -339,6 +340,9 @@ private:
     void awakenPhase();
     void beginningStep();
     void scoringStep();
+    /// The Holds of scoringStep from battlefield index `first` on, then its
+    /// Cleanup.
+    void scoreHolds(size_t first);
     void channelPhase();
     void drawPhase();
     void mainPhase();
@@ -371,6 +375,8 @@ private:
     /// pools, expire delayed abilities). Pulled out so expirationStep
     /// can loop the body per CR 317.2.f.1.
     void doExpirationBody();
+    /// expirationStep's passes (CR 317.2.f.1) from pass `first` on.
+    void runExpirationPasses(int first);
 
     // ── Main phase, structured for step-machine resumability (C-1 commit 5) ──
     //
@@ -547,6 +553,9 @@ private:
     /// `resume`: re-enter at the pending priority decision of a snapshot
     /// (isCleanChainPoint) instead of finalizing first.
     void runChain(bool resume = false);
+    /// runChain with TurnState::chain_step (and chain_step_bf) set to the
+    /// step it runs in, so its priority decisions are resume points.
+    void runChainInStep(ChainStep step, std::optional<BattlefieldId> bf = std::nullopt);
     /// resumeFromSnapshot at a chain priority decision: finishes the chain,
     /// then the step it ran in (TurnState::chain_step).
     void resumeChain();
@@ -615,6 +624,9 @@ private:
     /// The end of a non-combat Showdown, after its loop (CR 348.2.a).
     void finishShowdown(BattlefieldId bf);
     void runCombat(BattlefieldId bf);
+    /// runCombat after its attack / defend triggers: the Showdown step, or
+    /// straight to resolution if one side has no units left.
+    void continueCombat(BattlefieldId bf);
     /// Combat after its Showdown step: damage if both sides remain, then
     /// resolution (CR 460-461).
     void finishCombatAfterShowdown(BattlefieldId bf);
@@ -622,6 +634,10 @@ private:
     /// one round of advanceMainPhase does. Returns whether any ran; stops
     /// when the game ends.
     bool runStagedBattlefields(size_t first);
+    /// The rest of a staged round after battlefield index `i`: the later
+    /// battlefields, then the round's Cleanup and chain.
+    void finishStagedRound(size_t i);
+    size_t battlefieldIndex(BattlefieldId bf) const;
     /// resumeFromSnapshot at a Showdown focus decision of `bf` (focus_holder
     /// to decide): finishes that Showdown / Combat and the rest of its
     /// staged round, then the Cleanup and chain that follow it in

@@ -237,22 +237,39 @@ bool isCleanChainPoint(const GameState& state) {
         state.chain.resuming.has_value() ||
         state.chain.hasPending() ||
         !state.turn.priority_holder.has_value() ||
-        state.turn.phase != TurnPhase::MainPhase ||
         state.cost_cursor.has_value())
         return false;
+    const TurnPhase phase = state.turn.phase;
+    auto step_bf = [&]() -> const BattlefieldState* {
+        if (!state.turn.chain_step_bf.has_value()) return nullptr;
+        for (const auto& bf : state.battlefields)
+            if (bf.id == *state.turn.chain_step_bf) return &bf;
+        return nullptr;
+    };
     switch (state.turn.chain_step) {
         case ChainStep::MainAction:
         case ChainStep::MainActionCleanedUp:
-            return true;
-        case ChainStep::ShowdownAction:
-            if (!state.turn.chain_step_bf.has_value() || !state.turn.focus_holder.has_value())
-                return false;
-            for (const auto& bf : state.battlefields) {
-                if (bf.id != *state.turn.chain_step_bf) continue;
-                return bf.showdown_in_progress ||
-                       (bf.combat_in_progress && bf.combat_phase == CombatPhase::ShowdownStep);
-            }
-            return false;
+        case ChainStep::StagedRound:
+            return phase == TurnPhase::MainPhase;
+        case ChainStep::ShowdownAction: {
+            const BattlefieldState* bf = step_bf();
+            return phase == TurnPhase::MainPhase && bf && state.turn.focus_holder.has_value() &&
+                   (bf->showdown_in_progress ||
+                    (bf->combat_in_progress && bf->combat_phase == CombatPhase::ShowdownStep));
+        }
+        case ChainStep::CombatStart: {
+            const BattlefieldState* bf = step_bf();
+            return phase == TurnPhase::MainPhase && bf && bf->combat_in_progress &&
+                   bf->attacker.has_value() && bf->defender.has_value();
+        }
+        case ChainStep::BeginningStep:
+            return phase == TurnPhase::BeginningStep;
+        case ChainStep::ScoringStep:
+            return phase == TurnPhase::ScoringStep && step_bf();
+        case ChainStep::EndingStep:
+            return phase == TurnPhase::EndingStep;
+        case ChainStep::ExpirationStep:
+            return phase == TurnPhase::ExpirationStep;
         case ChainStep::None:
             break;
     }
@@ -741,6 +758,25 @@ void GameEngine::runTurnFromPhase(PlayerId player, TurnPhase resume_at) {
                      std::to_string(state_.players[0].score) + " P2=" +
                      std::to_string(state_.players[1].score));
 
+    // A snapshot taken at a chain priority decision outside the main phase
+    // first finishes that chain and the step it ran in; the turn then goes on
+    // from the next step.
+    if (resume_at != TurnPhase::MainPhase && state_.chain.awaiting_priority) {
+        resumeChain();
+        if (state_.game_over) return;
+        switch (resume_at) {
+            case TurnPhase::BeginningStep: resume_at = TurnPhase::ScoringStep; break;
+            case TurnPhase::ScoringStep:   resume_at = TurnPhase::ChannelPhase; break;
+            case TurnPhase::EndingStep:    resume_at = TurnPhase::ExpirationStep; break;
+            case TurnPhase::ExpirationStep:
+                state_.player(player).is_first_turn = false;
+                return;
+            default:
+                throw std::logic_error("runTurnFromPhase: a chain to resume in phase " +
+                                       std::string(toString(resume_at)));
+        }
+    }
+
     switch (resume_at) {
         case TurnPhase::AwakenPhase:
             awakenPhase();
@@ -790,14 +826,19 @@ void GameEngine::runTurnFromPhase(PlayerId player, TurnPhase resume_at) {
             // through to endingStep as normal. A snapshot taken at a
             // Showdown focus decision first finishes that Showdown; one
             // taken at a chain priority decision, the chain and its step.
-            if (state_.chain.awaiting_priority) {
-                resumeChain();
-                if (state_.game_over) return;
-            } else if (state_.turn.awaiting_focus_at.has_value()) {
-                resumeShowdown(*state_.turn.awaiting_focus_at);
-                if (state_.game_over) return;
+            // Entered from an earlier step, the main phase starts as usual.
+            if (resume_at != TurnPhase::MainPhase) {
+                mainPhase();
+            } else {
+                if (state_.chain.awaiting_priority) {
+                    resumeChain();
+                    if (state_.game_over) return;
+                } else if (state_.turn.awaiting_focus_at.has_value()) {
+                    resumeShowdown(*state_.turn.awaiting_focus_at);
+                    if (state_.game_over) return;
+                }
+                mainPhaseLoop();
             }
-            mainPhaseLoop();
             if (state_.game_over) return;
             [[fallthrough]];
         case TurnPhase::EndingStep:
@@ -879,7 +920,7 @@ void GameEngine::beginningStep() {
                                     state_.turn.turn_player});
 
     // Process "At the start of your Beginning Phase" triggers
-    if (chain_manager_->chainExists()) runChain();
+    if (chain_manager_->chainExists()) runChainInStep(ChainStep::BeginningStep);
 
     // CR 319: a Cleanup follows these state changes, before the Scoring Step.
     // Without it a battlefield whose last unit just died ([Temporary], a
@@ -894,19 +935,33 @@ void GameEngine::scoringStep() {
     events_.emit(PhaseChangedEvent{old_phase, TurnPhase::ScoringStep,
                                     state_.turn.turn_player});
 
+    scoreHolds(0);
+}
+
+void GameEngine::scoreHolds(size_t first) {
     // Turn player Holds all battlefields they control (CR 315.2.b)
     auto player = state_.turn.turn_player;
-    for (auto& bf : state_.battlefields) {
-        if (bf.controller.has_value() && *bf.controller == player) {
-            scoreHold(player, bf.id);
+    for (size_t i = first; i < state_.battlefields.size(); ++i) {
+        const BattlefieldId bf_id = state_.battlefields[i].id;
+        const auto& controller = state_.battlefields[i].controller;
+        if (controller.has_value() && *controller == player) {
+            scoreHold(player, bf_id);
             if (state_.game_over) return;
             // Process hold/score triggers
-            if (chain_manager_->chainExists()) runChain();
+            if (chain_manager_->chainExists()) runChainInStep(ChainStep::ScoringStep, bf_id);
             if (state_.game_over) return;
         }
     }
 
     cleanup();
+}
+
+size_t GameEngine::battlefieldIndex(BattlefieldId bf_id) const {
+    size_t i = 0;
+    while (i < state_.battlefields.size() && state_.battlefields[i].id != bf_id) ++i;
+    if (i == state_.battlefields.size())
+        throw std::logic_error("no battlefield " + std::to_string(bf_id));
+    return i;
 }
 
 void GameEngine::channelPhase() {
@@ -1010,7 +1065,7 @@ GameEngine::MainPhaseAdvance GameEngine::advanceMainPhase(int& action_count) {
         if (!ran) break;
 
         cleanup();
-        if (chain_manager_->chainExists()) runChain();
+        if (chain_manager_->chainExists()) runChainInStep(ChainStep::StagedRound);
         if (state_.game_over) {
             adv.kind = MainPhaseAdvance::Kind::Done;
             return adv;
@@ -1054,10 +1109,7 @@ bool GameEngine::runStagedBattlefields(size_t first) {
 }
 
 void GameEngine::resumeShowdown(BattlefieldId bf_id) {
-    size_t i = 0;
-    while (i < state_.battlefields.size() && state_.battlefields[i].id != bf_id) ++i;
-    if (i == state_.battlefields.size())
-        throw std::logic_error("resumeShowdown: no battlefield " + std::to_string(bf_id));
+    const size_t i = battlefieldIndex(bf_id);
 
     // The rest of runStagedBattlefields' body for battlefield i, entered
     // inside the loop the snapshot was taken in.
@@ -1078,13 +1130,17 @@ void GameEngine::resumeShowdown(BattlefieldId bf_id) {
             state_.battlefields[i].combat_staged = false;
         }
     }
+    finishStagedRound(i);
+}
+
+void GameEngine::finishStagedRound(size_t i) {
     runStagedBattlefields(i + 1);
     if (state_.game_over) return;
 
     // The end of advanceMainPhase's round; mainPhaseLoop's next
     // advanceMainPhase goes on to the next round.
     cleanup();
-    if (chain_manager_->chainExists()) runChain();
+    if (chain_manager_->chainExists()) runChainInStep(ChainStep::StagedRound);
 }
 
 bool GameEngine::resolveMainPhaseDecision(const Intent& intent,
@@ -1116,21 +1172,62 @@ void GameEngine::finishMainAction() {
     state_.turn.chain_step = ChainStep::None;
 }
 
+void GameEngine::runChainInStep(ChainStep step, std::optional<BattlefieldId> bf) {
+    const ChainStep outer_step = state_.turn.chain_step;
+    const std::optional<BattlefieldId> outer_bf = state_.turn.chain_step_bf;
+    state_.turn.chain_step = step;
+    state_.turn.chain_step_bf = bf;
+    runChain();
+    state_.turn.chain_step = outer_step;
+    state_.turn.chain_step_bf = outer_bf;
+}
+
 void GameEngine::resumeChain() {
     const ChainStep step = state_.turn.chain_step;
     runChain(/*resume=*/true);
     if (state_.game_over) return;
-    if (step == ChainStep::ShowdownAction) {
-        // The rest of resolveShowdownDecision, then the Showdown loop with
-        // focus passed to the opponent of the player who acted.
-        cleanup();
-        state_.turn.chain_step = ChainStep::None;
-        const BattlefieldId bf_id = *state_.turn.chain_step_bf;
-        state_.turn.chain_step_bf.reset();
-        state_.turn.focus_holder = opponent(*state_.turn.focus_holder);
-        resumeShowdown(bf_id);
-    } else {
+    if (step == ChainStep::MainAction || step == ChainStep::MainActionCleanedUp) {
         finishMainAction();
+        return;
+    }
+    // The rest of the step the chain ran in, as the caller of runChainInStep
+    // (or resolveShowdownDecision) goes on after it.
+    const std::optional<BattlefieldId> bf_id = state_.turn.chain_step_bf;
+    state_.turn.chain_step = ChainStep::None;
+    state_.turn.chain_step_bf.reset();
+    switch (step) {
+        case ChainStep::ShowdownAction:
+            // The rest of resolveShowdownDecision, then the Showdown loop with
+            // focus passed to the opponent of the player who acted.
+            cleanup();
+            state_.turn.focus_holder = opponent(*state_.turn.focus_holder);
+            resumeShowdown(*bf_id);
+            break;
+        case ChainStep::BeginningStep:
+        case ChainStep::EndingStep:
+            cleanup();
+            break;
+        case ChainStep::ScoringStep:
+            scoreHolds(battlefieldIndex(*bf_id) + 1);
+            break;
+        case ChainStep::StagedRound:
+            break;  // mainPhaseLoop's next advanceMainPhase starts the next round
+        case ChainStep::CombatStart: {
+            // The rest of runCombat, then of the staged round it ran in.
+            continueCombat(*bf_id);
+            if (state_.game_over) return;
+            const size_t i = battlefieldIndex(*bf_id);
+            state_.battlefields[i].combat_staged = false;
+            finishStagedRound(i);
+            break;
+        }
+        case ChainStep::ExpirationStep:
+            if (chain_manager_->chainExists()) runExpirationPasses(1);
+            break;
+        case ChainStep::MainAction:
+        case ChainStep::MainActionCleanedUp:
+        case ChainStep::None:
+            break;
     }
 }
 
@@ -1184,7 +1281,7 @@ void GameEngine::endingStep() {
     }
 
     // Process "At the end of your turn" triggers (e.g., Dazzling Aurora)
-    if (chain_manager_->chainExists()) runChain();
+    if (chain_manager_->chainExists()) runChainInStep(ChainStep::EndingStep);
 
     // Cleanup AFTER the chain finishes — same pattern as the main-phase
     // action loop. The end-of-turn chain can damage units (Aurora plays
@@ -1228,11 +1325,15 @@ void GameEngine::expirationStep() {
     // pre-fix, expirationStep was a single pass and any triggers fired
     // by healAllUnits / clearStun / emptyRunePools would sit on the chain
     // unresolved or resolve without re-running expiration.
+    runExpirationPasses(0);
+}
+
+void GameEngine::runExpirationPasses(int first) {
     constexpr int kMaxExpirationPasses = 8;
-    for (int pass = 0; pass < kMaxExpirationPasses; ++pass) {
+    for (int pass = first; pass < kMaxExpirationPasses; ++pass) {
         doExpirationBody();
         if (!chain_manager_->chainExists()) break;
-        runChain();
+        runChainInStep(ChainStep::ExpirationStep);
         // If running the chain produced new chain items (cascading
         // triggers from expiration effects), keep looping. Otherwise
         // we're stable.
@@ -4111,8 +4212,14 @@ void GameEngine::runCombat(BattlefieldId bf_id) {
     // loop. Players still get full priority windows because
     // processFEPR handles Closed State priority passing internally.
     if (!state_.chain.items.empty()) {
-        runChain();
+        runChainInStep(ChainStep::CombatStart, bf_id);
     }
+    continueCombat(bf_id);
+}
+
+void GameEngine::continueCombat(BattlefieldId bf_id) {
+    // The chain may have added a battlefield, so look this one up again.
+    auto& bf = getBattlefield(bf_id);
 
     // Re-check combat viability AFTER triggers resolve — kills or
     // bounces in trigger resolution may have emptied one side.

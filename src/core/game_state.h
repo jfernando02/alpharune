@@ -396,7 +396,18 @@ struct BattlefieldState {
 // ─── Turn State ──────────────────────────────────────────────────────────────
 
 /// See TurnState::chain_step.
-enum class ChainStep : uint8_t { None, MainAction, MainActionCleanedUp, ShowdownAction };
+enum class ChainStep : uint8_t {
+    None,
+    MainAction,           // a main-phase action, before its Cleanup
+    MainActionCleanedUp,  // ... after it
+    ShowdownAction,       // a Showdown focus action at chain_step_bf
+    BeginningStep,        // start-of-turn triggers
+    ScoringStep,          // the triggers of a Hold at chain_step_bf
+    StagedRound,          // after a round of staged Showdowns / Combats
+    CombatStart,          // attack / defend triggers of the combat at chain_step_bf
+    EndingStep,           // end-of-turn triggers
+    ExpirationStep,
+};
 
 struct TurnState {
     PlayerId turn_player = PlayerId::Player1;
@@ -426,10 +437,10 @@ struct TurnState {
 
     // The step whose chain is running, so a snapshot taken at a chain
     // priority decision (ChainState::awaiting_priority) can finish the
-    // chain and then that step: a main-phase action (before or after its
-    // Cleanup), or a Showdown focus action at `chain_step_bf`. None where
-    // the engine cannot resume one (beginning / ending step triggers, the
-    // start of a combat, a chain run inside another chain's resolution).
+    // chain and then that step (see ChainStep; `chain_step_bf` is the
+    // battlefield of a Showdown action, a Hold or a combat). None where the
+    // engine cannot resume one (a chain run inside another chain's
+    // resolution).
     ChainStep chain_step = ChainStep::None;
     std::optional<BattlefieldId> chain_step_bf;
 

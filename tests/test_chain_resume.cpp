@@ -16,6 +16,8 @@
 #include <algorithm>
 #include <cstdlib>
 #include <functional>
+#include <iostream>
+#include <map>
 #include <random>
 #include <string>
 #include <vector>
@@ -105,9 +107,10 @@ protected:
                     const int i = pick(step.legal.size());
                     step = live.applyChoice(i);
                     cstep = copy.applyChoice(i);
+                    // On into the next turn, for a chain at the end of one.
                     const GameState& ls = live.state();
                     if (isCleanResumePoint(ls) || isCleanShowdownPoint(ls) ||
-                        isCleanSetupPoint(ls) || ls.turn.turn_number != turn)
+                        isCleanSetupPoint(ls) || ls.turn.turn_number > turn + 1)
                         break;
                 }
                 if (step.kind == StepKind::NeedDecision) {
@@ -129,18 +132,61 @@ CardRegistry* ChainResumeTest::registry_ = nullptr;
 CardDB* ChainResumeTest::db_ = nullptr;
 
 TEST_F(ChainResumeTest, ChainPriorityCopyGoesOnAsTheLiveEngine) {
-    int main_steps = 0, showdown_steps = 0;
+    std::map<ChainStep, int> by_step;
     const auto run = runLockstep(
         [&](const GameState& s) {
             if (!isCleanChainPoint(s)) return false;
-            (s.turn.chain_step == ChainStep::ShowdownAction ? showdown_steps : main_steps)++;
+            ++by_step[s.turn.chain_step];
             return true;
         },
-        200);
+        400);
     ASSERT_GE(run.points, 40) << "too few chain priority decisions to test";
     EXPECT_GT(run.steps, run.points);
-    EXPECT_GT(main_steps, 0) << "no chain in a main-phase action";
-    EXPECT_GT(showdown_steps, 0) << "no chain in a Showdown focus action";
+    EXPECT_GT(by_step[ChainStep::MainAction] + by_step[ChainStep::MainActionCleanedUp], 0)
+        << "no chain in a main-phase action";
+    EXPECT_GT(by_step[ChainStep::ShowdownAction], 0) << "no chain in a Showdown focus action";
+    EXPECT_GT(by_step[ChainStep::StagedRound], 0) << "no chain after a combat";
+    EXPECT_GT(by_step[ChainStep::CombatStart], 0) << "no chain at the start of a combat";
+    for (const auto& [step, n] : by_step)
+        std::cout << "  chain step " << static_cast<int>(step) << ": " << n << " resumed\n";
+}
+
+/// A chain step is a resume point only in its own phase, and a Hold or a
+/// combat only at a battlefield that has one.
+TEST_F(ChainResumeTest, ChainStepsNeedTheirPhase) {
+    GameState s;
+    s.turn.priority_holder = PlayerId::Player1;
+    s.chain.awaiting_priority = true;
+    ChainItem item;
+    item.status = ChainItemStatus::Finalized;
+    s.chain.items.push_back(item);
+    s.battlefields.emplace_back();
+    s.battlefields[0].id = 3;
+    const std::pair<ChainStep, TurnPhase> steps[] = {
+        {ChainStep::BeginningStep, TurnPhase::BeginningStep},
+        {ChainStep::EndingStep, TurnPhase::EndingStep},
+        {ChainStep::ExpirationStep, TurnPhase::ExpirationStep},
+        {ChainStep::StagedRound, TurnPhase::MainPhase},
+    };
+    for (const auto& [step, phase] : steps) {
+        s.turn.chain_step = step;
+        s.turn.phase = phase;
+        EXPECT_TRUE(isCleanChainPoint(s)) << static_cast<int>(step);
+        s.turn.phase = TurnPhase::DrawPhase;
+        EXPECT_FALSE(isCleanChainPoint(s)) << "the wrong phase for step " << static_cast<int>(step);
+    }
+    s.turn.chain_step = ChainStep::ScoringStep;
+    s.turn.phase = TurnPhase::ScoringStep;
+    EXPECT_FALSE(isCleanChainPoint(s)) << "a Hold at no battlefield";
+    s.turn.chain_step_bf = 3;
+    EXPECT_TRUE(isCleanChainPoint(s));
+    s.turn.chain_step = ChainStep::CombatStart;
+    s.turn.phase = TurnPhase::MainPhase;
+    EXPECT_FALSE(isCleanChainPoint(s)) << "no combat in progress";
+    s.battlefields[0].combat_in_progress = true;
+    s.battlefields[0].attacker = PlayerId::Player1;
+    s.battlefields[0].defender = PlayerId::Player2;
+    EXPECT_TRUE(isCleanChainPoint(s));
 }
 
 TEST_F(ChainResumeTest, SetupCopyGoesOnAsTheLiveEngine) {
