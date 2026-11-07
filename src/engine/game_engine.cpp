@@ -68,6 +68,7 @@ void GameEngine::initSubsystems() {
         [this](PlayerId p, GameObjectId card) { return payCardCost(p, card); });
     chain_manager_->setEffectExecutor(effect_executor_.get());
     chain_manager_->setFinalizeChoices([this](ChainItem& item) { chooseTargetsAtFinalize(item); });
+    chain_manager_->setResumeFinalize([this]() { resumeFinalizeChoice(); });
     chain_manager_->setActivateAbility(
         [this](const Intent& i) { return payAndQueueAbility(i); });
     trigger_manager_ = std::make_unique<TriggerManager>(
@@ -230,15 +231,12 @@ bool isCleanShowdownPoint(const GameState& state) {
     return false;
 }
 
-bool isCleanChainPoint(const GameState& state) {
-    if (state.game_over ||
-        !state.chain.awaiting_priority ||
-        !state.chain.exists() ||
-        state.chain.resuming.has_value() ||
-        state.chain.hasPending() ||
-        !state.turn.priority_holder.has_value() ||
-        state.cost_cursor.has_value())
-        return false;
+namespace {
+
+/// The step a chain runs in (TurnState::chain_step) is one resumeChain can
+/// finish: the phase, and the battlefield, Showdown or combat it needs, are
+/// still there.
+bool chainStepResumable(const GameState& state) {
     const TurnPhase phase = state.turn.phase;
     auto step_bf = [&]() -> const BattlefieldState* {
         if (!state.turn.chain_step_bf.has_value()) return nullptr;
@@ -274,6 +272,45 @@ bool isCleanChainPoint(const GameState& state) {
             break;
     }
     return false;
+}
+
+} // namespace
+
+bool isCleanChainPoint(const GameState& state) {
+    if (state.game_over ||
+        !state.chain.awaiting_priority ||
+        state.chain.awaiting_choice.has_value() ||
+        !state.chain.exists() ||
+        state.chain.resuming.has_value() ||
+        state.chain.hasPending() ||
+        !state.turn.priority_holder.has_value() ||
+        state.cost_cursor.has_value())
+        return false;
+    return chainStepResumable(state);
+}
+
+bool isCleanResolvePoint(const GameState& state) {
+    if (state.game_over ||
+        !state.chain.awaiting_choice.has_value() ||
+        state.chain.awaiting_priority ||
+        state.cost_cursor.has_value())
+        return false;
+    const ChainChoice& choice = *state.chain.awaiting_choice;
+    const auto& resolving = state.chain.resuming;
+    switch (choice.at) {
+        case ChainChoiceAt::Resolve:
+            if (!resolving.has_value() || resolving->finalizing || resolving->id != choice.item)
+                return false;
+            break;
+        case ChainChoiceAt::FinalizePass:
+            if (!resolving.has_value() || !resolving->finalizing || resolving->id != choice.item)
+                return false;
+            break;
+        case ChainChoiceAt::FinalizeTarget:
+            if (resolving.has_value()) return false;
+            break;
+    }
+    return chainStepResumable(state);
 }
 
 bool isCleanSetupPoint(const GameState& state) {
@@ -758,10 +795,11 @@ void GameEngine::runTurnFromPhase(PlayerId player, TurnPhase resume_at) {
                      std::to_string(state_.players[0].score) + " P2=" +
                      std::to_string(state_.players[1].score));
 
-    // A snapshot taken at a chain priority decision outside the main phase
-    // first finishes that chain and the step it ran in; the turn then goes on
-    // from the next step.
-    if (resume_at != TurnPhase::MainPhase && state_.chain.awaiting_priority) {
+    // A snapshot taken at a chain priority decision, or at a chain item's
+    // choice, outside the main phase first finishes that chain and the step
+    // it ran in; the turn then goes on from the next step.
+    if (resume_at != TurnPhase::MainPhase &&
+        (state_.chain.awaiting_priority || state_.chain.awaiting_choice.has_value())) {
         resumeChain();
         if (state_.game_over) return;
         switch (resume_at) {
@@ -830,7 +868,7 @@ void GameEngine::runTurnFromPhase(PlayerId player, TurnPhase resume_at) {
             if (resume_at != TurnPhase::MainPhase) {
                 mainPhase();
             } else {
-                if (state_.chain.awaiting_priority) {
+                if (state_.chain.awaiting_priority || state_.chain.awaiting_choice.has_value()) {
                     resumeChain();
                     if (state_.game_over) return;
                 } else if (state_.turn.awaiting_focus_at.has_value()) {
@@ -1526,15 +1564,36 @@ void GameEngine::chooseTargetsAtFinalize(ChainItem& item) {
         i.chosen_objects = {t};
         options.push_back(std::move(i));
     }
-    const std::string source_name = state_.objectExists(item.source)
-        ? state_.getObject(item.source).name : std::string("?");
+    // Asked from inside another item's effect (makeNewChoicesFor), the
+    // choice cannot be resumed: that item's resolution is on the stack.
+    finalizeTarget(item.id, item.controller, std::move(options),
+                   /*resumable=*/!state_.chain.resuming.has_value());
+}
+
+void GameEngine::finalizeTarget(ChainItemId item_id, PlayerId chooser,
+                                std::vector<Intent> options, bool resumable) {
+    const ChainItem* item = nullptr;
+    for (const auto& ci : state_.chain.items) if (ci.id == item_id) { item = &ci; break; }
+    if (!item) return;
+    const Card* card = (item->is_ability && item->granted_ability_def != 0)
+        ? card_registry_.get(item->granted_ability_def)
+        : card_registry_.get(item->card_def_id);
+    if (!card) return;
+    std::vector<GameObjectId> legal;
+    legal.reserve(options.size());
+    for (const auto& o : options) legal.push_back(o.chosen_objects.front());
+
+    const std::string source_name = state_.objectExists(item->source)
+        ? state_.getObject(item->source).name : std::string("?");
     state_.decision_index++;
     events_.logTrace("DECISION #" + std::to_string(state_.decision_index) + " (" +
-                     toString(item.controller) + "): choose a target for " + source_name +
+                     toString(chooser) + "): choose a target for " + source_name +
                      " [" + std::to_string(options.size()) + " options]");
-    const PlayerId chooser = item.controller;
-    const ChainItemId item_id = item.id;
+    if (resumable)
+        state_.chain.awaiting_choice =
+            ChainChoice{ChainChoiceAt::FinalizeTarget, chooser, options, item_id};
     auto chosen = getAgent(chooser).selectAction(state_, options);
+    if (resumable) state_.chain.awaiting_choice.reset();
     recordAppliedIntent(chosen);
     if (on_decision) on_decision(state_, options, chosen);
     GameObjectId t = legal.front();
@@ -1652,10 +1711,13 @@ void GameEngine::runFinalizePass(ChainItem& item) {
     // An item is mid-resolution (this one was added by its effect): the
     // resume slot is taken, so this item decides as it resolves instead.
     if (state_.chain.resuming.has_value()) return;
-    const ChainItemId item_id = item.id;
     state_.chain.resuming = item;
     state_.chain.resuming->finalizing = true;
+    finishFinalizePass();
+}
 
+void GameEngine::finishFinalizePass() {
+    const ChainItemId item_id = state_.chain.resuming->id;
     constexpr int kMaxChoices = 16;
     for (int iter = 0; iter < kMaxChoices; ++iter) {
         resolveSpell(*state_.chain.resuming);
@@ -1665,7 +1727,10 @@ void GameEngine::runFinalizePass(ChainItem& item) {
                          (pending.label.empty() ? "MakeChoice" : pending.label) + " [" +
                          std::to_string(pending.legal.size()) + " options] (" +
                          toString(pending.player) + ")");
-        Intent choice = queryAgentForChain(pending.player, pending.legal);
+        state_.chain.awaiting_choice = ChainChoice{ChainChoiceAt::FinalizePass, pending.player,
+                                                   std::move(pending.legal), item_id};
+        Intent choice = queryAgentForChain(pending.player, state_.chain.awaiting_choice->legal);
+        state_.chain.awaiting_choice.reset();
         effect_executor_->recordChoice(std::move(choice));
     }
 
@@ -1682,6 +1747,22 @@ void GameEngine::runFinalizePass(ChainItem& item) {
         ci.choices_finalized = true;
         break;
     }
+}
+
+void GameEngine::resumeFinalizeChoice() {
+    ChainChoice choice = std::move(*state_.chain.awaiting_choice);
+    state_.chain.awaiting_choice.reset();
+    if (choice.at == ChainChoiceAt::FinalizeTarget) {
+        finalizeTarget(choice.item, choice.player, std::move(choice.legal), /*resumable=*/true);
+        return;
+    }
+    // FinalizePass: the item's answers so far are in ChainState::resuming.
+    state_.chain.awaiting_choice = std::move(choice);
+    Intent answer = queryAgentForChain(state_.chain.awaiting_choice->player,
+                                       state_.chain.awaiting_choice->legal);
+    state_.chain.awaiting_choice.reset();
+    effect_executor_->recordChoice(std::move(answer));
+    finishFinalizePass();
 }
 
 // Pay an activated ability's costs and put it on the chain. Returns true if a

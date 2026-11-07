@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <stdexcept>
 
 namespace riftbound {
 
@@ -161,6 +162,31 @@ void ChainManager::processFEPR(
 
     constexpr int kMaxIterations = 100; // safety
     int iterations = 0;
+
+    // A resumed loop waiting on a choice of an item resolving or finalizing
+    // first finishes that item as the live loop would have, then goes on as
+    // usual (stepFinalize passes over the items already finalized).
+    if (resume_priority && state_.chain.awaiting_choice.has_value()) {
+        resume_priority = false;
+        if (state_.chain.awaiting_choice->at == ChainChoiceAt::Resolve) {
+            stepResolve(query_agent, resolve_spell, /*resume=*/true);
+            if (!state_.chain.exists()) {
+                state_.turn.oc_state = OpenClosedState::Open;
+                events_.emit(ChainEmptiedEvent{});
+                return;
+            }
+        } else {
+            const ChainItemId fid = state_.chain.awaiting_choice->item;
+            if (!resume_finalize_)
+                throw std::logic_error("processFEPR: resuming a finalize choice needs setResumeFinalize");
+            resume_finalize_();
+            for (const auto& fin : state_.chain.items) {
+                if (fin.id != fid) continue;
+                events_.emit(ChainItemFinalizedEvent{fin.id, fin.source, fin.controller});
+                break;
+            }
+        }
+    }
 
     while (state_.chain.exists() && iterations < kMaxIterations) {
         iterations++;
@@ -376,19 +402,44 @@ bool ChainManager::stepExecuteAndPass(AgentQuery query_agent,
 
 void ChainManager::stepResolve(
     AgentQuery query_agent,
-    std::function<void(const ChainItem&)> resolve_spell) {
+    std::function<void(const ChainItem&)> resolve_spell,
+    bool resume) {
 
-    assert(!state_.chain.items.empty() && "stepResolve called with empty chain");
+    // Asks `player` to choose for the resolving item. While the agent
+    // decides, the choice is kept in the state, so a snapshot taken then can
+    // be resumed there (resume == true).
+    auto ask = [&](PlayerId player, std::vector<Intent> legal, int repeat) {
+        state_.chain.awaiting_choice =
+            ChainChoice{ChainChoiceAt::Resolve, player, std::move(legal),
+                        state_.chain.resuming->id, repeat};
+        Intent choice = query_agent(player, state_.chain.awaiting_choice->legal);
+        state_.chain.awaiting_choice.reset();
+        executor_->recordChoice(std::move(choice));
+    };
 
-    // Pop the newest (top) item — LIFO. Counter spells (Abandon, Wind Wall,
-    // Repulse, Not So Fast, Lilting Lullaby) rely on `items.back()` being
-    // the previous item on the chain (their counter target) — keep that
-    // invariant by popping FIRST. The popped item is held in
-    // `state_.chain.resuming` so a resumable Card can read/write its
-    // resume_point across iterations.
-    ChainItem resolved = state_.chain.items.back();
-    state_.chain.items.pop_back();
-    state_.chain.resuming = resolved;
+    ChainItem resolved;
+    int repeat = -1;  // -1: the item's own resolution; then each repeat (CR 820)
+    if (resume) {
+        // The snapshot was waiting on a choice of the resolving item: ask it
+        // again, then go on as the live loop would have.
+        assert(state_.chain.resuming.has_value() && state_.chain.awaiting_choice.has_value());
+        ChainChoice choice = std::move(*state_.chain.awaiting_choice);
+        state_.chain.awaiting_choice.reset();
+        repeat = choice.repeat;
+        ask(choice.player, std::move(choice.legal), repeat);
+    } else {
+        assert(!state_.chain.items.empty() && "stepResolve called with empty chain");
+
+        // Pop the newest (top) item — LIFO. Counter spells (Abandon, Wind Wall,
+        // Repulse, Not So Fast, Lilting Lullaby) rely on `items.back()` being
+        // the previous item on the chain (their counter target) — keep that
+        // invariant by popping FIRST. The popped item is held in
+        // `state_.chain.resuming` so a resumable Card can read/write its
+        // resume_point across iterations.
+        resolved = state_.chain.items.back();
+        state_.chain.items.pop_back();
+        state_.chain.resuming = resolved;
+    }
 
     // Resumable resolution loop. Single-shot cards (the common case) loop
     // exactly once: resolve_spell -> Card::onResolve returns without a
@@ -429,14 +480,19 @@ void ChainManager::stepResolve(
                 (pending.label.empty() ? "MakeChoice" : pending.label) +
                 " [" + std::to_string(pending.legal.size()) + " options] (" +
                 toString(pending.player) + ")");
-            Intent choice = query_agent(pending.player, pending.legal);
-            executor_->recordChoice(std::move(choice));
+            ask(pending.player, std::move(pending.legal), repeat);
             // Loop back — resolve_spell re-invokes onResolve / onTrigger; the
             // Card reads the recorded choice via `executor.takeChoice()` in its
             // case ≥1 branch and continues past resume_point.
         }
     };
-    resolveWithChoices();
+    // A resumed repeat goes on where it was; a later one starts over.
+    bool fresh = false;
+    if (repeat < 0) {
+        resolveWithChoices();
+        repeat = 0;
+        fresh = true;
+    }
 
     // Repeat (CR 820): if `repeats_paid > 0`, re-run resolve_spell that
     // many extra times. Each re-run reads the same item from
@@ -445,8 +501,9 @@ void ChainManager::stepResolve(
     // executions follow the same Make-Relevant-Choices pattern (CR 820.2)
     // and go through the same choice loop: a choice a repeat requests is
     // asked now, not left pending for the next item to resolve.
-    if (state_.chain.resuming.has_value()) {
-        for (int r = 0; r < state_.chain.resuming->repeats_paid; ++r) {
+    for (; state_.chain.resuming.has_value() && repeat < state_.chain.resuming->repeats_paid;
+         ++repeat) {
+        if (fresh) {
             // Reset resume_point so a resumable Card starts its case 0
             // branch fresh on each repeat.
             state_.chain.resuming->resume_point = 0;
@@ -455,8 +512,9 @@ void ChainManager::stepResolve(
             state_.chain.resuming->choices_finalized = false;
             state_.chain.resuming->finalize_costs_paid = false;
             state_.chain.resuming->finalize_checked = 0;
-            resolveWithChoices();
         }
+        fresh = true;
+        resolveWithChoices();
     }
 
     // Read the (possibly-mutated) resolving item back out and dispose.

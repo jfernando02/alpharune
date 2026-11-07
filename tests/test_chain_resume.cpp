@@ -1,8 +1,9 @@
-/// resumeFromSnapshot at a chain priority decision (isCleanChainPoint) and at
-/// the setup decisions (isCleanSetupPoint): the look-ahead agents search
-/// these decisions by restarting copies there, so a copy must offer the
-/// decision the live engine offers and then go on as the live engine does —
-/// through the rest of the chain and the step it ran in.
+/// resumeFromSnapshot at a chain priority decision (isCleanChainPoint), at a
+/// chain item's choice (isCleanResolvePoint) and at the setup decisions
+/// (isCleanSetupPoint): the look-ahead agents search these decisions by
+/// restarting copies there, so a copy must offer the decision the live
+/// engine offers and then go on as the live engine does — through the rest
+/// of the chain and the step it ran in.
 
 #include "agents/heuristic_agent.h"
 #include "cards/card_registry.h"
@@ -14,6 +15,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <functional>
 #include <iostream>
@@ -189,6 +191,69 @@ TEST_F(ChainResumeTest, ChainStepsNeedTheirPhase) {
     EXPECT_TRUE(isCleanChainPoint(s));
 }
 
+TEST_F(ChainResumeTest, ChainChoiceCopyGoesOnAsTheLiveEngine) {
+    std::map<ChainChoiceAt, int> by_at;
+    std::vector<Point> points;
+    const auto run = runLockstep(
+        [&](const GameState& s) {
+            if (!isCleanResolvePoint(s)) return false;
+            ++by_at[s.chain.awaiting_choice->at];
+            return true;
+        },
+        400, &points);
+    ASSERT_GE(run.points, 40) << "too few chain item choices to test";
+    EXPECT_GT(run.steps, run.points);
+    EXPECT_GT(by_at[ChainChoiceAt::Resolve], 0) << "no choice as an item resolves";
+    EXPECT_GT(by_at[ChainChoiceAt::FinalizeTarget], 0) << "no target chosen at finalization";
+    for (const auto& p : points)
+        EXPECT_TRUE(p.legal == p.state.chain.awaiting_choice->legal)
+            << "the kept choice is not the one asked";
+    for (const auto& [at, n] : by_at)
+        std::cout << "  chain choice at " << static_cast<int>(at) << ": " << n << " resumed\n";
+}
+
+/// A kept choice is a resume point only with the item it names in the state
+/// it was asked in, and only in a step the engine can finish.
+TEST_F(ChainResumeTest, ChainChoicesNeedTheirItem) {
+    GameState s;
+    s.turn.phase = TurnPhase::MainPhase;
+    s.turn.chain_step = ChainStep::MainAction;
+    ChainItem item;
+    item.id = 7;
+    item.status = ChainItemStatus::Finalized;
+    s.chain.items.push_back(item);
+    EXPECT_FALSE(isCleanResolvePoint(s)) << "no choice kept";
+
+    s.chain.awaiting_choice = ChainChoice{ChainChoiceAt::FinalizeTarget, PlayerId::Player1, {}, 7};
+    EXPECT_TRUE(isCleanResolvePoint(s));
+    s.chain.resuming = item;
+    EXPECT_FALSE(isCleanResolvePoint(s)) << "a target asked from inside a resolving item";
+
+    s.chain.awaiting_choice->at = ChainChoiceAt::Resolve;
+    EXPECT_TRUE(isCleanResolvePoint(s));
+    s.chain.resuming->id = 8;
+    EXPECT_FALSE(isCleanResolvePoint(s)) << "another item is resolving";
+    s.chain.resuming->id = 7;
+    s.chain.resuming->finalizing = true;
+    EXPECT_FALSE(isCleanResolvePoint(s)) << "the item is finalizing, not resolving";
+
+    s.chain.awaiting_choice->at = ChainChoiceAt::FinalizePass;
+    EXPECT_TRUE(isCleanResolvePoint(s));
+    s.chain.resuming.reset();
+    EXPECT_FALSE(isCleanResolvePoint(s)) << "a finalize pass with no item in it";
+
+    s.chain.resuming = item;
+    s.chain.resuming->finalizing = true;
+    s.turn.chain_step = ChainStep::None;
+    EXPECT_FALSE(isCleanResolvePoint(s)) << "a chain outside any known step";
+    s.turn.chain_step = ChainStep::EndingStep;
+    EXPECT_FALSE(isCleanResolvePoint(s)) << "the wrong phase for the step";
+    s.turn.phase = TurnPhase::EndingStep;
+    EXPECT_TRUE(isCleanResolvePoint(s));
+    s.cost_cursor.emplace();
+    EXPECT_FALSE(isCleanResolvePoint(s)) << "a cost being paid";
+}
+
 TEST_F(ChainResumeTest, SetupCopyGoesOnAsTheLiveEngine) {
     int picks = 0, mulligans = 0;
     const auto run = runLockstep(
@@ -255,6 +320,39 @@ TEST_F(ChainResumeTest, HeuristicSearchesChainAndSetupWhenAsked) {
         EXPECT_EQ(agent.stats().setup_searches, setup ? 1 : 0) << "point " << k;
         EXPECT_GT(agent.stats().simulations, 0) << "point " << k;
         EXPECT_EQ(agent.stats().failed_simulations, 0) << "point " << k;
+    }
+}
+
+TEST_F(ChainResumeTest, HeuristicSearchesChainItemChoicesWhenAsked) {
+    std::vector<Point> all;
+    runLockstep([](const GameState& s) { return isCleanResolvePoint(s); }, 200, &all);
+    std::vector<Point> points;
+    for (auto& p : all)
+        if (p.legal.size() >= 2 && points.size() < 8) points.push_back(p);
+    ASSERT_GE(points.size(), 4u);
+    for (size_t k = 0; k < points.size(); ++k) {
+        const auto& [state, legal] = points[k];
+        HeuristicAgent plain(*db_, *registry_, HeuristicConfig{});
+        plain.selectAction(state, legal);
+        EXPECT_EQ(plain.stats().lookahead_decisions, 0) << "point " << k;
+
+        HeuristicConfig on;
+        on.search_resolve = true;
+        on.guesses = 2;
+        on.max_resolve_options = 2;
+        HeuristicAgent agent(*db_, *registry_, on);
+        int scored = 0;
+        agent.setSearchObserver([&](const GameState&, const std::vector<Intent>&,
+                                    const std::vector<double>& scores) {
+            for (double v : scores) scored += std::isnan(v) ? 0 : 1;
+        });
+        const Intent pick = agent.selectAction(state, legal);
+        EXPECT_NE(std::find(legal.begin(), legal.end(), pick), legal.end()) << "point " << k;
+        EXPECT_EQ(agent.stats().resolve_searches, 1) << "point " << k;
+        EXPECT_GT(agent.stats().simulations, 0) << "point " << k;
+        EXPECT_EQ(agent.stats().failed_simulations, 0) << "point " << k;
+        EXPECT_GE(scored, 1) << "point " << k;
+        EXPECT_LE(scored, 2) << "point " << k << ": more options tried than max_resolve_options";
     }
 }
 

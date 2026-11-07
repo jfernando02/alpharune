@@ -591,6 +591,22 @@ struct ChainItem {
     GameObjectId triggering_subject = kInvalidId;
 };
 
+/// Where a chain item's choice was asked (ChainState::awaiting_choice).
+enum class ChainChoiceAt : uint8_t {
+    Resolve,         // as it resolves (ChainManager::stepResolve)
+    FinalizePass,    // in its finalize pass (GameEngine::runFinalizePass)
+    FinalizeTarget,  // its target, at finalization (GameEngine::chooseTargetsAtFinalize)
+};
+
+/// A choice a chain item asked for, kept while the agent decides it.
+struct ChainChoice {
+    ChainChoiceAt at = ChainChoiceAt::Resolve;
+    PlayerId player = PlayerId::None;
+    std::vector<Intent> legal;
+    ChainItemId item = kInvalidId;  // the item it is for
+    int repeat = -1;                // Resolve: the repeat resolving (CR 820), -1 = the first
+};
+
 struct ChainState {
     std::vector<ChainItem> items;
     ChainItemId next_id = 1;
@@ -609,6 +625,12 @@ struct ChainState {
     // item or pass), with priority_holder deciding. With TurnState::
     // chain_step set, resumeFromSnapshot re-enters the loop there.
     bool awaiting_priority = false;
+
+    // Set only while a chain item waits on a choice (target, mode, X, "you
+    // may", ...) asked by the FEPR loop itself, not from inside another
+    // effect. With TurnState::chain_step set, resumeFromSnapshot asks it
+    // again and goes on from there.
+    std::optional<ChainChoice> awaiting_choice;
 
     bool exists() const { return !items.empty(); }
 

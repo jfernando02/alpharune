@@ -18,11 +18,12 @@
 /// was lucky. Ties go to the earlier legal action.
 ///
 /// The same search covers, when configured, Showdown focus decisions, chain
-/// priority decisions and the setup decisions (battlefield pick, mulligan),
-/// and the follow-ups of a searched action (rune payment, targets, ...) are
-/// planned with it. Everywhere else (targets of resolving effects, combat
-/// damage, triggers outside those steps) it answers as ScriptedAgent does:
-/// a resumed engine cannot re-enter those decisions.
+/// priority decisions, the choices of chain items (targets, modes, X as they
+/// resolve or are finalized) and the setup decisions (battlefield pick,
+/// mulligan), and the follow-ups of a searched action (rune payment,
+/// targets, ...) are planned with it. Everywhere else (combat damage, rune
+/// payment, choices asked from inside an effect) it answers as ScriptedAgent
+/// does: a resumed engine cannot re-enter those decisions.
 ///
 /// A learned policy (`HeuristicConfig::policy`, trained on this agent's own
 /// search results) can stand in for ScriptedAgent — in the simulations and
@@ -90,6 +91,17 @@ struct HeuristicConfig {
     // action (isCleanChainPoint). The simulation plays to the end of the
     // turn the chain is in, as for the other decisions.
     bool search_chain = false;
+    // Also search the choices a chain item asks for as it resolves or is
+    // finalized — a target, mode, X or "you may" (isCleanResolvePoint) —
+    // 14% of real decisions, with ~50 legal actions each. A choice that
+    // finishes the agent's own searched action is still played from the
+    // plan when the plan covered all its options.
+    bool search_resolve = false;
+    // Options a chain item's choice tries, at most (0 = all): the ones the
+    // policy ranks best (ScriptedAgent's pick first without one). A target
+    // can have dozens of legal objects, and each costs a simulation per guess
+    // out of the turn's budget.
+    int max_resolve_options = 12;
     // Also search the setup decisions: the battlefield pick and the
     // mulligan. Their simulations play the game from setup to the end of
     // turn `setup_turns - 1` (turn 0 is the first player's first turn),
@@ -128,6 +140,7 @@ public:
         int budget_fallbacks = 0;    // answered as ScriptedAgent: turn budget spent
         int showdown_searches = 0;   // searched decisions that were Showdown focus
         int chain_searches = 0;      // ... chain priority
+        int resolve_searches = 0;    // ... a chain item's choice
         int setup_searches = 0;      // ... battlefield pick or mulligan
         int planned_followups = 0;   // follow-up decisions answered from a plan
         int abandoned_plans = 0;     // plans dropped: the engine asked something else
@@ -168,18 +181,26 @@ public:
     /// PassPriority on offer), searched when `search_chain` is set.
     static bool isChainLookaheadPoint(const GameState& state,
                                       const std::vector<Intent>& legal_actions);
+    /// The same for a chain item's choice (`isCleanResolvePoint`, asking
+    /// exactly the kept choice), searched when `search_resolve` is set.
+    static bool isResolveLookaheadPoint(const GameState& state,
+                                        const std::vector<Intent>& legal_actions);
     /// The same for a battlefield pick or a mulligan (`isCleanSetupPoint`),
     /// searched when `search_battlefield` / `search_mulligan` is set.
     static bool isSetupLookaheadPoint(const GameState& state,
                                       const std::vector<Intent>& legal_actions);
 
 private:
-    enum class SearchKind : uint8_t { None, Main, Showdown, Chain, Setup };
+    enum class SearchKind : uint8_t { None, Main, Showdown, Chain, Resolve, Setup };
     /// Which kind of searched decision this is, given the config; None for
     /// the decisions answered as ScriptedAgent (or from a plan).
     SearchKind searchKind(const GameState& state, const std::vector<Intent>& legal) const;
     /// The last turn a simulation from `state` plays before scoring.
     int lastTurn(const GameState& state) const;
+    /// The legal actions a search of this kind tries, in legal order: all of
+    /// them, except at a chain item's choice (max_resolve_options).
+    std::vector<Intent> searchedOptions(const GameState& state, const std::vector<Intent>& legal,
+                                        SearchKind kind) const;
 
     /// Score of playing `plan` from the already-determinized `guess`, or
     /// nullopt when the simulation could not run. plan[0] is played at the
@@ -188,7 +209,9 @@ private:
     std::optional<double> simulate(const GameState& guess, const std::vector<Intent>& plan,
                                    PlayerId me, uint64_t engine_seed);
     /// A decision of `me` that finishes the action before it: not one the
-    /// agent searches from scratch, and with a real choice.
+    /// agent searches from scratch (a chain item's choice still is one, as
+    /// it finishes the action that put the item there), and with a real
+    /// choice.
     bool isFollowup(const GameState& state, const std::vector<Intent>& legal, PlayerId me) const;
     /// Candidate plans starting with `action`: the action alone, or with each
     /// option of its follow-up decisions, up to plan_followups deep, found

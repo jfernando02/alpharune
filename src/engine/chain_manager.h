@@ -60,7 +60,9 @@ public:
     /// gen_closed_actions generates legal actions during Closed State.
     /// resume_priority re-enters a loop that was waiting on a priority
     /// decision (ChainState::awaiting_priority): the priority holder decides
-    /// again, keeping the passes already made.
+    /// again, keeping the passes already made. With ChainState::
+    /// awaiting_choice set it re-enters at that choice instead: the item
+    /// resolving or finalizing asks it again and is finished first.
     void processFEPR(
         AgentQuery query_agent,
         std::function<void(const ChainItem&)> resolve_permanent,
@@ -89,6 +91,10 @@ public:
     /// paid then).
     using FinalizeChoices = std::function<void(ChainItem&)>;
     void setFinalizeChoices(FinalizeChoices fn) { finalize_choices_ = std::move(fn); }
+    /// Finishes the finalization of the item a resumed snapshot was asking a
+    /// finalize choice for (ChainState::awaiting_choice, not Resolve).
+    using ResumeFinalize = std::function<void()>;
+    void setResumeFinalize(ResumeFinalize fn) { resume_finalize_ = std::move(fn); }
     using ActivateAbility = std::function<bool(const Intent&)>;
     void setActivateAbility(ActivateAbility fn) { activate_ability_ = std::move(fn); }
 
@@ -108,6 +114,7 @@ private:
     PayCost pay_cost_;
     ActivateAbility activate_ability_;
     FinalizeChoices finalize_choices_;
+    ResumeFinalize resume_finalize_;
     EffectExecutor* executor_ = nullptr;
 
     /// Step 1: Finalize all pending items in order.
@@ -127,8 +134,11 @@ private:
     /// `EffectExecutor::requestChoice`, query the agent + record the
     /// choice + re-invoke resolve_spell so the Card's next switch case
     /// runs. Single-shot resolution (the common case) loops once.
+    /// `resume` goes on with the item already resolving, from the choice it
+    /// was waiting on (ChainState::awaiting_choice).
     void stepResolve(AgentQuery query_agent,
-                     std::function<void(const ChainItem&)> resolve_spell);
+                     std::function<void(const ChainItem&)> resolve_spell,
+                     bool resume = false);
 };
 
 } // namespace riftbound

@@ -4,6 +4,7 @@
 
 #include "core/events.h"
 #include "engine/game_engine.h"
+#include "ml/policy_features.h"
 
 #include <algorithm>
 #include <cmath>
@@ -55,6 +56,11 @@ bool HeuristicAgent::isChainLookaheadPoint(const GameState& state,
     });
 }
 
+bool HeuristicAgent::isResolveLookaheadPoint(const GameState& state,
+                                             const std::vector<Intent>& legal) {
+    return isCleanResolvePoint(state) && state.chain.awaiting_choice->legal == legal;
+}
+
 bool HeuristicAgent::isSetupLookaheadPoint(const GameState& state,
                                            const std::vector<Intent>& legal) {
     if (!isCleanSetupPoint(state)) return false;
@@ -84,6 +90,8 @@ HeuristicAgent::SearchKind HeuristicAgent::searchKind(const GameState& state,
     if (config_.search_showdowns && isShowdownLookaheadPoint(state, legal))
         return SearchKind::Showdown;
     if (config_.search_chain && isChainLookaheadPoint(state, legal)) return SearchKind::Chain;
+    if (config_.search_resolve && isResolveLookaheadPoint(state, legal))
+        return SearchKind::Resolve;
     if (isSetupLookaheadPoint(state, legal) &&
         (legal[0].type == IntentType::ChooseBattlefield ? config_.search_battlefield
                                                         : config_.search_mulligan))
@@ -96,6 +104,32 @@ int HeuristicAgent::lastTurn(const GameState& state) const {
     return state.turn.turn_number + config_.turns_ahead - 1;
 }
 
+std::vector<Intent> HeuristicAgent::searchedOptions(const GameState& state,
+                                                    const std::vector<Intent>& legal,
+                                                    SearchKind kind) const {
+    const size_t width = static_cast<size_t>(config_.max_resolve_options);
+    if (kind != SearchKind::Resolve || width == 0 || legal.size() <= width) return legal;
+    // Rank: the policy's scores where it covers the decision, else
+    // ScriptedAgent's pick ahead of the rest in legal order.
+    const int scripted = scripted_.selectIndex(state, legal);
+    std::vector<double> rank(legal.size(), 0.0);
+    const char* policy_kind = ml::policyDecisionKind(state, legal);
+    if (config_.policy && config_.policy->covers(policy_kind))
+        rank = config_.policy->scores(state, card_db_, legal, policy_kind, scripted);
+    else if (scripted >= 0)
+        rank[scripted] = 1.0;
+    std::vector<size_t> order(legal.size());
+    for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+    std::stable_sort(order.begin(), order.end(),
+                     [&](size_t a, size_t b) { return rank[a] > rank[b]; });
+    order.resize(width);
+    std::sort(order.begin(), order.end());
+    std::vector<Intent> out;
+    out.reserve(width);
+    for (size_t i : order) out.push_back(legal[i]);
+    return out;
+}
+
 Intent HeuristicAgent::selectAction(const GameState& state,
                                     const std::vector<Intent>& legal) {
     if (legal.empty()) return Intent::concede(state.turn.turn_player);
@@ -106,9 +140,14 @@ Intent HeuristicAgent::selectAction(const GameState& state,
     const bool searchable = kind != SearchKind::None;
 
     // The follow-ups of the action last chosen, in the order it planned them.
+    // A chain item's choice may be one; the plan answers it when it tried
+    // every option there, and the search does otherwise.
     if (!plan_.empty()) {
-        if (searchable) {
-            plan_.clear();  // the action is over
+        const bool planned_choice =
+            kind == SearchKind::Resolve &&
+            legal.size() <= static_cast<size_t>(config_.max_followup_options);
+        if (searchable && !planned_choice) {
+            plan_.clear();  // the action is over, or the plan tried too few options here
             plan_scores_.clear();
         } else {
             const int i = indexOf(legal, plan_.front());
@@ -136,6 +175,7 @@ Intent HeuristicAgent::selectAction(const GameState& state,
     ++stats_.lookahead_decisions;
     if (kind == SearchKind::Showdown) ++stats_.showdown_searches;
     if (kind == SearchKind::Chain) ++stats_.chain_searches;
+    if (kind == SearchKind::Resolve) ++stats_.resolve_searches;
     if (kind == SearchKind::Setup) ++stats_.setup_searches;
 
     // Setup decisions have a budget of their own (turn "-1"), so they do not
@@ -167,7 +207,7 @@ Intent HeuristicAgent::selectAction(const GameState& state,
 
     // Candidate plans: each legal action, with its follow-ups if planned.
     std::vector<std::vector<Intent>> plans;
-    for (const Intent& action : legal) {
+    for (const Intent& action : searchedOptions(state, legal, kind)) {
         if (action.type == IntentType::Concede) continue;
         if (config_.plan_followups > 0)
             expandPlans(first_guess, first_seed, me, {action}, plans);
@@ -291,7 +331,8 @@ void HeuristicAgent::countUnspentEnergy(const GameState& state,
 bool HeuristicAgent::isFollowup(const GameState& state, const std::vector<Intent>& legal,
                                 PlayerId me) const {
     if (legal.size() < 2 || legal[0].player != me) return false;
-    return searchKind(state, legal) == SearchKind::None;
+    const SearchKind kind = searchKind(state, legal);
+    return kind == SearchKind::None || kind == SearchKind::Resolve;
 }
 
 void HeuristicAgent::expandPlans(const GameState& guess, uint64_t engine_seed, PlayerId me,

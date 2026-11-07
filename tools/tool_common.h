@@ -85,7 +85,8 @@ struct ToolAgentSpec {
 ///   showdown (focus: play or pass), chain (react or pass, resumable),
 ///   chain_mid (react or pass where a resumed engine cannot re-enter), trigger
 ///   (optional trigger), trigger_cost, battlefield, rune (rune payment),
-///   resolve (a choice while a chain item resolves: target / mode / X),
+///   resolve (a chain item's choice as it resolves or is finalized: target /
+///   mode / X, resumable), resolve_mid (the same asked from inside an effect),
 ///   choice (any other MakeChoice: play location, optional cost, ...).
 inline bool offers(const std::vector<Intent>& legal, IntentType t) {
     return std::any_of(legal.begin(), legal.end(), [t](const Intent& a) { return a.type == t; });
@@ -104,7 +105,8 @@ inline std::string decisionKind(const GameState& s, const std::vector<Intent>& l
     if (offers(legal, IntentType::ChooseBattlefield)) return "battlefield";
     if (offers(legal, IntentType::MakeChoice)) {
         if (s.cost_cursor.has_value()) return "rune";
-        if (s.chain.exists() || s.chain.resuming.has_value()) return "resolve";
+        if (s.chain.exists() || s.chain.resuming.has_value())
+            return isCleanResolvePoint(s) ? "resolve" : "resolve_mid";
         return "choice";
     }
     return std::string("other:") + toString(legal[0].type);
@@ -162,6 +164,8 @@ inline ToolAgentSpec parseToolAgent(const std::string& spec) {
         else if (key == "guesses" && h) out.heuristic.guesses = std::stoi(val);
         else if (key == "followups" && h) out.heuristic.plan_followups = std::stoi(val);
         else if (key == "chain" && h) out.heuristic.search_chain = std::stoi(val) != 0;
+        else if (key == "resolve" && h) out.heuristic.search_resolve = std::stoi(val) != 0;
+        else if (key == "resolve_width" && h) out.heuristic.max_resolve_options = std::stoi(val);
         else if (key == "setup" && h)
             out.heuristic.search_battlefield = out.heuristic.search_mulligan = std::stoi(val) != 0;
         else if (key == "battlefield" && h) out.heuristic.search_battlefield = std::stoi(val) != 0;

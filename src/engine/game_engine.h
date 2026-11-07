@@ -97,6 +97,15 @@ bool isCleanShowdownPoint(const GameState& state);
 /// The resumed engine finishes the chain, then that step and the turn.
 bool isCleanChainPoint(const GameState& state);
 
+/// True when `state` is a choice of a chain item (a target, mode, X, "you
+/// may", ...) `resumeFromSnapshot` can re-enter: the FEPR loop itself asked
+/// it (`ChainState::awaiting_choice`) — as the item resolves, in its finalize
+/// pass, or for its target at finalization — not an effect from inside
+/// another item, with no cost payment in progress, in a step the engine knows
+/// how to finish (as for isCleanChainPoint). The resumed engine asks the
+/// choice again, finishes the item, the chain, the step and the turn.
+bool isCleanResolvePoint(const GameState& state);
+
 /// True when `state` is a setup decision `resumeFromSnapshot` can re-enter:
 /// the battlefield picks (TurnPhase::Setup) or the mulligans
 /// (TurnPhase::Mulligan), the only decisions asked before the first turn.
@@ -686,7 +695,18 @@ private:
                                   GameObjectId source, int index) const;
     /// Make the choices the rules place at finalization for `item` (targets).
     void chooseTargetsAtFinalize(ChainItem& item);
+    /// Asks `chooser` for the target of item `item_id` among `options` and
+    /// applies it (Deflect paid now). `resumable`: asked by the FEPR loop
+    /// itself, so kept in ChainState::awaiting_choice while the agent decides.
+    void finalizeTarget(ChainItemId item_id, PlayerId chooser, std::vector<Intent> options,
+                        bool resumable);
     void runFinalizePass(ChainItem& item);
+    /// The finalize pass of the item in ChainState::resuming, from where it
+    /// is, writing its answers back to the item on the chain.
+    void finishFinalizePass();
+    /// A resumed snapshot's finalize choice (ChainState::awaiting_choice):
+    /// asks it again and finishes that item's finalization.
+    void resumeFinalizeChoice();
     /// "You may make new choices for it" (CR 750-755).
     void makeNewChoicesFor(ChainItemId item_id);
     /// One agent decision among `options` for `player`, logged like any other.

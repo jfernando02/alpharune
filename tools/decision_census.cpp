@@ -57,11 +57,17 @@ std::string kindOf(const GameState& s, const std::vector<Intent>& legal) {
         {"trigger_cost", "triggered cost"},
         {"battlefield", "choose battlefield"},
         {"rune", "choice: rune payment"},
-        {"resolve", "choice: during resolution (target / mode / X)"},
+        {"resolve", "choice: during resolution (target / mode / X; searched with resolve=1)"},
+        {"resolve_mid", "choice: during resolution, inside an effect (not resumable)"},
         {"choice", "choice: other (play location, optional cost, ...)"},
     };
     const std::string kind = tools::decisionKind(s, legal);
     if (kind == "chain" || kind == "chain_mid") return kind + "  " + chainContext(s);
+    if (kind == "resolve") {
+        static const char* at[] = {"as it resolves", "finalize pass", "target at finalization"};
+        return kind + "  choice: " + at[static_cast<int>(s.chain.awaiting_choice->at)] +
+               " (searched with resolve=1)";
+    }
     const auto it = describe.find(kind);
     return kind + "  " + (it != describe.end() ? it->second : "");
 }
