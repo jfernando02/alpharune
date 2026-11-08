@@ -159,6 +159,18 @@ std::string ReplayWriter::boardJson(const GameState& state, const Intent* chosen
             else if (o.isRune()) runes.push_back(id);
         }
         for (auto* v : {&units, &gear, &runes}) std::sort(v->begin(), v->end());
+        // Restricted floating resources, e.g. "+1 P gear only".
+        std::string restricted;
+        {
+            static const char* kScope[] = {"units", "spells", "gear", "units/gear", "showdowns"};
+            for (int i = 0; i < RunePool::kScopes; ++i) {
+                const auto& r = ps.rune_pool.restricted[i];
+                if (r.energy > 0)
+                    restricted += " +" + std::to_string(r.energy) + " E " + kScope[i] + " only";
+                if (r.power > 0)
+                    restricted += " +" + std::to_string(r.power) + " P " + kScope[i] + " only";
+            }
+        }
         json p = {
             {"score", ps.score},
             {"deck", ps.main_deck.size()},
@@ -167,6 +179,7 @@ std::string ReplayWriter::boardJson(const GameState& state, const Intent* chosen
             {"power", ps.rune_pool.totalPower()},
             {"restricted_energy", ps.rune_pool.restrictedEnergyTotal()},
             {"restricted_power", ps.rune_pool.restrictedPowerTotal()},
+            {"restricted", restricted},
             {"hand", list(ps.hand)},
             {"units", list(units)},
             {"gear", list(gear)},
@@ -993,7 +1006,8 @@ function playerStrip(b, seat) {
     if (p.legend) h += '<div class="zone"><div class="zl">Legend</div>' + cardHtml(p.legend, { w: 44 }) + '</div>';
     if (p.champ) h += '<div class="zone"><div class="zl">Champion</div>' + cardHtml(p.champ, { w: 44 }) + '</div>';
     h += '<div class="stat">Deck <b>' + p.deck + '</b><br>Runes left <b>' + p.rdeck + '</b><br>Pool <b>' +
-         p.energy + '</b> E · <b>' + p.power + '</b> P</div>';
+         p.energy + '</b> E · <b>' + p.power + '</b> P' +
+         (p.restricted ? '<br><small>' + p.restricted + '</small>' : '') + '</div>';
     h += '<div class="zone" style="flex:1"><div class="zl">Hand (' + p.hand.length + ')</div><div class="row">' +
          cardsHtml(p.hand, { w: 48, noTurn: true }) + '</div></div>';
     h += pileHtml('t' + seat, 'Trash', p.trash);
