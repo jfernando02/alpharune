@@ -958,6 +958,19 @@ void register_card_952(CardRegistry&);
 void register_card_953(CardRegistry&);
 void register_card_954(CardRegistry&);
 void register_card_955(CardRegistry&);
+// Radiance (ids 956..1099 by collector number; implemented so far):
+void register_card_977(CardRegistry&);
+void register_card_979(CardRegistry&);
+void register_card_980(CardRegistry&);
+void register_card_981(CardRegistry&);
+void register_card_983(CardRegistry&);
+void register_card_984(CardRegistry&);
+void register_card_985(CardRegistry&);
+void register_card_996(CardRegistry&);
+void register_card_999(CardRegistry&);
+void register_card_1002(CardRegistry&);
+void register_card_1004(CardRegistry&);
+void register_card_1007(CardRegistry&);
 
 void registerAllCards(CardRegistry& registry) {
     register_card_1(registry);
@@ -1915,6 +1928,18 @@ void registerAllCards(CardRegistry& registry) {
     register_card_953(registry);
     register_card_954(registry);
     register_card_955(registry);
+    register_card_977(registry);
+    register_card_979(registry);
+    register_card_980(registry);
+    register_card_981(registry);
+    register_card_983(registry);
+    register_card_984(registry);
+    register_card_985(registry);
+    register_card_996(registry);
+    register_card_999(registry);
+    register_card_1002(registry);
+    register_card_1004(registry);
+    register_card_1007(registry);
 }
 
 } // namespace riftbound

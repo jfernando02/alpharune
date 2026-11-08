@@ -1635,5 +1635,82 @@ TEST_F(VendettaLastCardsTest, ChooseObjectNowAsksTheAgent) {
     EXPECT_EQ(engine_->testHook_executor().chooseObjectNow(P1, {}), kInvalidId);
 }
 
+// ─── Radiance ───────────────────────────────────────────────────────────────
+constexpr CardDefId kKiBurst = 980;   // "As an additional cost ... exhaust a friendly unit. [Stun] a unit."
+
+TEST_F(TriggerFinalizationTest, KiBurst_TheExhaustIsPaidBeforeTheOpponentCanRespond) {
+    setUpBoard();
+    auto mine = engineUnit(P1, 2);
+    auto enemy = engineUnit(P2, 4, 0);
+    p1_.want = enemy;
+    bool exhausted_at_response = false, stunned_at_response = true;
+    p2_.on_first_priority = [&] {
+        exhausted_at_response = s().getObject(mine).is_exhausted;
+        stunned_at_response = s().getObject(enemy).is_stunned;
+    };
+    s().player(P1).rune_pool.energy = 1;
+    auto card = cardInHand(P1, kKiBurst);
+    Intent play;
+    play.type = IntentType::PlayCard;
+    play.player = P1;
+    play.card = card;
+    engine_->testHook_executeIntent(play);
+
+    ASSERT_TRUE(p2_.seen);
+    EXPECT_TRUE(exhausted_at_response) << "the additional cost is paid as the spell is played";
+    EXPECT_FALSE(stunned_at_response) << "the stun waits for resolution";
+    EXPECT_TRUE(s().getObject(enemy).is_stunned);
+    EXPECT_TRUE(s().getObject(mine).is_exhausted);
+}
+
+constexpr CardDefId kLifeFromStone = 981;  // "As an additional cost ... exhaust a friendly unit. Draw 1 ..."
+
+TEST_F(TriggerFinalizationTest, LifeFromStone_TheUnitExhaustedForTheCostDoesNotStopTheDraw) {
+    setUpBoard();
+    auto mine = engineUnit(P1, 2);
+    p1_.want = mine;
+    for (int i = 0; i < 2; ++i) {
+        auto c = s().createObject();
+        auto& o = s().getObject(c);
+        o.owner = o.controller = P1;
+        o.card_type = CardType::Unit;
+        o.zone = ZoneType::MainDeck;
+        s().player(P1).main_deck.push_back(c);
+    }
+    bool exhausted_at_response = false;
+    p2_.on_first_priority = [&] { exhausted_at_response = s().getObject(mine).is_exhausted; };
+    s().player(P1).rune_pool.energy = 1;
+    auto card = cardInHand(P1, kLifeFromStone);
+    Intent play;
+    play.type = IntentType::PlayCard;
+    play.player = P1;
+    play.card = card;
+    engine_->testHook_executeIntent(play);
+
+    ASSERT_TRUE(p2_.seen);
+    EXPECT_TRUE(exhausted_at_response);
+    EXPECT_EQ(s().player(P1).main_deck.size(), 1u) << "the draw happens although the unit is exhausted now";
+    EXPECT_EQ(s().player(P1).hand.size(), 1u);
+}
+
+TEST_F(TriggerFinalizationTest, AUnitThatCantMoveThisTurnIsOfferedNoMove) {
+    setUpBoard();
+    auto held = engineUnit(P1, 3);
+    auto free_unit = engineUnit(P1, 3);
+    s().getObject(held).cant_move_on_turn = s().turn.turn_number;
+    auto moves_of = [&](GameObjectId u) {
+        int n = 0;
+        for (const auto& a : engine_->generateLegalActions())
+            if (a.type == IntentType::StandardMove &&
+                std::find(a.units_to_move.begin(), a.units_to_move.end(), u) != a.units_to_move.end())
+                ++n;
+        return n;
+    };
+    EXPECT_GT(moves_of(free_unit), 0);
+    EXPECT_EQ(moves_of(held), 0);
+    s().getObject(held).cant_move_on_turn = s().turn.turn_number - 1;   // last turn's
+    EXPECT_GT(moves_of(held), 0);
+}
+
 }  // namespace
 }  // namespace riftbound::test

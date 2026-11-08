@@ -215,6 +215,10 @@ struct GameObject {
     // main-phase move generator (parallel to BattlefieldState::blocks_move_to_base,
     // which is the per-battlefield variant).
     bool cant_move_to_base = false;
+    // "It can't move this turn" (Hunker Down): the turn number the
+    // restriction applies to; the move generator offers no standard move
+    // while it equals the current turn.
+    int cant_move_on_turn = -1;
 
     // ── Take-control reversion (CR 416, Phase 6q+) ──
     // EffectExecutor::takeControl with `until_end_of_turn=true` snapshots

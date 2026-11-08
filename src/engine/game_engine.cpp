@@ -2927,6 +2927,7 @@ std::vector<Intent> GameEngine::generateMainPhaseActions(PlayerId player) const 
     for (auto unit_id : all_units) {
         auto& unit = state_.getObject(unit_id);
         if (unit.is_exhausted) continue; // must be ready
+        if (unit.cant_move_on_turn == state_.turn.turn_number) continue;  // "can't move this turn"
 
         if (unit.isAtBase()) {
             // Can move from base to any battlefield (CR 144.4.a).

@@ -300,6 +300,20 @@ inline void moveToLocation(EffectExecutor& exec, GameObjectId obj,
         exec.moveToBase(obj);
 }
 
+// An additional cost chosen with pickTarget / pickTargetPair ("exhaust a
+// friendly unit", "return a friendly unit") is paid at finalization, and the
+// helper checks the choice again as the item resolves, when the paid object
+// no longer fits the list it was chosen from. Pass that list through this:
+// once the cost is paid, every object is accepted.
+inline std::vector<GameObjectId> costChoices(const CardContext& ctx,
+                                             std::vector<GameObjectId> choices) {
+    if (!Card::costAlreadyPaid(ctx)) return choices;
+    std::vector<GameObjectId> all;
+    all.reserve(ctx.state.objects.size());
+    for (const auto& [id, obj] : ctx.state.objects) all.push_back(id);
+    return all;
+}
+
 inline bool isMighty(const GameObject& obj) { return obj.current_might >= 5; }
 
 inline bool hasTag(const GameObject& obj, const std::string& tag) {
