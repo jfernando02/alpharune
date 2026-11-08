@@ -19,6 +19,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <set>
 #include <string>
@@ -474,6 +475,39 @@ TEST_F(HeuristicAgentTest, TreeStopsAtTheTurnBudget) {
         EXPECT_NE(std::find(legal.begin(), legal.end(), pick), legal.end());
         EXPECT_EQ(agent.stats().simulations, 1);
         EXPECT_EQ(agent.stats().budget_fallbacks, 0);
+    }
+}
+
+// Sequential halving at the root: every option (tree_halving_m=0) is
+// simulated, End Turn included, the pick is deterministic and the observer
+// gets a score for every option.
+TEST_F(HeuristicAgentTest, TreeHalvingSimulatesEveryOption) {
+    HeuristicConfig config;
+    config.tree = true;
+    config.tree_sims = 64;
+    config.tree_halving = true;
+    config.tree_halving_m = 0;
+    config.seed = 321;
+    for (const auto& [state, legal] : cleanPoints(23, 8)) {
+        HeuristicAgent a(card_db, card_registry, config);
+        HeuristicAgent b(card_db, card_registry, config);
+        std::vector<double> seen;
+        a.setSearchObserver([&](const GameState&, const std::vector<Intent>&,
+                                const std::vector<double>& scores) { seen = scores; });
+        const Intent pick = a.selectAction(state, legal);
+        EXPECT_NE(std::find(legal.begin(), legal.end(), pick), legal.end());
+        EXPECT_EQ(b.selectAction(state, legal), pick);
+        EXPECT_EQ(a.stats().failed_simulations, 0);
+        ASSERT_EQ(seen.size(), legal.size());
+        for (size_t i = 0; i < legal.size(); ++i) {
+            if (legal[i].type == IntentType::Concede) continue;
+            EXPECT_FALSE(std::isnan(seen[i])) << "option " << i << " never simulated";
+            EXPECT_GE(a.lastRoot().visits[i], 1);
+        }
+        // The pick has the most visits: it survived every round.
+        const auto& v = a.lastRoot().visits;
+        const int j = static_cast<int>(std::find(legal.begin(), legal.end(), pick) - legal.begin());
+        EXPECT_EQ(v[j], *std::max_element(v.begin(), v.end()));
     }
 }
 

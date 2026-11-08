@@ -41,7 +41,9 @@
 #include <boost/program_options.hpp>
 #include <nlohmann/json.hpp>
 #include <fstream>
+#include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <chrono>
 #include <ctime>
 #include <filesystem>
@@ -200,8 +202,34 @@ bool applyTreeOption(HeuristicConfig& c, const std::string& key, double v) {
     else if (key == "tree_temp") c.tree_temperature = v;
     else if (key == "tree_width") c.tree_width = static_cast<int>(v);
     else if (key == "tree_reuse") c.tree_min_reuse = static_cast<int>(v);
+    else if (key == "tree_halving") c.tree_halving = v != 0;
+    else if (key == "tree_halving_m") c.tree_halving_m = static_cast<int>(v);
+    else if (key == "tree_hscale") c.tree_halving_scale = v;
     else return false;
     return true;
+}
+
+// One line naming an action for --explain: type, card, targets, movers, picks.
+std::string explainIntent(const GameState& st, const Intent& a) {
+    auto name = [&](GameObjectId id) {
+        return st.objectExists(id) ? st.getObject(id).name : "?" + std::to_string(id);
+    };
+    std::string out = toString(a.type);
+    if (a.card != kInvalidId) out += " " + name(a.card);
+    if (a.ability_source != kInvalidId) out += " src=" + name(a.ability_source);
+    auto list = [&](const char* tag, const std::vector<GameObjectId>& ids) {
+        if (ids.empty()) return;
+        out += std::string(" ") + tag + "=[";
+        for (size_t i = 0; i < ids.size(); ++i) out += (i ? "," : "") + name(ids[i]);
+        out += "]";
+    };
+    list("tgt", a.targets);
+    list("units", a.units_to_move);
+    list("pick", a.chosen_objects);
+    if (a.chosen_battlefield != kInvalidId) out += " bf=" + std::to_string(a.chosen_battlefield);
+    if (a.chosen_value.has_value()) out += " value=" + std::to_string(*a.chosen_value);
+    if (!a.choice_label.empty()) out += " (" + a.choice_label + ")";
+    return out;
 }
 
 AgentSpec parseAgentSpec(const std::string& s) {
@@ -478,6 +506,9 @@ int main(int argc, char* argv[]) {
          "Parallel workers for --games > 1 (0 = hardware concurrency).")
         ("show-hand", po::bool_switch()->default_value(false),
          "Show hand contents in stdout / replay renders (debug aid).")
+        ("explain", po::value<std::string>()->default_value(""),
+         "Single game: write every searched decision of a heuristic agent to this "
+         "file — each legal action with the search's score, best first.")
         ("wild", po::bool_switch()->default_value(false),
          "Wild format: allow banned cards in decks (skips the ban-list check).")
     ;
@@ -736,6 +767,43 @@ int main(int argc, char* argv[]) {
     }
     if (!p1_human) p1_human_ptr = nullptr;
     if (!p2_human) p2_human_ptr = nullptr;
+
+    // --explain: each searched decision, every option's search score.
+    std::shared_ptr<std::ofstream> explain_out;
+    if (const auto explain_path = vm["explain"].as<std::string>(); !explain_path.empty()) {
+        explain_out = std::make_shared<std::ofstream>(explain_path);
+        for (auto* agent : {agent1.get(), agent2.get()}) {
+            auto* h = dynamic_cast<HeuristicAgent*>(agent);
+            if (!h) continue;
+            h->setSearchObserver([explain_out, h](const GameState& st, const std::vector<Intent>& legal,
+                                                  const std::vector<double>& scores) {
+                const auto& root = h->lastRoot();
+                const bool detail = root.visits.size() == legal.size();
+                std::vector<size_t> order(legal.size());
+                for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+                auto key = [&](size_t i) {
+                    return i < scores.size() && !std::isnan(scores[i]) ? scores[i] : -1e9;
+                };
+                std::stable_sort(order.begin(), order.end(),
+                                 [&](size_t x, size_t y) { return key(x) > key(y); });
+                auto& o = *explain_out;
+                o << "T" << st.turn.turn_number << " D#" << st.decision_index << " "
+                  << toString(legal.empty() ? PlayerId::None : legal.front().player)
+                  << " score " << st.player(PlayerId::Player1).score << "-"
+                  << st.player(PlayerId::Player2).score << "\n";
+                for (size_t i : order) {
+                    o << "  ";
+                    if (key(i) <= -1e8) o << "   --  ";
+                    else o << std::fixed << std::setprecision(4) << scores[i] << " ";
+                    if (detail)
+                        o << "n=" << std::setw(3) << root.visits[i] << " p=" << std::setprecision(3)
+                          << root.priors[i] << "  ";
+                    o << explainIntent(st, legal[i]) << "\n";
+                }
+                o.flush();
+            });
+        }
+    }
 
     // ── Wire engine + event bus + optional replay writer ──────────────────
     EventBus events;

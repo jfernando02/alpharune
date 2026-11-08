@@ -65,6 +65,22 @@ struct HeuristicAgent::Tree {
         hi = std::max(hi, v);
     }
 
+    /// Takes `action` at `node` (sequential halving's root), counting the
+    /// visit; returns its index in node.children.
+    int force(Node& node, const Intent& action, double prior) {
+        int k = node.find(action);
+        if (k < 0) {
+            node.children.push_back(Child{action});
+            k = static_cast<int>(node.children.size()) - 1;
+        }
+        Child& ch = node.children[k];
+        ++ch.available;
+        ch.prior += (prior - ch.prior) / ch.available;
+        ++node.visits;
+        ++ch.visits;
+        return k;
+    }
+
     /// PUCT: the index in `legal` of the option to take at `node`, counting
     /// the visit; `child` gets its index in node.children. Candidates are
     /// the `width` options with the best priors (0: all). Concede never is.

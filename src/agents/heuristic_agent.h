@@ -137,6 +137,17 @@ struct HeuristicConfig {
     double tree_temperature = 1.0;
     int tree_width = 8;             // options per node below the root (best priors)
     int tree_min_reuse = 4;
+    // The root as Gumbel MuZero's sequential halving instead of PUCT: the
+    // `tree_halving_m` options with the best priors each get an equal share
+    // of the round's simulations, all options of a round on the same guesses
+    // of the hidden cards and engine seeds (common random numbers), and the
+    // worse half by log prior + (50 + max visits) * tree_halving_scale *
+    // normalized mean is dropped after each round; the decision goes to the
+    // last one left. PUCT picks the most visited option, and with ~100
+    // simulations the visits follow the priors, not the values.
+    bool tree_halving = false;
+    int tree_halving_m = 16;
+    double tree_halving_scale = 1.0;
     uint64_t seed = 1;              // 0 picks a random seed
 };
 
@@ -178,6 +189,14 @@ public:
                         const std::vector<Intent>& legal_actions) override;
 
     const Stats& stats() const { return stats_; }
+
+    /// The last tree decision's root, per legal action (diagnostics; valid
+    /// inside the SearchObserver call): visits and prior.
+    struct RootDetail {
+        std::vector<int> visits;
+        std::vector<double> priors;
+    };
+    const RootDetail& lastRoot() const { return last_root_; }
 
     /// Told of every searched decision, and of every follow-up decision
     /// answered from a plan, with the search's score of each legal action
@@ -251,6 +270,7 @@ private:
     // For each step of plan_: the score of each option searched there.
     std::vector<std::vector<std::pair<Intent, double>>> plan_scores_;
     SearchObserver observer_;
+    RootDetail last_root_;
 
     // Tree search (heuristic_tree.cpp).
     struct Tree;
@@ -260,9 +280,15 @@ private:
     /// node there was visited enough.
     std::optional<Intent> treeAnswer(const GameState& state, const std::vector<Intent>& legal);
     /// One simulation from `state`; false when it could not run.
+    /// The root option to take by sequential halving (tree_halving), or -1.
+    int treeHalving(const GameState& state, const std::vector<Intent>& legal, PlayerId me,
+                    uint64_t root_key, const std::vector<double>& priors, int sims,
+                    bool& budget_spent);
     bool treeSimulation(const GameState& state, PlayerId me, uint64_t root_key,
                         const std::vector<Intent>& root_legal,
-                        const std::vector<double>& root_priors);
+                        const std::vector<double>& root_priors,
+                        int forced = -1,     // root option (index in root_legal) to take
+                        uint64_t seed = 0);  // guess + engine seed; 0: from rng_
     uint64_t treeKey(const GameState& state, const std::vector<Intent>& legal, PlayerId me) const;
     std::vector<double> treePriors(const GameState& state, const std::vector<Intent>& legal) const;
     /// The searcher's value of a simulation's end state, in [0, 1].

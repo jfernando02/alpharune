@@ -39,6 +39,12 @@ uint64_t hashLegal(const std::vector<Intent>& legal) {
     return h;
 }
 
+int findAction(const std::vector<Intent>& legal, const Intent& action) {
+    for (size_t j = 0; j < legal.size(); ++j)
+        if (legal[j] == action) return static_cast<int>(j);
+    return -1;
+}
+
 } // namespace
 
 uint64_t HeuristicAgent::treeKey(const GameState& state, const std::vector<Intent>& legal,
@@ -114,6 +120,18 @@ Intent HeuristicAgent::treeSearch(const GameState& state, const std::vector<Inte
         if (a.type != IntentType::Concede) ++options;
     const int sims = std::min(config_.tree_sims, config_.tree_sims_per_action * options);
     bool budget_spent = false;
+    if (config_.tree_halving) {
+        const int pick = treeHalving(state, legal, me, root_key, priors, sims, budget_spent);
+        if (pick < 0) {
+            if (budget_spent) ++stats_.budget_fallbacks;
+            return defaultAction(state, legal);
+        }
+        if (legal[pick].type == IntentType::EndTurn) {
+            ++stats_.lookahead_end_turns;
+            countUnspentEnergy(state, legal, me);
+        }
+        return legal[pick];
+    }
     for (int s = 0; s < sims; ++s) {
         if (config_.max_rollout_steps_per_turn > 0 &&
             steps_this_turn_ >= config_.max_rollout_steps_per_turn) {
@@ -129,11 +147,14 @@ Intent HeuristicAgent::treeSearch(const GameState& state, const std::vector<Inte
     int best = -1;
     const Tree::Child* best_child = nullptr;
     std::vector<double> scores(legal.size(), std::nan(""));
+    last_root_.visits.assign(legal.size(), 0);
+    last_root_.priors = priors;
     if (it != tree.nodes.end()) {
         for (size_t j = 0; j < legal.size(); ++j) {
             const int k = it->second.find(legal[j]);
             if (k < 0) continue;
             const Tree::Child& c = it->second.children[k];
+            last_root_.visits[j] = c.visits;
             if (c.visits == 0) continue;
             scores[j] = c.mean();
             if (!best_child || c.visits > best_child->visits ||
@@ -155,9 +176,78 @@ Intent HeuristicAgent::treeSearch(const GameState& state, const std::vector<Inte
     return legal[best];
 }
 
+int HeuristicAgent::treeHalving(const GameState& state, const std::vector<Intent>& legal,
+                                PlayerId me, uint64_t root_key, const std::vector<double>& priors,
+                                int sims, bool& budget_spent) {
+    Tree& tree = *tree_;
+    std::vector<int> alive;
+    for (size_t i = 0; i < legal.size(); ++i)
+        if (legal[i].type != IntentType::Concede) alive.push_back(static_cast<int>(i));
+    std::stable_sort(alive.begin(), alive.end(),
+                     [&](int a, int b) { return priors[a] > priors[b]; });
+    if (config_.tree_halving_m > 0 && alive.size() > static_cast<size_t>(config_.tree_halving_m))
+        alive.resize(config_.tree_halving_m);
+    if (alive.size() <= 1) return alive.empty() ? -1 : alive[0];
+
+    auto child = [&](int i) -> const Tree::Child* {
+        const auto it = tree.nodes.find(root_key);
+        if (it == tree.nodes.end()) return nullptr;
+        const int k = it->second.find(legal[i]);
+        return k < 0 || it->second.children[k].visits == 0 ? nullptr : &it->second.children[k];
+    };
+    // Gumbel MuZero's score without the Gumbel noise: log prior +
+    // sigma(normalized mean), sigma growing with the most visits.
+    auto rank = [&]() {
+        int max_visits = 0;
+        for (int i : alive)
+            if (const auto* c = child(i)) max_visits = std::max(max_visits, c->visits);
+        const double sigma = (50.0 + max_visits) * config_.tree_halving_scale;
+        std::vector<double> score(legal.size(), -std::numeric_limits<double>::infinity());
+        for (int i : alive) {
+            const auto* c = child(i);
+            if (!c) continue;  // never simulated (every attempt failed): last
+            score[i] = std::log(std::max(priors[i], 1e-9)) + sigma * tree.normalized(c->mean(), true);
+        }
+        std::stable_sort(alive.begin(), alive.end(),
+                         [&](int a, int b) { return score[a] > score[b]; });
+    };
+
+    const int rounds = std::max(1, static_cast<int>(std::ceil(std::log2(alive.size()))));
+    for (int r = 0; r < rounds && alive.size() > 1 && !budget_spent; ++r) {
+        const int per = std::max(1, sims / (rounds * static_cast<int>(alive.size())));
+        for (int v = 0; v < per && !budget_spent; ++v) {
+            const uint64_t seed = rng_() | 1;
+            for (int i : alive) {
+                if (config_.max_rollout_steps_per_turn > 0 &&
+                    steps_this_turn_ >= config_.max_rollout_steps_per_turn) {
+                    budget_spent = true;
+                    break;
+                }
+                treeSimulation(state, me, root_key, legal, priors, i, seed);
+            }
+        }
+        rank();
+        alive.resize((alive.size() + 1) / 2);
+    }
+    if (alive.size() > 1) rank();
+
+    std::vector<double> scores(legal.size(), std::nan(""));
+    last_root_.visits.assign(legal.size(), 0);
+    last_root_.priors = priors;
+    for (size_t j = 0; j < legal.size(); ++j)
+        if (const auto* c = child(static_cast<int>(j))) {
+            scores[j] = c->mean();
+            last_root_.visits[j] = c->visits;
+        }
+    if (!child(alive[0])) return -1;  // nothing was simulated
+    if (observer_) observer_(state, legal, scores);
+    return alive[0];
+}
+
 bool HeuristicAgent::treeSimulation(const GameState& state, PlayerId me, uint64_t root_key,
                                     const std::vector<Intent>& root_legal,
-                                    const std::vector<double>& root_priors) {
+                                    const std::vector<double>& root_priors,
+                                    int forced, uint64_t seed) {
     Tree& tree = *tree_;
     struct Visit {
         Tree::Node* node;
@@ -169,11 +259,15 @@ bool HeuristicAgent::treeSimulation(const GameState& state, PlayerId me, uint64_
     double value = 0.5;
     try {
         GameState guess = state;
-        determinize(guess, me, rng_);
+        // A given seed: the same guess and engine seed for every option
+        // compared with it (sequential halving's common random numbers).
+        std::mt19937_64 shared(seed);
+        std::mt19937_64& rng = seed ? shared : rng_;
+        determinize(guess, me, rng);
         EventBus bus;
         GameEngine engine(card_db_, bus, card_registry_);
         // Nonzero: resumeFromSnapshot treats 0 as "seed from random_device".
-        StepResult step = engine.resumeFromSnapshot(guess, rng_() | 1);
+        StepResult step = engine.resumeFromSnapshot(guess, rng() | 1);
         if (step.kind != StepKind::NeedDecision) {
             ++stats_.failed_simulations;
             return false;
@@ -189,6 +283,15 @@ bool HeuristicAgent::treeSimulation(const GameState& state, PlayerId me, uint64_
                 auto [it, created] = tree.nodes.try_emplace(key);
                 if (created && !at_root) {
                     in_tree = false;  // a new leaf: the playout starts here
+                } else if (at_root && forced >= 0) {
+                    pick = findAction(legal, root_legal[forced]);
+                    if (pick < 0) {  // the guess does not offer it
+                        ++stats_.failed_simulations;
+                        return false;
+                    }
+                    const int child = tree.force(it->second, legal[pick], root_priors[forced]);
+                    path.push_back({&it->second, child, legal[0].player == me});
+                    ++stats_.tree_steps;
                 } else {
                     const bool mine = legal[0].player == me;
                     const std::vector<double> priors =
@@ -242,10 +345,14 @@ std::optional<Intent> HeuristicAgent::treeAnswer(const GameState& state,
     int best = -1, known = 0;
     const Tree::Child* best_child = nullptr;
     std::vector<double> scores(legal.size(), std::nan(""));
+    last_root_.visits.assign(legal.size(), 0);
+    last_root_.priors.assign(legal.size(), std::nan(""));
     for (size_t j = 0; j < legal.size(); ++j) {
         const int k = it->second.find(legal[j]);
         if (k < 0) continue;
         const Tree::Child& c = it->second.children[k];
+        last_root_.visits[j] = c.visits;
+        last_root_.priors[j] = c.prior;
         if (c.visits == 0) continue;
         scores[j] = c.mean();
         ++known;

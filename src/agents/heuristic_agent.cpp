@@ -104,6 +104,7 @@ Intent HeuristicAgent::selectAction(const GameState& state,
     if (legal.empty()) return Intent::concede(state.turn.turn_player);
     if (legal.size() == 1) return legal[0];
     ++stats_.decisions;
+    last_root_ = {};
 
     const SearchKind kind = searchKind(state, legal);
     const bool searchable = kind != SearchKind::None;

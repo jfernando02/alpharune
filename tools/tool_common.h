@@ -178,6 +178,9 @@ inline ToolAgentSpec parseToolAgent(const std::string& spec) {
         else if (key == "tree_temp" && h) out.heuristic.tree_temperature = std::stod(val);
         else if (key == "tree_width" && h) out.heuristic.tree_width = std::stoi(val);
         else if (key == "tree_reuse" && h) out.heuristic.tree_min_reuse = std::stoi(val);
+        else if (key == "tree_halving" && h) out.heuristic.tree_halving = std::stoi(val) != 0;
+        else if (key == "tree_halving_m" && h) out.heuristic.tree_halving_m = std::stoi(val);
+        else if (key == "tree_hscale" && h) out.heuristic.tree_halving_scale = std::stod(val);
         else if (key == "sims" && !h) out.ismcts.max_simulations = std::stoi(val);
         else if (key == "uct_c" && !h) out.ismcts.uct_c = std::stod(val);
         else if (!setWeight(h ? out.heuristic.weights : out.ismcts.weights, key, std::stod(val)))
