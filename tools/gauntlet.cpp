@@ -4,15 +4,16 @@
 ///
 ///   riftbound_gauntlet --agent SPEC --deck FILE [--deck FILE ...]
 ///                      [--opponents DIR] [--pairs N] [--threads T] [--seed S]
-///                      [--game-seconds N] [--out FILE.csv]
+///                      [--game-seconds N] [--out FILE.csv] [--round-robin]
 ///
 /// Each candidate meets each opponent in N pairs of games: the same game seed
 /// with the seats swapped, so neither side gains from going first. Pair p
 /// against an opponent uses the same seeds for every candidate, so candidates
 /// that differ by a few cards are compared on the same games as far as the
 /// decks let them. Opponents are the legal decks of DIR that are not
-/// candidates. A game still going after --game-seconds (default 600) is
-/// finished by ScriptedAgent for both seats.
+/// candidates (with --round-robin: every deck of DIR, so candidates in DIR
+/// also play each other, never themselves). A game still going after
+/// --game-seconds (default 600) is finished by ScriptedAgent for both seats.
 ///
 /// Prints a table per candidate (overall and per opponent) and writes every
 /// game to --out: candidate,opponent,pair,candidate_seat,result (win / loss /
@@ -48,6 +49,7 @@ struct Options {
     uint64_t seed = 1;
     double game_seconds = 600.0;
     std::string out;
+    bool round_robin = false;   // candidates in DIR are opponents too (never themselves)
 };
 
 Options parse(int argc, char** argv) {
@@ -66,6 +68,7 @@ Options parse(int argc, char** argv) {
         else if (arg == "--seed") o.seed = std::stoull(next());
         else if (arg == "--game-seconds") o.game_seconds = std::stod(next());
         else if (arg == "--out") o.out = next();
+        else if (arg == "--round-robin") o.round_robin = true;
         else throw std::runtime_error("unknown argument " + arg);
     }
     if (o.decks.empty()) throw std::runtime_error("at least one --deck is required");
@@ -115,7 +118,7 @@ int main(int argc, char** argv) {
         std::cerr << "Error: " << e.what() << "\n"
                   << "usage: riftbound_gauntlet --agent SPEC --deck FILE [--deck FILE ...] "
                      "[--opponents DIR] [--pairs N] [--threads T] [--seed S] "
-                     "[--game-seconds N] [--out FILE.csv]\n";
+                     "[--game-seconds N] [--out FILE.csv] [--round-robin]\n";
         return 2;
     }
 
@@ -143,8 +146,11 @@ int main(int argc, char** argv) {
     const tools::DeckSet field = tools::loadLegalDecks(opt.opponents_dir, db);
     std::vector<size_t> opponents;
     for (size_t i = 0; i < field.names.size(); ++i)
-        if (std::find(names.begin(), names.end(), field.names[i]) == names.end())
+        if (opt.round_robin ||
+            std::find(names.begin(), names.end(), field.names[i]) == names.end())
             opponents.push_back(i);
+    // A candidate never plays its own list.
+    const auto self = [&](size_t c, size_t o) { return field.names[o] == names[c]; };
     if (opponents.empty()) {
         std::cerr << "no opponent decks in " << opt.opponents_dir << "\n";
         return 1;
@@ -167,6 +173,7 @@ int main(int argc, char** argv) {
             const size_t rest = j / candidates.size();
             const size_t o = opponents[rest % opponents.size()];
             const int p = static_cast<int>(rest / opponents.size());
+            if (self(c, o)) continue;
             std::mt19937_64 rng(opt.seed * 1000003ULL + o * 7919ULL + static_cast<uint64_t>(p));
             const uint64_t game_seed = (rng() & 0x7FFFFFFFULL) | 1;
             const uint64_t seed_c = rng(), seed_o = rng();
@@ -240,6 +247,7 @@ int main(int argc, char** argv) {
         std::cout << names[c] << ": " << all.wins << "-" << all.losses << "-" << all.draws
                   << " (errors " << all.errors << ") score " << all.score() << "\n";
         for (size_t o : opponents) {
+            if (self(c, o)) continue;
             const Tally& t = tallies[{c, o}];
             std::cout << "    " << std::setw(24) << std::left << field.names[o] << std::right
                       << " " << t.wins << "-" << t.losses << "-" << t.draws << "\n";

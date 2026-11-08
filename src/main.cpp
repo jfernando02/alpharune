@@ -175,6 +175,7 @@ struct AgentSpec {
     int sims = 0;          // populated for mcts/ismcts
     int guesses = 0;       // heuristic only; 0 = HeuristicConfig default
     int turns_ahead = 0;   // heuristic / ismcts-native; 0 = config default
+    long step_budget = 0;  // heuristic only: engine steps per turn of rollouts; 0 = default
     double uct_c = 0.0;    // ismcts-native only; 0 = IsmctsConfig default
     double value_scale = 0.0;  // ismcts-native only; 0 = IsmctsConfig default
     std::string policy;    // ismcts-native only: visits | maxvisits | maxvalue
@@ -232,6 +233,7 @@ AgentSpec parseAgentSpec(const std::string& s) {
                 if (key == "sims") out.sims = std::stoi(val);
                 else if (key == "guesses") out.guesses = std::stoi(val);
                 else if (key == "turns_ahead") out.turns_ahead = std::stoi(val);
+                else if (key == "step_budget" && out.kind == "heuristic") out.step_budget = std::stol(val);
                 else if (key == "uct_c") out.uct_c = std::stod(val);
                 else if (key == "value_scale") out.value_scale = std::stod(val);
                 else if (key == "policy") out.policy = val;
@@ -310,6 +312,7 @@ std::unique_ptr<AgentInterface> buildAgent(const AgentSpec& spec,
         HeuristicConfig config;
         if (spec.guesses > 0) config.guesses = spec.guesses;
         if (spec.turns_ahead > 0) config.turns_ahead = spec.turns_ahead;
+        if (spec.step_budget > 0) config.max_rollout_steps_per_turn = spec.step_budget;
         for (const auto& [name, value] : spec.weights) setWeight(config.weights, name, value);
         for (const auto& [name, value] : spec.tree) applyTreeOption(config, name, value);
         if (!spec.model.empty()) config.model = loadModelCached(spec.model);
