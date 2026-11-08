@@ -15,8 +15,11 @@ class Eclipse : public SpellCard {
 public:
     const CardDef& def() const override { return def_; }
     void onResolve(CardContext& ctx, const std::vector<GameObjectId>& targets) override {
-        if (!targets.empty())
+        // "Give a unit -4 [M] this turn. [Predict]." The Predict happens even
+        // if the unit is no longer a legal target.
+        if (!targets.empty() && ctx.state.objectExists(targets[0]))
             ctx.executor.giveTemporaryMight(targets[0], -4);
+        ctx.executor.predict(ctx.controller, 1);
     }
     TargetRequirements getTargetRequirements() const override {
         return TargetRequirements{.count = 1, .must_be_unit = true};

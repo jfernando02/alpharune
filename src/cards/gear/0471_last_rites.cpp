@@ -17,22 +17,16 @@ public:
     const CardDef& def() const override { return def_; }
 
     bool hasEquipAbility() const override { return true; }
+    bool canEquip(const GameState& state, PlayerId controller) const override {
+        return state.player(controller).trash.size() >= 2 &&
+               canPayEquipCost(state, controller, 0, Domain::Chaos);
+    }
     bool onEquip(CardContext& ctx, GameObjectId unit) override {
         auto& ps = ctx.state.player(ctx.controller);
         if (ps.trash.size() < 2) return false;
 
-        // Pre-check a Chaos power rune is available before committing.
-        bool has_chaos = false;
-        auto base_loc = BaseLocation{ctx.controller};
-        for (auto& [id, obj] : ctx.state.objects) {
-            if (!obj.isRune() || obj.controller != ctx.controller) continue;
-            if (!obj.location.has_value() || *obj.location != LocationId{base_loc}) continue;
-            for (auto d : obj.domains) {
-                if (d == Domain::Chaos) { has_chaos = true; break; }
-            }
-            if (has_chaos) break;
-        }
-        if (!has_chaos) return false;
+        // Pre-check the [R] can be paid before committing the trash recycle.
+        if (!canPayEquipCost(ctx.state, ctx.controller, 0, Domain::Chaos)) return false;
 
         // Pay the additional cost: recycle 2 cards from trash (back-of-trash;
         // which-2 is auto, an agent-choice refinement for later).

@@ -20,10 +20,10 @@ public:
     ActivationCost getActivationCost() const override { return {.exhaust = true}; }
     void onActivate(CardContext& ctx,
                     const std::vector<GameObjectId>& /*targets*/) override {
-        // [Add] [A] resolves immediately (CR 429.2) — not via the chain.
-        ctx.executor.addFloatingUniversalPower(ctx.controller, 1);
-        ctx.events.logTrace("ACTIVATE: Fire Below the Mountain adds [A] "
-                            "(spend earmarked for gear — not engine-enforced)");
+        // [Add] [A] resolves immediately (CR 430.2) — not via the chain. "Use
+        // only to play gear or use gear abilities": its own pool, which only
+        // gear plays and gear abilities can spend.
+        ctx.executor.addRestrictedPower(ctx.controller, SpendScope::Gear, 1);
     }
 private:
     const CardDef def_ = [] {

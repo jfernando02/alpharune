@@ -1,9 +1,9 @@
 #pragma once
 /// @file equip_base.h
-/// Shared equip infrastructure for gear cards — the canonical standardEquip
-/// helper plus the SimpleEquipGear / UniversalEquipGear base classes. Lives in
-/// the gear/ type dir (relocated from the old _shared holding pen). This is the
-/// ONE canonical standardEquip; the old per-audit-file copies redirect here.
+/// Shared equip infrastructure for gear cards — the canonical equip cost
+/// payment (canPayEquipCost / payEquipCost), standardEquip, and the
+/// SimpleEquipGear / UniversalEquipGear base classes. This is the ONE canonical
+/// standardEquip; the old per-audit-file copies redirect here.
 
 #include "cards/card.h"
 #include "cards/card_registry.h"
@@ -12,72 +12,127 @@
 
 #include <algorithm>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace riftbound {
 
-// ─── Standard equip cost check: [energy] ready runes + one [domain] rune ─────
-/// The rune `standardEquip` would recycle for the [domain] power, or
-/// kInvalidId when `player` cannot pay [energy] + that power.
-inline GameObjectId standardEquipPowerRune(const GameState& state, PlayerId player,
-                                           int energy_cost, Domain domain) {
-    const auto base_loc = BaseLocation{player};
-    int ready_count = 0;
-    GameObjectId domain_rune = kInvalidId;
-    for (const auto& [id, obj] : state.objects) {
-        if (!obj.isRune() || obj.controller != player) continue;
-        if (!obj.location.has_value() || *obj.location != LocationId{base_loc}) continue;
-        if (!obj.is_exhausted) ready_count++;
-        if (domain_rune == kInvalidId) {
-            for (auto d : obj.domains) {
-                if (d == domain) { domain_rune = id; break; }
-            }
-        }
+// ─── Equip cost: [energy] + one Power of `domain` ([A] when nullopt) ─────────
+// [Equip] is an activated ability of the gear, so it is paid like any other
+// cost (CR 445): from the rune pool first — Power that may only be used on gear
+// abilities (Fire Below the Mountain, RunePool::restricted) included — then by
+// exhausting runes for Energy and recycling a rune, ready or exhausted, for
+// Power (CR 164.2; one rune may do both).
+namespace equip_detail {
+inline bool runeMatches(const GameObject& rune, std::optional<Domain> domain) {
+    if (!domain.has_value()) return true;
+    for (auto d : rune.domains) if (d == *domain) return true;
+    return false;
+}
+inline bool poolHasPower(const RunePool& pool, const SpendPurpose& purpose,
+                         std::optional<Domain> domain) {
+    if (pool.restrictedPowerFor(purpose) > 0 || pool.universal_power > 0) return true;
+    return domain.has_value() ? pool.power[static_cast<int>(*domain)] > 0
+                              : pool.totalPower() > 0;
+}
+inline std::vector<GameObjectId> runesInBase(const GameState& state, PlayerId player) {
+    std::vector<GameObjectId> out;
+    const LocationId base{BaseLocation{player}};
+    for (const auto& [id, obj] : state.objects)
+        if (obj.isRune() && obj.controller == player && obj.location.has_value() &&
+            *obj.location == base) out.push_back(id);
+    std::sort(out.begin(), out.end());
+    return out;
+}
+}  // namespace equip_detail
+
+inline bool canPayEquipCost(const GameState& state, PlayerId player, int energy_cost,
+                            std::optional<Domain> domain) {
+    const auto& pool = state.player(player).rune_pool;
+    const SpendPurpose purpose = state.purposeAbilityOf(CardType::Gear);
+    int ready = 0;
+    bool rune_for_power = false;
+    for (auto id : equip_detail::runesInBase(state, player)) {
+        const auto& rune = state.getObject(id);
+        if (!rune.is_exhausted) ++ready;
+        if (equip_detail::runeMatches(rune, domain)) rune_for_power = true;
     }
-    if (ready_count < energy_cost) return kInvalidId;
-    return domain_rune;
+    return ready + pool.energyFor(purpose) >= std::max(0, energy_cost) &&
+           (equip_detail::poolHasPower(pool, purpose, domain) || rune_for_power);
 }
 
-// ─── Canonical standard equip: pay [energy] + one [domain] power, then attach ──
-inline bool standardEquip(CardContext& ctx, GameObjectId gear_id, GameObjectId unit_id,
-                          int energy_cost, Domain domain) {
+inline bool payEquipCost(CardContext& ctx, int energy_cost, std::optional<Domain> domain) {
     auto& state = ctx.state;
-    auto player = ctx.controller;
+    const PlayerId player = ctx.controller;
+    if (!canPayEquipCost(state, player, energy_cost, domain)) return false;
     auto& ps = state.player(player);
-    auto base_loc = BaseLocation{player};
+    auto& pool = ps.rune_pool;
+    const SpendPurpose purpose = state.purposeAbilityOf(CardType::Gear);
 
-    // PRE-CHECK: bail (no state change) unless BOTH the energy and the
-    // domain-power can be paid — otherwise the loops below would partially
-    // pay and then "equip for free".
-    const GameObjectId domain_rune = standardEquipPowerRune(state, player, energy_cost, domain);
-    if (domain_rune == kInvalidId) return false;
-
-    // Pay energy: exhaust ready runes.
-    if (energy_cost > 0) {
-        int e_remaining = energy_cost;
-        for (auto& [id, obj] : state.objects) {
-            if (e_remaining <= 0) break;
-            if (!obj.isRune() || obj.controller != player || obj.is_exhausted) continue;
-            if (!obj.location.has_value() || *obj.location != LocationId{base_loc}) continue;
-            obj.is_exhausted = true;
-            e_remaining--;
+    int e_need = std::max(0, energy_cost);
+    pool.spendEnergy(purpose, e_need);
+    const bool power_from_pool = equip_detail::poolHasPower(pool, purpose, domain);
+    auto runes = equip_detail::runesInBase(state, player);
+    if (e_need > 0) {
+        // When a rune must pay the Power, exhaust a matching one for Energy
+        // first so the same rune can then be recycled.
+        std::stable_sort(runes.begin(), runes.end(), [&](GameObjectId a, GameObjectId b) {
+            if (power_from_pool) return false;
+            return equip_detail::runeMatches(state.getObject(a), domain) >
+                   equip_detail::runeMatches(state.getObject(b), domain);
+        });
+        for (auto id : runes) {
+            if (e_need <= 0) break;
+            auto& rune = state.getObject(id);
+            if (rune.is_exhausted) continue;
+            rune.is_exhausted = true;
+            ctx.events.emit(ObjectStateChangedEvent{id, "exhausted"});
+            --e_need;
         }
     }
 
-    // Recycle the pre-located matching-domain rune for power.
-    {
-        auto& dr = state.getObject(domain_rune);
-        ctx.events.logTrace("  EQUIP_COST: recycled " + dr.name + " for power");
-        dr.location = std::nullopt;
-        dr.zone = ZoneType::RuneDeck;
-        ps.rune_deck.insert(ps.rune_deck.begin(), domain_rune);
+    if (power_from_pool) {
+        int p_need = 1;
+        pool.spendRestrictedPower(purpose, p_need);
+        if (p_need > 0 && domain.has_value() && pool.power[static_cast<int>(*domain)] > 0) {
+            --pool.power[static_cast<int>(*domain)];
+            p_need = 0;
+        }
+        if (p_need > 0 && !domain.has_value()) {
+            for (int di = 0; di < static_cast<int>(Domain::Count) && p_need > 0; ++di)
+                if (pool.power[di] > 0) { --pool.power[di]; p_need = 0; }
+        }
+        if (p_need > 0 && pool.universal_power > 0) { --pool.universal_power; p_need = 0; }
+        ctx.events.logTrace("  EQUIP_COST: paid the Power from the rune pool");
+        return true;
     }
+    // Recycle a matching rune, an exhausted one first (it has nothing else to give).
+    GameObjectId pick = kInvalidId;
+    for (auto id : runes) {
+        const auto& rune = state.getObject(id);
+        if (!equip_detail::runeMatches(rune, domain)) continue;
+        if (pick == kInvalidId || (rune.is_exhausted && !state.getObject(pick).is_exhausted))
+            pick = id;
+    }
+    if (pick == kInvalidId) return false;   // canPayEquipCost said otherwise
+    auto& dr = state.getObject(pick);
+    ctx.events.logTrace("  EQUIP_COST: recycled " + dr.name + " for power");
+    dr.location = std::nullopt;
+    dr.zone = ZoneType::RuneDeck;
+    dr.is_exhausted = false;
+    ps.rune_deck.insert(ps.rune_deck.begin(), pick);
+    ps.power_spent_this_turn++;
+    ctx.events.emit(LeftBoardEvent{pick, player, CardType::Rune, BaseLocation{player},
+                                   ZoneType::RuneDeck, false});
+    return true;
+}
 
-    // Attach.
-    auto& gear = state.getObject(gear_id);
-    auto& unit = state.getObject(unit_id);
+// ─── Attach a gear to a unit (cost already paid) ─────────────────────────────
+inline void attachEquipment(CardContext& ctx, GameObjectId gear_id, GameObjectId unit_id) {
+    auto& gear = ctx.state.getObject(gear_id);
+    auto& unit = ctx.state.getObject(unit_id);
     ctx.events.logTrace("EQUIP: " + gear.name + " -> " + unit.name +
-                         " (might_bonus=" + std::to_string(gear.might_bonus) + ")");
+                        " (might_bonus=" + std::to_string(gear.might_bonus) + ")");
     gear.attached_to = unit_id;
     unit.attachments.push_back(gear_id);
     gear.location = unit.location;
@@ -86,6 +141,15 @@ inline bool standardEquip(CardContext& ctx, GameObjectId gear_id, GameObjectId u
     unit.recomputeMight();
     ctx.events.emit(ObjectStateChangedEvent{gear_id, "attached"});
     ctx.events.emit(ObjectStateChangedEvent{unit_id, "equipped"});
+}
+
+// ─── Canonical standard equip: pay [energy] + one [domain] power, then attach ──
+inline bool standardEquip(CardContext& ctx, GameObjectId gear_id, GameObjectId unit_id,
+                          int energy_cost, std::optional<Domain> domain) {
+    if (!ctx.state.objectExists(gear_id) || !ctx.state.objectExists(unit_id)) return false;
+    // No state change unless the whole cost can be paid.
+    if (!payEquipCost(ctx, energy_cost, domain)) return false;
+    attachEquipment(ctx, gear_id, unit_id);
     return true;
 }
 
@@ -102,7 +166,7 @@ public:
         return standardEquip(ctx, ctx.source, unit, energy_cost_, equip_domain_);
     }
     bool canEquip(const GameState& state, PlayerId controller) const override {
-        return standardEquipPowerRune(state, controller, energy_cost_, equip_domain_) != kInvalidId;
+        return canPayEquipCost(state, controller, energy_cost_, equip_domain_);
     }
 
 protected:
@@ -110,7 +174,7 @@ protected:
     int energy_cost_;
 };
 
-// ─── Universal equip gear: pay [A] (recycle any rune), then attach ──────────
+// ─── Universal equip gear: pay [A], then attach ─────────────────────────────
 class UniversalEquipGear : public GearCard {
 public:
     explicit UniversalEquipGear(int energy_cost = 0)
@@ -118,40 +182,10 @@ public:
 
     bool hasEquipAbility() const override { return true; }
     bool onEquip(CardContext& ctx, GameObjectId unit) override {
-        auto& state = ctx.state;
-        auto player = ctx.controller;
-        auto& ps = state.player(player);
-        auto base_loc = BaseLocation{player};
-
-        for (int i = 0; i < energy_cost_; ++i) {
-            for (auto& [id, obj] : state.objects) {
-                if (!obj.isRune() || obj.controller != player || obj.is_exhausted) continue;
-                if (!obj.location.has_value() || *obj.location != LocationId{base_loc}) continue;
-                obj.is_exhausted = true;
-                break;
-            }
-        }
-        for (auto& [id, obj] : state.objects) {
-            if (!obj.isRune() || obj.controller != player) continue;
-            if (!obj.location.has_value() || *obj.location != LocationId{base_loc}) continue;
-            ctx.events.logTrace("  EQUIP_COST: recycled " + obj.name + " for [A]");
-            obj.location = std::nullopt;
-            obj.zone = ZoneType::RuneDeck;
-            ps.rune_deck.insert(ps.rune_deck.begin(), id);
-            break;
-        }
-        auto& gear = state.getObject(ctx.source);
-        auto& unit_obj = state.getObject(unit);
-        ctx.events.logTrace("EQUIP: " + gear.name + " -> " + unit_obj.name);
-        gear.attached_to = unit;
-        unit_obj.attachments.push_back(ctx.source);
-        gear.location = unit_obj.location;
-        gear.zone = unit_obj.zone;
-        unit_obj.attachment_might_bonus += gear.might_bonus;
-        unit_obj.recomputeMight();
-        ctx.events.emit(ObjectStateChangedEvent{ctx.source, "attached"});
-        ctx.events.emit(ObjectStateChangedEvent{unit, "equipped"});
-        return true;
+        return standardEquip(ctx, ctx.source, unit, energy_cost_, std::nullopt);
+    }
+    bool canEquip(const GameState& state, PlayerId controller) const override {
+        return canPayEquipCost(state, controller, energy_cost_, std::nullopt);
     }
 
 protected:

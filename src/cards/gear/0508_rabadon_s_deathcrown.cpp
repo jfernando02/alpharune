@@ -16,6 +16,9 @@ class RabadonSDeathcrown : public GearCard {
 public:
     const CardDef& def() const override { return def_; }
     bool hasEquipAbility() const override { return true; }
+    bool canEquip(const GameState& state, PlayerId controller) const override {
+        return canPayEquipCost(state, controller, 0, std::nullopt);
+    }
     bool onEquip(CardContext& ctx, GameObjectId unit) override {
         // [A] equip: recycle any rune for power.
         return standardEquip(ctx, ctx.source, unit, std::nullopt);

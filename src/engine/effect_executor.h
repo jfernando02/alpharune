@@ -35,8 +35,9 @@ struct EffectPlayCost {
 /// [A] an opponent must pay to choose `target` (CR 808 Deflect); 0 if
 /// `chooser` controls it or Deflect is ignored at its battlefield.
 int deflectCostFor(const GameState& state, PlayerId chooser, GameObjectId target);
-/// Power of any Domain `player` could pay right now.
-int payableAnyPower(const GameState& state, PlayerId player);
+/// Power of any Domain `player` could pay right now for `purpose` (restricted
+/// floating power counts only where the purpose allows it).
+int payableAnyPower(const GameState& state, PlayerId player, SpendPurpose purpose = {});
 
 class EffectExecutor {
 public:
@@ -151,20 +152,24 @@ public:
     // These helpers are called directly from Card::onTrigger / onActivate
     // bodies; no chain bookkeeping required.
     void addFloatingEnergy(PlayerId player, int amount);
-    /// Energy that can only pay for units and activated abilities of units.
-    void addUnitOnlyEnergy(PlayerId player, int amount);
     void addFloatingPower(PlayerId player, Domain domain, int amount);
     /// Universal power ([A]). Counted separately from domain-specific power
     /// and spendable for any cost.
     void addFloatingUniversalPower(PlayerId player, int amount);
+    /// Energy / [A] Power the adding ability restricts ("Use only to play
+    /// spells."): kept in its own pool (RunePool::restricted), spendable only
+    /// on payments `scope` allows.
+    void addRestrictedEnergy(PlayerId player, SpendScope scope, int amount);
+    void addRestrictedPower(PlayerId player, SpendScope scope, int amount);
 
     // ── Paying inside an effect ──
-    /// Power of any Domain ([A]) `player` could pay now: floating power of
-    /// every kind plus runes in base (CR 164.2.b — recycle, ready or exhausted).
-    int payableAnyPower(PlayerId player) const;
+    /// Power of any Domain ([A]) `player` could pay now for `purpose`: floating
+    /// power (restricted power only where `purpose` allows it) plus runes in
+    /// base (CR 164.2.b — recycle, ready or exhausted).
+    int payableAnyPower(PlayerId player, SpendPurpose purpose = {}) const;
     /// Pay `amount` [A]: floating power first, then recycle runes (exhausted
     /// ones first). Pays nothing and returns false if it can't be covered.
-    bool payAnyPower(PlayerId player, int amount);
+    bool payAnyPower(PlayerId player, int amount, SpendPurpose purpose = {});
 
     // ── Scoring by an effect (CR 471 "score N points" outside Conquer/Hold) ──
     /// Give `player` `amount` points from an effect: honours "can't gain/score

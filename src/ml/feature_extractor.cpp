@@ -137,7 +137,8 @@ void extractPlayerFeatures(const GameState& state, PlayerId player,
     out.push_back(static_cast<float>(ps.hand.size()));
     out.push_back(static_cast<float>(ps.main_deck.size()));
     out.push_back(static_cast<float>(ps.rune_deck.size()));
-    out.push_back(static_cast<float>(ps.rune_pool.energy));
+    out.push_back(static_cast<float>(ps.rune_pool.energy +
+                                     ps.rune_pool.restrictedEnergyTotal()));
     out.push_back(ps.burned_out ? 1.0f : 0.0f);
     int cards_played = ps.cards_played_this_turn;
     out.push_back(static_cast<float>(cards_played));
@@ -157,7 +158,8 @@ void extractPlayerFeatures(const GameState& state, PlayerId player,
     // Power breakdown by domain (7)
     for (int i = 0; i < static_cast<int>(Domain::Count); ++i)
         out.push_back(static_cast<float>(ps.rune_pool.power[i]));
-    out.push_back(static_cast<float>(ps.rune_pool.universal_power));
+    out.push_back(static_cast<float>(ps.rune_pool.universal_power +
+                                     ps.rune_pool.restrictedPowerTotal()));
 
     // Hand card IDs (10) — self only, opponent's hidden
     for (int i = 0; i < 10; ++i) {

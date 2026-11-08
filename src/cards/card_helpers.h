@@ -19,21 +19,21 @@ namespace riftbound {
 // The engine-known Gold gear token's card_def_id.
 constexpr CardDefId kGoldGearCardDefId = 326;
 
-// ── Equip: pay one power (of `domain`, or any rune if nullopt), then attach ──
-// Complements the energy+Domain `standardEquip` overload in gear/equip_base.h.
-// One Power of `domain` (any domain if nullopt), the way CR 164.2 lets it be
-// paid: floating Power of that domain, then universal Power, then recycling a
-// matching rune — ready or exhausted (an exhausted one first, since a ready
-// rune can still be exhausted for Energy).
+// ── One Power of `domain` (any domain if nullopt) ──
+// Paid the way CR 164.2 lets it be: restricted Power `purpose` may spend
+// (RunePool::restricted; none for a plain "pay [C]" trigger cost), floating
+// Power of that domain, universal Power, then recycling a matching rune — ready
+// or exhausted (an exhausted one first, since a ready rune can still be
+// exhausted for Energy). Equip costs go through payEquipCost (equip_base.h).
 inline bool runeMatchesDomain(const GameObject& rune, std::optional<Domain> domain) {
     if (!domain.has_value()) return true;
     for (auto d : rune.domains) if (d == *domain) return true;
     return false;
 }
 inline bool payableOnePower(const GameState& state, PlayerId player,
-                            std::optional<Domain> domain) {
+                            std::optional<Domain> domain, SpendPurpose purpose = {}) {
     const auto& pool = state.player(player).rune_pool;
-    if (pool.universal_power > 0) return true;
+    if (pool.universal_power > 0 || pool.restrictedPowerFor(purpose) > 0) return true;
     if (domain.has_value()) { if (pool.power[static_cast<int>(*domain)] > 0) return true; }
     else if (pool.totalPower() > 0) return true;
     const LocationId base{BaseLocation{player}};
@@ -43,9 +43,14 @@ inline bool payableOnePower(const GameState& state, PlayerId player,
     return false;
 }
 inline bool payOnePower(CardContext& ctx, PlayerId player,
-                        std::optional<Domain> domain) {
+                        std::optional<Domain> domain, SpendPurpose purpose = {}) {
     auto& state = ctx.state;
     auto& pool = state.player(player).rune_pool;
+    {
+        int need = 1;
+        pool.spendRestrictedPower(purpose, need);
+        if (need == 0) return true;
+    }
     if (domain.has_value()) {
         int& own = pool.power[static_cast<int>(*domain)];
         if (own > 0) { --own; return true; }
@@ -67,8 +72,12 @@ inline bool payOnePower(CardContext& ctx, PlayerId player,
     auto& dr = state.getObject(rune);
     dr.location = std::nullopt;
     dr.zone = ZoneType::RuneDeck;
+    dr.is_exhausted = false;
     state.player(player).rune_deck.insert(state.player(player).rune_deck.begin(), rune);
+    state.player(player).power_spent_this_turn++;
     ctx.events.logTrace("  ADDL_COST: recycled " + dr.name + " for power");
+    ctx.events.emit(LeftBoardEvent{rune, player, CardType::Rune, BaseLocation{player},
+                                   ZoneType::RuneDeck, false});
     return true;
 }
 
@@ -89,24 +98,10 @@ inline int excessCombatDamageAt(const GameState& state, PlayerId player, Battlef
     return ps.last_combat_bf == bf ? ps.excess_combat_damage : 0;
 }
 
+// Equip [C] / [A] with no Energy: the canonical payment in gear/equip_base.h.
 inline bool standardEquip(CardContext& ctx, GameObjectId gear_id,
                           GameObjectId unit_id, std::optional<Domain> domain) {
-    auto& state = ctx.state;
-    if (!state.objectExists(gear_id) || !state.objectExists(unit_id)) return false;
-    if (!payOnePower(ctx, ctx.controller, domain)) return false;
-    auto& gear = state.getObject(gear_id);
-    auto& unit = state.getObject(unit_id);
-    ctx.events.logTrace("EQUIP: " + gear.name + " -> " + unit.name +
-                        " (might_bonus=" + std::to_string(gear.might_bonus) + ")");
-    gear.attached_to = unit_id;
-    unit.attachments.push_back(gear_id);
-    gear.location = unit.location;
-    gear.zone = unit.zone;
-    unit.attachment_might_bonus += gear.might_bonus;
-    unit.recomputeMight();
-    ctx.events.emit(ObjectStateChangedEvent{gear_id, "attached"});
-    ctx.events.emit(ObjectStateChangedEvent{unit_id, "equipped"});
-    return true;
+    return standardEquip(ctx, gear_id, unit_id, /*energy_cost=*/0, domain);
 }
 
 // Attach a gear directly (no cost) to a unit (e.g. Edge of Night's

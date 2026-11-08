@@ -20,33 +20,39 @@ public:
     void onTrigger(CardContext& ctx, const std::vector<GameObjectId>&) override {
         auto& ps = ctx.state.player(ctx.controller);
 
-        // Look at top 4 (top = back of vector).
+        // Look at the top 4 (top = back of the vector). They stay in the deck
+        // until the pick is made, so the trigger can suspend for the choice.
         std::vector<GameObjectId> peeked;
-        for (int i = 0; i < 4 && !ps.main_deck.empty(); ++i) {
-            peeked.push_back(ps.main_deck.back());
-            ps.main_deck.pop_back();
-        }
+        for (int i = static_cast<int>(ps.main_deck.size()) - 1;
+             i >= 0 && static_cast<int>(peeked.size()) < 4; --i)
+            peeked.push_back(ps.main_deck[i]);
         if (peeked.empty()) return;
 
-        // Reveal a gear from among them and draw it (first gear; "may" is
-        // treated as always-take when a gear is present — consistent with
-        // the other look-N drafters in this engine).
+        // "You may reveal a gear from among them and draw it": the agent picks
+        // which gear (drawing one is never worse than recycling it).
+        std::vector<GameObjectId> gears;
+        for (auto id : peeked)
+            if (ctx.state.objectExists(id) && ctx.state.getObject(id).isGear())
+                gears.push_back(id);
         GameObjectId drafted = kInvalidId;
-        std::vector<GameObjectId> rest;
-        for (auto id : peeked) {
-            if (!ctx.state.objectExists(id)) { continue; }
-            const auto& obj = ctx.state.getObject(id);
-            if (drafted == kInvalidId && obj.isGear()) drafted = id;
-            else rest.push_back(id);
+        if (!gears.empty()) {
+            drafted = pickTarget(ctx, "Ornn, Blacksmith: reveal a gear and draw it", gears);
+            if (ctx.executor.hasPendingChoice()) return;  // waiting for the pick
         }
 
-        if (drafted != kInvalidId) {
+        auto takeFromDeck = [&](GameObjectId id) {
+            auto it = std::find(ps.main_deck.begin(), ps.main_deck.end(), id);
+            if (it == ps.main_deck.end()) return false;
+            ps.main_deck.erase(it);
+            return true;
+        };
+        if (drafted != kInvalidId && ctx.state.objectExists(drafted) && takeFromDeck(drafted)) {
             auto& drafted_obj = ctx.state.getObject(drafted);
             ctx.events.emit(CardRevealedEvent{
                 /*card=*/drafted,
                 /*card_def_id=*/drafted_obj.card_def_id,
                 /*owner=*/drafted_obj.owner,
-                /*revealed_to_all=*/false,
+                /*revealed_to_all=*/true,
                 /*revealed_to=*/ctx.controller,
                 /*source_zone=*/ZoneType::MainDeck,
             });
@@ -57,6 +63,9 @@ public:
         }
 
         // Recycle the rest to the bottom of the deck.
+        std::vector<GameObjectId> rest;
+        for (auto id : peeked)
+            if (id != drafted && takeFromDeck(id)) rest.push_back(id);
         if (!rest.empty()) {
             ctx.executor.recycleCards(ctx.controller, rest);
         }

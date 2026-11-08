@@ -433,17 +433,17 @@ TEST_F(FireBelowMtnTest, HasActivatedAbilityWithExhaustCost) {
     EXPECT_EQ(cost.xp_cost, 0);
 }
 
-TEST_F(FireBelowMtnTest, ActivateAddsUniversalPower) {
+TEST_F(FireBelowMtnTest, ActivateAddsGearOnlyPower) {
     auto src = addUnit(P1, kInvalidId, /*might=*/0);  // legend stand-in object
-    EXPECT_EQ(state.player(P1).rune_pool.universal_power, 0);
 
     EffectExecutor exec(state, events, card_db);
     CardContext ctx{state, events, exec, P1, src};
     card_registry.get(kFireBelowMtn)->onActivate(ctx, {});
 
-    EXPECT_EQ(state.player(P1).rune_pool.universal_power, 1)
-        << "Fire Below the Mountain adds 1 universal power on activate";
-    EXPECT_EQ(state.player(P2).rune_pool.universal_power, 0)
+    EXPECT_EQ(state.player(P1).rune_pool.restrictedFor(SpendScope::Gear).power, 1)
+        << "Fire Below the Mountain adds 1 gear-only Power on activate";
+    EXPECT_EQ(state.player(P1).rune_pool.universal_power, 0) << "not ordinary Power";
+    EXPECT_EQ(state.player(P2).rune_pool.restrictedPowerTotal(), 0)
         << "opponent's pool is untouched";
 }
 

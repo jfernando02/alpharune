@@ -36,13 +36,17 @@ public:
 
         // Cost gate: "no more than [4]". Read the static energy cost of the
         // spell being countered from the CardDB.
-        int cost = 0;
+        // "Counter a spell that costs no more than [4] and no more than [A]":
+        // at most 4 Energy and at most 1 Power.
+        int cost = 0, power = 0;
         if (top.card_def_id != kInvalidId) {
-            cost = ctx.executor.cardDB().get(top.card_def_id).energy_cost;
+            const auto& d = ctx.executor.cardDB().get(top.card_def_id);
+            cost = d.energy_cost;
+            power = d.power_cost;
         }
-        if (cost > 4) {
-            ctx.events.logTrace("DEFY: cannot counter — cost " +
-                                 std::to_string(cost) + " exceeds [4]");
+        if (cost > 4 || power > 1) {
+            ctx.events.logTrace("DEFY: cannot counter — cost [" + std::to_string(cost) +
+                                "] + " + std::to_string(power) + " Power exceeds [4] and [A]");
             return;  // illegal target; spell resolves normally
         }
 

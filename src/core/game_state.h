@@ -23,28 +23,124 @@ namespace riftbound {
 
 // ─── Rune Pool ───────────────────────────────────────────────────────────────
 
+/// What a payment is for. Resources whose adding ability restricts their use
+/// ("Use only to play spells.") are kept apart from the rest of the pool
+/// (RunePool::restricted) and only a payment whose purpose the restriction
+/// allows can count or spend them.
+struct SpendPurpose {
+    enum class Kind : uint8_t {
+        Other,     // anything else: hiding, a triggered "pay ... to", a tax, ...
+        PlayCard,  // playing a card of `type`, including its additional costs
+        Ability,   // an activated ability of an object of `type`
+    };
+    Kind kind = Kind::Other;
+    CardType type = CardType::Unit;
+    bool in_showdown = false;  // a showdown is under way
+};
+
+/// The restrictions resource-adding abilities print.
+enum class SpendScope : uint8_t {
+    Units,        // "only to play units or activated abilities of units" (Butcher of the Sands)
+    Spells,       // "only to play spells" (Daughter of the Void, Lux)
+    Gear,         // "only to play gear or use gear abilities" (Fire Below the Mountain)
+    UnitsOrGear,  // "only to play units or gear" (Iron Revenant)
+    Showdowns,    // "only during showdowns" (Scorn of the Moon)
+    Count
+};
+
+inline bool scopeAllows(SpendScope scope, const SpendPurpose& p) {
+    const bool play = p.kind == SpendPurpose::Kind::PlayCard;
+    const bool play_or_ability = play || p.kind == SpendPurpose::Kind::Ability;
+    switch (scope) {
+        case SpendScope::Units:       return play_or_ability && p.type == CardType::Unit;
+        case SpendScope::Spells:      return play && p.type == CardType::Spell;
+        case SpendScope::Gear:        return play_or_ability && p.type == CardType::Gear;
+        case SpendScope::UnitsOrGear: return play && (p.type == CardType::Unit ||
+                                                      p.type == CardType::Gear);
+        case SpendScope::Showdowns:   return p.in_showdown;
+        case SpendScope::Count:       break;
+    }
+    return false;
+}
+
 struct RunePool {
     int energy = 0;
-    // Energy that may be spent "only to play units or activated abilities of
-    // units" (Butcher of the Sands). Counted and spent first when the engine
-    // pays for one of those; invisible to every other payment.
-    int unit_energy = 0;
     int power[static_cast<int>(Domain::Count)] = {};  // per-domain
     int universal_power = 0;  // [A] — any domain
 
+    /// Energy and [A] Power that may only be spent on what their scope allows.
+    /// A separate pool per restriction: invisible to every other payment, and
+    /// spent before the unrestricted pool when a payment may use it.
+    struct Restricted {
+        int energy = 0;
+        int power = 0;  // [A]
+    };
+    static constexpr int kScopes = static_cast<int>(SpendScope::Count);
+    Restricted restricted[kScopes] = {};
+    Restricted& restrictedFor(SpendScope s) { return restricted[static_cast<int>(s)]; }
+    const Restricted& restrictedFor(SpendScope s) const { return restricted[static_cast<int>(s)]; }
+
     void clear() {
         energy = 0;
-        unit_energy = 0;
         universal_power = 0;
         for (int i = 0; i < static_cast<int>(Domain::Count); ++i)
             power[i] = 0;
+        for (auto& r : restricted) r = Restricted{};
     }
 
+    /// Unrestricted Power (domain and [A]).
     int totalPower() const {
         int sum = universal_power;
         for (int i = 0; i < static_cast<int>(Domain::Count); ++i)
             sum += power[i];
         return sum;
+    }
+
+    /// Floating Energy a payment for `p` may use (unrestricted + allowed restricted).
+    int energyFor(const SpendPurpose& p) const {
+        int n = energy;
+        for (int s = 0; s < kScopes; ++s)
+            if (scopeAllows(static_cast<SpendScope>(s), p)) n += restricted[s].energy;
+        return n;
+    }
+    /// Restricted [A] Power a payment for `p` may use.
+    int restrictedPowerFor(const SpendPurpose& p) const {
+        int n = 0;
+        for (int s = 0; s < kScopes; ++s)
+            if (scopeAllows(static_cast<SpendScope>(s), p)) n += restricted[s].power;
+        return n;
+    }
+    /// Spend up to `need` floating Energy for `p`: allowed restricted Energy
+    /// first, then unrestricted. Decrements `need` by what was spent.
+    void spendEnergy(const SpendPurpose& p, int& need) {
+        for (int s = 0; s < kScopes && need > 0; ++s) {
+            if (!scopeAllows(static_cast<SpendScope>(s), p)) continue;
+            const int n = std::min(restricted[s].energy, need);
+            restricted[s].energy -= n;
+            need -= n;
+        }
+        const int n = std::min(energy, std::max(0, need));
+        energy -= n;
+        need -= n;
+    }
+    /// Spend up to `need` allowed restricted [A] Power for `p`.
+    void spendRestrictedPower(const SpendPurpose& p, int& need) {
+        for (int s = 0; s < kScopes && need > 0; ++s) {
+            if (!scopeAllows(static_cast<SpendScope>(s), p)) continue;
+            const int n = std::min(restricted[s].power, need);
+            restricted[s].power -= n;
+            need -= n;
+        }
+    }
+    int restrictedEnergyTotal() const {
+        int n = 0;
+        for (const auto& r : restricted) n += r.energy;
+        return n;
+    }
+    int restrictedPowerTotal() const {
+        int n = 0;
+        for (const auto& r : restricted) n += r.power;
+        return n;
     }
 };
 
@@ -741,6 +837,26 @@ struct GameState {
 
     const PlayerState& player(PlayerId id) const {
         return players[playerIndex(id)];
+    }
+
+    // ── What a payment is for (restricted resources, RunePool::restricted) ──
+    bool inShowdown() const { return turn.ns_state == NeutralShowdownState::Showdown; }
+    SpendPurpose purposePlaying(CardType type) const {
+        return {SpendPurpose::Kind::PlayCard, type, inShowdown()};
+    }
+    SpendPurpose purposeAbilityOf(CardType type) const {
+        return {SpendPurpose::Kind::Ability, type, inShowdown()};
+    }
+    SpendPurpose purposeOther() const {
+        return {SpendPurpose::Kind::Other, CardType::Unit, inShowdown()};
+    }
+    /// A cost paid for a chain item (Deflect, a resolve-time choice): part of
+    /// playing the spell, or of using the activated ability's source.
+    SpendPurpose purposeOf(const ChainItem& item) const {
+        if (item.is_spell) return purposePlaying(CardType::Spell);
+        if (item.is_ability && item.is_activated_ability && objectExists(item.source))
+            return purposeAbilityOf(objects.at(item.source).card_type);
+        return purposeOther();
     }
 
     // ── Observation tracking ──────────────────────────────────────────

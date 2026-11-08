@@ -14,13 +14,31 @@ namespace {
 class AspiringEngineer : public UnitCard {
 public:
     const CardDef& def() const override { return def_; }
-    void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& targets) override {
-        if (!targets.empty())
-            ctx.executor.bounceToHand(targets[0]);
-    }
+    unsigned choicesAtFinalization() const override { return kFinalizeTrigger; }
     TriggerType triggerType() const override { return TriggerType::WhenYouPlayMe; }
-    TargetRequirements getTargetRequirements() const override {
-        return TargetRequirements{.count = 1, .must_be_gear = true, .must_be_friendly = true};
+    // "When you play me, return a gear from your trash to your hand."
+    void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
+        auto& ps = ctx.state.player(ctx.controller);
+        std::vector<GameObjectId> trash_gear;
+        for (auto cid : ps.trash)
+            if (ctx.state.objectExists(cid) && ctx.state.getObject(cid).isGear())
+                trash_gear.push_back(cid);
+        if (trash_gear.empty()) {
+            finalizingChoices(ctx);   // no choice to make
+            return;
+        }
+        GameObjectId picked = pickTarget(ctx, "Aspiring Engineer (gear from trash)", trash_gear);
+        if (finalizingChoices(ctx)) return;   // choices end here (CR 383.3)
+        if (ctx.executor.hasPendingChoice()) return;
+        if (picked == kInvalidId || !ctx.state.objectExists(picked)) return;
+        auto it = std::find(ps.trash.begin(), ps.trash.end(), picked);
+        if (it == ps.trash.end()) return;   // left the trash in response
+        ps.trash.erase(it);
+        auto& obj = ctx.state.getObject(picked);
+        obj.zone = ZoneType::Hand;
+        obj.location = std::nullopt;
+        ps.hand.push_back(picked);
+        ctx.events.logTrace("ASPIRING ENGINEER: returned " + obj.name + " from trash to hand");
     }
 private:
     const CardDef def_ = [] {

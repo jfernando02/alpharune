@@ -36,10 +36,17 @@ public:
         if (picked != kInvalidId) {
             ctx.executor.stunUnit(picked);
         }
-        // "If you played this from your hand, draw 1." Always-draw
-        // (more generous reading); rider fires whether or not the
-        // stun target was legal.
-        ctx.executor.drawCards(ctx.controller, 1);
+        // "If you played this from your hand, draw 1." Not when it was played
+        // from face down ([Hidden]) or anywhere else — the engine marks such a
+        // play on the card. The rider is independent of the stun target.
+        bool from_hand = true;
+        if (ctx.state.objectExists(ctx.source)) {
+            const auto& self = ctx.state.getObject(ctx.source);
+            auto it = self.card_counters.find("__played_not_from_hand_turn");
+            from_hand = it == self.card_counters.end() ||
+                        it->second != ctx.state.turn.turn_number + 1;
+        }
+        if (from_hand) ctx.executor.drawCards(ctx.controller, 1);
     }
 private:
     const CardDef def_ = [] {

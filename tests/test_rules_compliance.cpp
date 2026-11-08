@@ -1233,13 +1233,13 @@ TEST_F(RulesComplianceTest, TriggerCondition_VanguardHelmOnlyForABuffedUnit) {
 TEST_F(CostPaymentRulesTest, UnitOnlyEnergy_PaysForAUnitButNothingElse) {
     makeEngine();
     setLegend(P1); setLegend(P2);
-    s().player(P1).rune_pool.unit_energy = 4;
+    s().player(P1).rune_pool.restrictedFor(SpendScope::Units).energy = 4;
     auto unit = cardInHand(P1, 813);            // Field Musicians: [4]
     EXPECT_TRUE(engine_->testHook_canAfford(P1, unit));
     EXPECT_FALSE(engine_->testHook_canPayAdditionalCost(P1, 1, 0, Domain::Fury))
         << "an ordinary cost can't use it";
     ASSERT_TRUE(engine_->testHook_payCardCost(P1, unit));
-    EXPECT_EQ(s().player(P1).rune_pool.unit_energy, 0);
+    EXPECT_EQ(s().player(P1).rune_pool.restrictedFor(SpendScope::Units).energy, 0);
 }
 
 TEST_F(CostPaymentRulesTest, UnitOnlyEnergy_PaysForAUnitsActivatedAbility) {
@@ -1249,14 +1249,250 @@ TEST_F(CostPaymentRulesTest, UnitOnlyEnergy_PaysForAUnitsActivatedAbility) {
     s().turn.ns_state = NeutralShowdownState::Neutral;
     s().turn.oc_state = OpenClosedState::Open;
     auto ren = engineUnit(P1, 3, -1, kRenektonBrute);
-    s().player(P1).rune_pool.unit_energy = 1;
+    s().player(P1).rune_pool.restrictedFor(SpendScope::Units).energy = 1;
     Intent act;
     act.type = IntentType::ActivateActionAbility;
     act.player = P1;
     act.ability_source = ren;
     engine_->testHook_executeIntent(act);
-    EXPECT_EQ(s().player(P1).rune_pool.unit_energy, 0);
+    EXPECT_EQ(s().player(P1).rune_pool.restrictedFor(SpendScope::Units).energy, 0);
     EXPECT_EQ(s().getObject(ren).temp_might_bonus, 1);
+}
+
+// ─── Restricted resources: each printed restriction has its own pool ────────
+// "[Add] [A]. Use only to play gear or use gear abilities." (Fire Below the
+// Mountain) and its kin add to RunePool::restricted, which only the purposes
+// the card names can spend.
+constexpr CardDefId kFireBelowTheMountain = 506;
+constexpr CardDefId kSpriteFountain = 640;   // gear [2][M-Mind]
+constexpr CardDefId kOrnnBlacksmith = 381;   // unit [5][Calm]
+constexpr CardDefId kDefy = 45;              // spell [1][Calm]
+constexpr CardDefId kStupefy = 95;           // spell [1]
+constexpr CardDefId kBrutalizer = 365;       // [Equip] [Calm]
+constexpr CardDefId kSpinningAxe = 504;      // [Equip] [A]
+
+class RestrictedPoolTest : public CostPaymentRulesTest {
+protected:
+    RunePool& pool() { return s().player(P1).rune_pool; }
+    GameObjectId gearAtBase(PlayerId p, CardDefId def_id) {
+        auto id = s().createObject();
+        auto& g = s().getObject(id);
+        const auto& def = card_db.get(def_id);
+        g.owner = g.controller = p;
+        g.card_def_id = def_id;
+        g.card_type = CardType::Gear;
+        g.name = def.name;
+        g.domains = def.domains;
+        g.keywords = def.keywords;
+        g.might_bonus = def.might_bonus;
+        g.zone = ZoneType::Base;
+        g.location = BaseLocation{p};
+        return id;
+    }
+    bool equip(GameObjectId gear, GameObjectId unit) {
+        Card* card = card_registry.get(s().getObject(gear).card_def_id);
+        CardContext ctx{s(), events, engine_->testHook_executor(), P1, gear};
+        return card->onEquip(ctx, unit);
+    }
+    bool canEquip(GameObjectId gear) {
+        return card_registry.get(s().getObject(gear).card_def_id)->canEquip(s(), P1);
+    }
+};
+
+TEST_F(RestrictedPoolTest, FireBelowTheMountain_AddsGearOnlyPower) {
+    makeEngine();
+    auto legend = setLegend(P1, kFireBelowTheMountain);
+    setLegend(P2);
+    CardContext ctx{s(), events, engine_->testHook_executor(), P1, legend};
+    card_registry.get(kFireBelowTheMountain)->onActivate(ctx, {});
+    EXPECT_EQ(pool().restrictedFor(SpendScope::Gear).power, 1);
+    EXPECT_EQ(pool().universal_power, 0);
+    EXPECT_EQ(pool().totalPower(), 0) << "it is not ordinary Power";
+}
+
+TEST_F(RestrictedPoolTest, GearOnlyPower_PaysForAGearOnly) {
+    makeEngine();
+    setLegend(P1); setLegend(P2);
+    pool().energy = 5;                                       // the Energy is not the question
+    pool().restrictedFor(SpendScope::Gear).power = 1;
+    auto fountain = cardInHand(P1, kSpriteFountain);
+    auto ornn = cardInHand(P1, kOrnnBlacksmith);
+    auto defy = cardInHand(P1, kDefy);
+    EXPECT_TRUE(engine_->testHook_canAfford(P1, fountain));
+    EXPECT_FALSE(engine_->testHook_canAfford(P1, ornn)) << "a unit's Power";
+    EXPECT_FALSE(engine_->testHook_canAfford(P1, defy)) << "a spell's Power";
+    EXPECT_FALSE(engine_->testHook_canPayAdditionalCost(P1, 0, 1, Domain::Calm))
+        << "a triggered 'pay [C]' cost";
+    EXPECT_FALSE(engine_->testHook_canPayAdditionalCost(
+        P1, 0, 1, Domain::Calm, s().purposePlaying(CardType::Unit)))
+        << "a unit's additional cost";
+    EXPECT_TRUE(engine_->testHook_canPayAdditionalCost(
+        P1, 0, 1, Domain::Calm, s().purposeAbilityOf(CardType::Gear)));
+    ASSERT_TRUE(engine_->testHook_payCardCost(P1, fountain));
+    EXPECT_EQ(pool().restrictedFor(SpendScope::Gear).power, 0);
+    EXPECT_EQ(pool().energy, 3);
+}
+
+TEST_F(RestrictedPoolTest, GearOnlyPower_PaysAnEquipCost) {
+    makeEngine();
+    setLegend(P1); setLegend(P2);
+    auto unit = engineUnit(P1, 2);
+    auto brut = gearAtBase(P1, kBrutalizer);
+    EXPECT_FALSE(canEquip(brut)) << "no runes, nothing floating";
+    EXPECT_FALSE(equip(brut, unit));
+    EXPECT_FALSE(s().getObject(brut).attached_to.has_value());
+
+    pool().restrictedFor(SpendScope::Spells).power = 1;
+    EXPECT_FALSE(canEquip(brut)) << "spell-only Power can't equip";
+
+    pool().restrictedFor(SpendScope::Gear).power = 1;
+    EXPECT_TRUE(canEquip(brut));
+    ASSERT_TRUE(equip(brut, unit));
+    EXPECT_EQ(s().getObject(brut).attached_to, unit);
+    EXPECT_EQ(pool().restrictedFor(SpendScope::Gear).power, 0);
+    EXPECT_EQ(pool().restrictedFor(SpendScope::Spells).power, 1);
+}
+
+TEST_F(RestrictedPoolTest, GearOnlyPower_EquipIsOfferedAndExecutedByTheEngine) {
+    makeEngine();
+    setLegend(P1); setLegend(P2);
+    s().turn.ns_state = NeutralShowdownState::Neutral;
+    s().turn.oc_state = OpenClosedState::Open;
+    auto unit = engineUnit(P1, 2);
+    auto brut = gearAtBase(P1, kBrutalizer);
+    auto equips = [&] {
+        std::vector<Intent> out;
+        for (const auto& a : engine_->generateLegalActions())
+            if (a.ability_source == brut) out.push_back(a);
+        return out;
+    };
+    EXPECT_TRUE(equips().empty()) << "unaffordable Equip is not offered";
+    pool().restrictedFor(SpendScope::Gear).power = 1;
+    auto offered = equips();
+    ASSERT_FALSE(offered.empty());
+    engine_->testHook_executeIntent(offered.front());
+    EXPECT_EQ(s().getObject(brut).attached_to, unit);
+    EXPECT_EQ(pool().restrictedFor(SpendScope::Gear).power, 0);
+}
+
+TEST_F(RestrictedPoolTest, Equip_PaysFromFloatingPowerOrByRecyclingAMatchingRune) {
+    makeEngine();
+    setLegend(P1); setLegend(P2);
+    auto unit = engineUnit(P1, 2);
+    auto brut = gearAtBase(P1, kBrutalizer);
+    auto fury = rune(P1, Domain::Fury);
+    EXPECT_FALSE(canEquip(brut)) << "a Fury rune can't pay [Calm]";
+    pool().power[static_cast<int>(Domain::Calm)] = 1;
+    ASSERT_TRUE(equip(brut, unit));
+    EXPECT_EQ(pool().power[static_cast<int>(Domain::Calm)], 0);
+    EXPECT_TRUE(onBoard(fury));
+
+    auto brut2 = gearAtBase(P1, kBrutalizer);
+    auto calm = rune(P1, Domain::Calm, /*exhausted=*/true);
+    EXPECT_TRUE(canEquip(brut2)) << "an exhausted rune can still be recycled for Power";
+    ASSERT_TRUE(equip(brut2, unit));
+    EXPECT_FALSE(onBoard(calm));
+    ASSERT_EQ(s().player(P1).rune_deck.size(), 1u);
+    EXPECT_EQ(s().player(P1).rune_deck.front(), calm);
+}
+
+TEST_F(RestrictedPoolTest, UniversalEquip_IsNotFree) {
+    makeEngine();
+    setLegend(P1); setLegend(P2);
+    auto unit = engineUnit(P1, 2);
+    auto axe = gearAtBase(P1, kSpinningAxe);
+    EXPECT_FALSE(canEquip(axe));
+    EXPECT_FALSE(equip(axe, unit)) << "no rune and nothing floating";
+    EXPECT_FALSE(s().getObject(axe).attached_to.has_value());
+    pool().restrictedFor(SpendScope::Gear).power = 1;
+    EXPECT_TRUE(canEquip(axe));
+    ASSERT_TRUE(equip(axe, unit));
+    EXPECT_EQ(s().getObject(axe).attached_to, unit);
+}
+
+TEST_F(RestrictedPoolTest, SpellOnlyEnergy_PaysForASpellButNotAUnit) {
+    makeEngine();
+    setLegend(P1); setLegend(P2);
+    pool().restrictedFor(SpendScope::Spells).energy = 4;
+    auto spell = cardInHand(P1, kStupefy);
+    auto unit = cardInHand(P1, kFieldMusicians);
+    EXPECT_TRUE(engine_->testHook_canAfford(P1, spell));
+    EXPECT_FALSE(engine_->testHook_canAfford(P1, unit));
+    ASSERT_TRUE(engine_->testHook_payCardCost(P1, spell));
+    EXPECT_EQ(pool().restrictedFor(SpendScope::Spells).energy, 3);
+}
+
+TEST_F(RestrictedPoolTest, ShowdownEnergy_OnlyDuringAShowdown) {
+    makeEngine();
+    setLegend(P1); setLegend(P2);
+    pool().restrictedFor(SpendScope::Showdowns).energy = 1;
+    auto spell = cardInHand(P1, kStupefy);
+    s().turn.ns_state = NeutralShowdownState::Neutral;
+    EXPECT_FALSE(engine_->testHook_canAfford(P1, spell));
+    s().turn.ns_state = NeutralShowdownState::Showdown;
+    EXPECT_TRUE(engine_->testHook_canAfford(P1, spell));
+}
+
+TEST_F(RestrictedPoolTest, RunePoolClearEmptiesRestrictedPools) {
+    RunePool p;
+    p.restrictedFor(SpendScope::Gear).power = 1;
+    p.restrictedFor(SpendScope::Units).energy = 2;
+    p.restrictedFor(SpendScope::Showdowns).energy = 1;
+    p.clear();
+    EXPECT_EQ(p.restrictedPowerTotal(), 0);
+    EXPECT_EQ(p.restrictedEnergyTotal(), 0);
+}
+
+TEST_F(RestrictedPoolTest, RepeatCostRecyclesRunesToTheRuneDeck) {
+    makeEngine();
+    setLegend(P1); setLegend(P2);
+    auto r1 = rune(P1, Domain::Calm);
+    rune(P1, Domain::Calm);
+    GameEngine::RepeatCost cost;
+    cost.energy = 1;
+    cost.power = 1;
+    cost.power_domain = Domain::Calm;
+    cost.valid = true;
+    const auto deck_before = s().player(P1).main_deck.size();
+    ASSERT_TRUE(engine_->testHook_payRepeatCost(P1, cost));
+    EXPECT_EQ(s().player(P1).main_deck.size(), deck_before) << "runes never go to the Main Deck";
+    EXPECT_EQ(s().player(P1).rune_deck.size(), 1u);
+    (void)r1;
+}
+
+TEST_F(RestrictedPoolTest, PoroSnax_AbilityCostsCalmPowerAndKillsItAsACost) {
+    // "[1][C], [E], Kill this: Draw 1."
+    constexpr CardDefId kPoroSnax = 369;
+    makeEngine();
+    setLegend(P1); setLegend(P2);
+    s().turn.ns_state = NeutralShowdownState::Neutral;
+    s().turn.oc_state = OpenClosedState::Open;
+    auto snax = gearAtBase(P1, kPoroSnax);
+    {
+        auto c = s().createObject();
+        auto& o = s().getObject(c);
+        o.owner = o.controller = P1;
+        o.name = "Filler";
+        o.zone = ZoneType::MainDeck;
+        s().player(P1).main_deck.push_back(c);
+    }
+    auto snax_abilities = [&] {
+        std::vector<Intent> out;
+        for (const auto& a : engine_->generateLegalActions())
+            if (a.ability_source == snax) out.push_back(a);
+        return out;
+    };
+    rune(P1, Domain::Fury);
+    EXPECT_TRUE(snax_abilities().empty()) << "a Fury rune pays [1] but not [C]";
+    rune(P1, Domain::Calm);
+    auto offered = snax_abilities();
+    ASSERT_EQ(offered.size(), 1u);
+    engine_->testHook_executeIntent(offered.front());
+    EXPECT_EQ(s().getObject(snax).zone, ZoneType::Trash) << "killed as a cost, into the trash";
+    const auto& trash = s().player(P1).trash;
+    EXPECT_NE(std::find(trash.begin(), trash.end(), snax), trash.end());
+    EXPECT_EQ(s().player(P1).hand.size(), 1u) << "draw 1";
+    EXPECT_EQ(s().player(P1).rune_deck.size(), 1u) << "a rune was recycled for [C]";
 }
 
 TEST_F(CostPaymentRulesTest, AbilityEnergyCostSpendsFloatingEnergy) {

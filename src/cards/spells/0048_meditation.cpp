@@ -15,35 +15,37 @@ namespace {
 class Meditation : public SpellCard {
 public:
     const CardDef& def() const override { return def_; }
+    // "As an additional cost to play this, you may exhaust a friendly unit. If
+    // you do, draw 2. Otherwise, draw 1." The optional cost — whether, and
+    // which unit — is decided and paid as the spell is played (CR 383.3).
+    unsigned choicesAtFinalization() const override { return kFinalizeResolve; }
+    static std::vector<GameObjectId> readyFriendlyUnits(const GameState& state, PlayerId controller) {
+        std::vector<GameObjectId> out;
+        for (const auto& [id, obj] : state.objects)
+            if (obj.isUnit() && obj.controller == controller && obj.location.has_value() &&
+                !obj.is_exhausted)
+                out.push_back(id);
+        return out;
+    }
     void onResolve(CardContext& ctx,
                    const std::vector<GameObjectId>& /*targets*/) override {
-        auto find_ready_friendly = [&]() -> GameObjectId {
-            for (auto& [id, obj] : ctx.state.objects) {
-                if (!obj.isUnit() || obj.controller != ctx.controller) continue;
-                if (!obj.location.has_value()) continue;
-                if (obj.is_exhausted) continue;
-                return id;
-            }
-            return kInvalidId;
-        };
-        auto still_legal = [&]() { return find_ready_friendly() != kInvalidId; };
-
-        int conf = confirmOptional(ctx,
+        const int go = confirmOptional(ctx,
             "Meditation: exhaust a friendly unit to draw 2 (else draw 1)?",
-            still_legal);
-        if (conf == -1) return;  // waiting for agent choice
-
-        if (conf == 1) {
-            auto target = find_ready_friendly();
-            if (target != kInvalidId) {
-                ctx.executor.exhaustObject(target);
-                ctx.executor.drawCards(ctx.controller, 2);
-                ctx.events.logTrace("MEDITATION: exhausted friendly -> draw 2");
-                return;
-            }
+            [&]() { return !readyFriendlyUnits(ctx.state, ctx.controller).empty(); });
+        if (go < 0) return;  // waiting for agent choice
+        GameObjectId paid = kInvalidId;
+        if (go == 1) {
+            paid = pickTarget(ctx, "Meditation: exhaust a friendly unit",
+                              costChoices(ctx, readyFriendlyUnits(ctx.state, ctx.controller)));
+            if (ctx.executor.hasPendingChoice()) return;  // waiting for the pick
+            if (paid != kInvalidId && ctx.state.objectExists(paid) && costDueNow(ctx))
+                ctx.executor.exhaustObject(paid);
         }
-        ctx.executor.drawCards(ctx.controller, 1);
-        ctx.events.logTrace("MEDITATION: draw 1");
+        if (finalizingChoices(ctx)) return;   // choices end here (CR 383.3)
+        const bool exhausted = go == 1 && (paid != kInvalidId || costAlreadyPaid(ctx));
+        ctx.executor.drawCards(ctx.controller, exhausted ? 2 : 1);
+        ctx.events.logTrace(exhausted ? "MEDITATION: exhausted a friendly unit -> draw 2"
+                                      : "MEDITATION: draw 1");
     }
 private:
     const CardDef def_ = [] {

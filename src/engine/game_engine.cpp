@@ -1556,7 +1556,7 @@ void GameEngine::chooseTargetsAtFinalize(ChainItem& item) {
     if (!card->ignoresDeflect()) {
         const int deflect = deflectCostFor(state_, chooser, t);
         if (deflect > 0) {
-            effect_executor_->payAnyPower(chooser, deflect);
+            effect_executor_->payAnyPower(chooser, deflect, state_.purposeOf(*it));
             events_.logTrace("DEFLECT: " + std::string(toString(chooser)) + " pays " +
                              std::to_string(deflect) + " [A] to choose " +
                              state_.getObject(t).name);
@@ -1753,7 +1753,8 @@ bool GameEngine::payAndQueueAbility(const Intent& intent) {
     // Pay energy (+ power) cost. Abilities with a power component pay
     // both through the shared resource path (floating pool, then runes).
     if (act_cost.power > 0 || act_cost.energy > 0)
-        payActivationResources(intent.player, act_cost.energy, act_cost, source.isUnit());
+        payActivationResources(intent.player, act_cost.energy, act_cost,
+                               state_.purposeAbilityOf(source.card_type));
     // Pay recycle-self cost [C]
     if (act_cost.recycle_self) {
         events_.logTrace("ACTIVATE_COST: recycle self " + source.name);
@@ -1943,11 +1944,13 @@ void GameEngine::executePlayCard(const Intent& intent) {
         if (alt.any_domain) {
             for (int di = 0; di < static_cast<int>(Domain::Count); ++di)
                 if (canPayAdditionalCost(intent.player, alt.energy, alt.power,
-                                          static_cast<Domain>(di))) {
+                                          static_cast<Domain>(di),
+                                          state_.purposePlaying(card.card_type))) {
                     d = static_cast<Domain>(di); break;
                 }
         }
-        payAdditionalCost(intent.player, alt.energy, alt.power, d);
+        payAdditionalCost(intent.player, alt.energy, alt.power, d,
+                          state_.purposePlaying(card.card_type));
         events_.logTrace("ALT_COST: " + card.name + " played for its alternative cost");
     } else {
         payCardCost(intent.player, intent.card);
@@ -1961,7 +1964,8 @@ void GameEngine::executePlayCard(const Intent& intent) {
         const auto bf_id = std::get<BattlefieldLocation>(*intent.play_location).id;
         for (const auto& bf : state_.battlefields) {
             if (bf.id != bf_id || bf.paid_play_power <= 0) continue;
-            effect_executor_->payAnyPower(intent.player, bf.paid_play_power);
+            effect_executor_->payAnyPower(intent.player, bf.paid_play_power,
+                                          state_.purposePlaying(card.card_type));
             events_.logTrace("ADDITIONAL_COST: " + card.name + " pays " +
                              std::to_string(bf.paid_play_power) + " [A] to be played to BF#" +
                              std::to_string(bf_id));
@@ -2159,7 +2163,8 @@ void GameEngine::executePlaySpell(const Intent& intent) {
                canPayAdditionalCost(intent.player,
                                      repeat_cost.energy,
                                      repeat_cost.power,
-                                     repeat_cost.power_domain)) {
+                                     repeat_cost.power_domain,
+                                     state_.purposePlaying(card.card_type))) {
             Intent decline;
             decline.type = IntentType::MakeChoice;
             decline.player = intent.player;
@@ -2180,7 +2185,8 @@ void GameEngine::executePlaySpell(const Intent& intent) {
             if (on_decision) on_decision(state_, opts, chosen);
             bool wants_pay = chosen.chosen_value.value_or(0) == 1;
             if (!wants_pay) break;
-            if (!payRepeatCost(intent.player, repeat_cost)) break;
+            if (!payRepeatCost(intent.player, repeat_cost,
+                               state_.purposePlaying(card.card_type))) break;
             ++repeats;
         }
         if (repeats > 0) {
@@ -2430,11 +2436,13 @@ void GameEngine::resolvePermanent(const ChainItem& item) {
             // 805.1.b.2: a unit with no domain pays it with [A].
             std::optional<Domain> domain_to_pay;
             if (card.domains.empty()) {
-                if (canPayAdditionalCost(item.controller, 1, 1, Domain::Count, true))
+                if (canPayAdditionalCost(item.controller, 1, 1, Domain::Count,
+                                         state_.purposePlaying(CardType::Unit)))
                     domain_to_pay = Domain::Count;
             } else {
                 for (Domain d : card.domains) {
-                    if (canPayAdditionalCost(item.controller, 1, 1, d, true)) {
+                    if (canPayAdditionalCost(item.controller, 1, 1, d,
+                                             state_.purposePlaying(CardType::Unit))) {
                         domain_to_pay = d;
                         break;
                     }
@@ -2466,7 +2474,8 @@ void GameEngine::resolvePermanent(const ChainItem& item) {
                 bool wants_pay = chosen.chosen_value.value_or(0) == 1;
                 if (wants_pay) {
                     events_.logTrace("ACCELERATE: " + card.name + " pays [1] + power to enter ready");
-                    payAdditionalCost(item.controller, 1, 1, *domain_to_pay, true);
+                    payAdditionalCost(item.controller, 1, 1, *domain_to_pay,
+                                      state_.purposePlaying(CardType::Unit));
                     enters_ready = true;
                 } else {
                     events_.logTrace("ACCELERATE: " + card.name + " declined");
@@ -3075,12 +3084,14 @@ std::vector<Intent> GameEngine::generateMainPhaseActions(PlayerId player) const 
                     if (alt.any_domain) {
                         for (int di = 0; di < static_cast<int>(Domain::Count); ++di)
                             if (canPayAdditionalCost(player, alt.energy, alt.power,
-                                                      static_cast<Domain>(di))) {
+                                                      static_cast<Domain>(di),
+                                                      state_.purposePlaying(CardType::Unit))) {
                                 afford = true; break;
                             }
                     } else {
                         afford = canPayAdditionalCost(player, alt.energy, alt.power,
-                                                       alt.power_domain);
+                                                       alt.power_domain,
+                                                       state_.purposePlaying(CardType::Unit));
                     }
                 }
                 if (afford) {
@@ -3510,9 +3521,10 @@ std::vector<Intent> GameEngine::generateClosedStateActions(
                 if (ab.cost.exhaust && obj.is_exhausted) continue;
                 int net_energy = std::max(0, ab.cost.energy -
                     activationEnergyReduction(*card_obj, player, id, (int)ai));
-                if (net_energy > 0 && availableEnergy(player, obj.isUnit()) < net_energy) continue;
+                if (net_energy > 0 && availableEnergy(player, state_.purposeAbilityOf(obj.card_type)) < net_energy) continue;
                 if (ab.cost.power > 0 &&
-                    !canPayActivationResources(player, net_energy, ab.cost, obj.isUnit())) continue;
+                    !canPayActivationResources(player, net_energy, ab.cost,
+                                               state_.purposeAbilityOf(obj.card_type))) continue;
                 if (ab.cost.discard && ab.cost.discard_count > 0 &&
                     static_cast<int>(state_.player(player).hand.size()) <
                         ab.cost.discard_count) continue;
@@ -3744,18 +3756,21 @@ void GameEngine::generateTrashReplayActions(PlayerId player, bool action_ok,
 
         // Affordability against the OVERRIDE cost, not the printed cost. For
         // an [A] grant, any single domain that's payable suffices.
+        const SpendPurpose grant_purpose = state_.objectExists(grant.card)
+            ? state_.purposePlaying(state_.getObject(grant.card).card_type)
+            : state_.purposeOther();
         bool affordable = false;
         if (grant.any_domain) {
             for (int di = 0; di < static_cast<int>(Domain::Count); ++di) {
                 if (canPayAdditionalCost(player, grant.energy, grant.power,
-                                          static_cast<Domain>(di))) {
+                                          static_cast<Domain>(di), grant_purpose)) {
                     affordable = true;
                     break;
                 }
             }
         } else {
             affordable = canPayAdditionalCost(player, grant.energy, grant.power,
-                                               grant.power_domain);
+                                               grant.power_domain, grant_purpose);
         }
         if (!affordable) continue;
 
@@ -3833,9 +3848,10 @@ void GameEngine::generateActivateAbilityActions(PlayerId player,
             if (act_cost.exhaust && obj.is_exhausted) continue;
             int net_energy = std::max(0, act_cost.energy -
                 activationEnergyReduction(*card, player, id, (int)ai));
-            if (net_energy > 0 && availableEnergy(player, obj.isUnit()) < net_energy) continue;
+            if (net_energy > 0 && availableEnergy(player, state_.purposeAbilityOf(obj.card_type)) < net_energy) continue;
             if (act_cost.power > 0 &&
-                !canPayActivationResources(player, net_energy, act_cost, obj.isUnit())) continue;
+                !canPayActivationResources(player, net_energy, act_cost,
+                                           state_.purposeAbilityOf(obj.card_type))) continue;
             if (act_cost.discard && act_cost.discard_count > 0) {
                 int matching = 0;
                 for (auto hid : state_.player(player).hand) {
@@ -3913,8 +3929,9 @@ void GameEngine::generateActivateAbilityActions(PlayerId player,
                 ref.ability_index >= static_cast<int>(gabs.size())) continue;
             const auto& gcost = gabs[ref.ability_index].cost;
             if (gcost.exhaust && obj.is_exhausted) continue;           // bearer must be ready
-            if (gcost.energy > 0 && availableEnergy(player, obj.isUnit()) < gcost.energy) continue;
-            if (gcost.power > 0 && !canPayActivationResources(player, gcost.energy, gcost, obj.isUnit())) continue;
+            if (gcost.energy > 0 && availableEnergy(player, state_.purposeAbilityOf(obj.card_type)) < gcost.energy) continue;
+            if (gcost.power > 0 && !canPayActivationResources(player, gcost.energy, gcost,
+                                                                     state_.purposeAbilityOf(obj.card_type))) continue;
             if (gcost.xp_cost > 0 && state_.player(player).xp < gcost.xp_cost) continue;
             Intent activate;
             activate.type = IntentType::ActivateAbility;
@@ -5651,7 +5668,7 @@ void GameEngine::shuffleRuneDeck(PlayerId player) {
 // Cost payment
 // ═══════════════════════════════════════════════════════════════════════════════
 
-int GameEngine::availableEnergy(PlayerId player, bool for_unit) const {
+int GameEngine::availableEnergy(PlayerId player, SpendPurpose purpose) const {
     // Energy comes from exhausting ready runes (CR 163.2.a: [E]: Add [1])
     // Each ready rune in base can be exhausted for 1 Energy
     int count = 0;
@@ -5663,8 +5680,8 @@ int GameEngine::availableEnergy(PlayerId player, bool for_unit) const {
         }
     }
     // Also count Energy already in the pool
-    count += state_.player(player).rune_pool.energy;
-    if (for_unit) count += state_.player(player).rune_pool.unit_energy;
+    purpose.in_showdown = state_.inShowdown();
+    count += state_.player(player).rune_pool.energyFor(purpose);
     return count;
 }
 
@@ -5798,46 +5815,12 @@ GameEngine::RepeatCost GameEngine::parseRepeatCost(const std::string& text) {
 // the same primitives canAfford / payCardCost use, but for ONE extra
 // (energy, domain_power) charge — called by executePlaySpell after the
 // base cost has already been paid.
-bool GameEngine::payRepeatCost(PlayerId player, const RepeatCost& cost) {
+bool GameEngine::payRepeatCost(PlayerId player, const RepeatCost& cost,
+                               SpendPurpose purpose) {
     if (!cost.valid) return true;
-    auto base_loc = BaseLocation{player};
-
-    // Energy: exhaust ready runes
-    int need_energy = cost.energy;
-    if (need_energy > 0) {
-        for (auto& [id, obj] : state_.objects) {
-            if (need_energy == 0) break;
-            if (!obj.isRune() || obj.controller != player || obj.is_exhausted) continue;
-            if (!obj.location.has_value() || *obj.location != LocationId{base_loc}) continue;
-            obj.is_exhausted = true;
-            --need_energy;
-        }
-        if (need_energy > 0) return false;
-    }
-
-    // Power: recycle exhausted matching-domain rune to deck
-    int need_power = cost.power;
-    if (need_power > 0) {
-        auto& ps = state_.player(player);
-        bool universal = (cost.power_domain == Domain::Count);
-        for (auto& [id, obj] : state_.objects) {
-            if (need_power == 0) break;
-            if (!obj.isRune() || obj.controller != player) continue;
-            if (!obj.location.has_value() || *obj.location != LocationId{base_loc}) continue;
-            if (!obj.is_exhausted) continue;
-            bool match = universal;
-            if (!match) {
-                for (auto d : obj.domains) if (d == cost.power_domain) { match = true; break; }
-            }
-            if (!match) continue;
-            obj.zone = ZoneType::MainDeck;
-            obj.location = std::nullopt;
-            ps.main_deck.insert(ps.main_deck.begin(), id);
-            --need_power;
-        }
-        if (need_power > 0) return false;
-    }
-    return true;
+    // Floating resources first, then exhaust runes for Energy and recycle runes
+    // (ready or exhausted, CR 164.2.b) to the rune deck for Power.
+    return payAdditionalCost(player, cost.energy, cost.power, cost.power_domain, purpose);
 }
 
 void GameEngine::maybePayOptionalAdditionalCost(PlayerId player, GameObjectId card_id) {
@@ -5877,17 +5860,21 @@ void GameEngine::maybePayOptionalAdditionalCost(PlayerId player, GameObjectId ca
     }
 
     // Pick a payable domain for the power portion (specific, any, or none).
+    // The cost is part of playing the card.
+    const SpendPurpose purpose = state_.purposePlaying(card.card_type);
     std::optional<Domain> dom;
     if (cost.power == 0) {
-        if (canPayAdditionalCost(player, cost.energy, 0, Domain::Fury)) dom = Domain::Fury;
+        if (canPayAdditionalCost(player, cost.energy, 0, Domain::Fury, purpose)) dom = Domain::Fury;
     } else if (cost.any_domain) {
         for (int di = 0; di < static_cast<int>(Domain::Count); ++di) {
-            if (canPayAdditionalCost(player, cost.energy, cost.power, static_cast<Domain>(di))) {
+            if (canPayAdditionalCost(player, cost.energy, cost.power, static_cast<Domain>(di),
+                                     purpose)) {
                 dom = static_cast<Domain>(di);
                 break;
             }
         }
-    } else if (canPayAdditionalCost(player, cost.energy, cost.power, cost.power_domain)) {
+    } else if (canPayAdditionalCost(player, cost.energy, cost.power, cost.power_domain,
+                                    purpose)) {
         dom = cost.power_domain;
     }
     if (!dom.has_value()) return;  // can't afford -> not offered (CR: choice only when payable)
@@ -5905,7 +5892,7 @@ void GameEngine::maybePayOptionalAdditionalCost(PlayerId player, GameObjectId ca
     if (on_decision) on_decision(state_, opts, chosen);
 
     if (chosen.chosen_value.value_or(0) == 1) {
-        payAdditionalCost(player, cost.energy, cost.power, *dom);
+        payAdditionalCost(player, cost.energy, cost.power, *dom, purpose);
         if (cost.paid_flag && cost.paid_flag[0] != '\0') {
             card.card_counters[cost.paid_flag] = 1;
         }
@@ -6074,7 +6061,8 @@ bool GameEngine::canAfford(PlayerId player, GameObjectId card_obj, int extra_any
 
     // Energy can come from the pool's existing energy AND from
     // exhausting ready runes (each gives 1 energy).
-    int energy_available = ready_total + pool.energy + (card.isUnit() ? pool.unit_energy : 0);
+    const SpendPurpose purpose = state_.purposePlaying(card.card_type);
+    int energy_available = ready_total + pool.energyFor(purpose);
     if (energy_available < energy_needed) return false;
 
     // Power can come from:
@@ -6086,7 +6074,7 @@ bool GameEngine::canAfford(PlayerId player, GameObjectId card_obj, int extra_any
     //     just exhausted in the energy step (the energy step exhausts
     //     `energy_needed` ready runes, and we're free to pick the
     //     matching-domain ones first when doing so).
-    int power_from_pool = pool.universal_power;
+    int power_from_pool = pool.universal_power + pool.restrictedPowerFor(purpose);
     for (auto d : def.domains) {
         int di = static_cast<int>(d);
         if (di >= 0 && di < static_cast<int>(Domain::Count)) {
@@ -6102,7 +6090,7 @@ bool GameEngine::canAfford(PlayerId player, GameObjectId card_obj, int extra_any
     // the ones recycled for this card's own Power.
     const int extra_any = extraAnyPowerCost(state_, player, card) + extra_any_power;
     if (extra_any > 0) {
-        const int any_available = payableAnyPower(state_, player) - power_needed;
+        const int any_available = payableAnyPower(state_, player, purpose) - power_needed;
         if (any_available < extra_any) return false;
     }
     return true;
@@ -6244,21 +6232,15 @@ GameEngine::CostPaymentAdvance GameEngine::beginCostPayment(
     events_.logTrace("PAY_COST: " + card.name + " E=" + std::to_string(energy_needed) +
                      " P=" + std::to_string(power_needed));
 
-    // Spend pool energy first (no agent decision needed): Energy restricted to
-    // units before unrestricted Energy.
-    if (energy_needed > 0 && card.isUnit()) {
-        int from_units = std::min(ps.rune_pool.unit_energy, energy_needed);
-        ps.rune_pool.unit_energy -= from_units;
-        energy_needed -= from_units;
-    }
-    if (energy_needed > 0) {
-        int from_pool = std::min(ps.rune_pool.energy, energy_needed);
-        ps.rune_pool.energy -= from_pool;
-        energy_needed -= from_pool;
-    }
+    // Spend pool energy first (no agent decision needed): restricted Energy
+    // this card may use (RunePool::restricted) before unrestricted Energy.
+    const SpendPurpose purpose = state_.purposePlaying(card.card_type);
+    if (energy_needed > 0) ps.rune_pool.spendEnergy(purpose, energy_needed);
 
-    // Spend floating Power the same way: this card's domains first, then [A].
+    // Spend floating Power the same way: restricted [A] this card may use,
+    // then this card's domains, then [A].
     if (power_needed > 0) {
+        ps.rune_pool.spendRestrictedPower(purpose, power_needed);
         for (auto d : def.domains) {
             int di = static_cast<int>(d);
             if (di < 0 || di >= static_cast<int>(Domain::Count)) continue;
@@ -6429,15 +6411,15 @@ GameEngine::CostPaymentAdvance GameEngine::resolveCostPaymentDecision(
 
 bool GameEngine::canPayActivationResources(PlayerId player, int energy,
                                             const ActivationCost& cost,
-                                            bool for_unit) const {
+                                            SpendPurpose purpose) const {
     return canPayAdditionalCost(player, energy, cost.power,
-        cost.power_any_domain ? Domain::Count : cost.power_domain, for_unit);
+        cost.power_any_domain ? Domain::Count : cost.power_domain, purpose);
 }
 
 bool GameEngine::payActivationResources(PlayerId player, int energy,
-                                         const ActivationCost& cost, bool for_unit) {
+                                         const ActivationCost& cost, SpendPurpose purpose) {
     return payAdditionalCost(player, energy, cost.power,
-        cost.power_any_domain ? Domain::Count : cost.power_domain, for_unit);
+        cost.power_any_domain ? Domain::Count : cost.power_domain, purpose);
 }
 
 // Extra (energy, power) charge on top of — or instead of — a card's base cost:
@@ -6462,13 +6444,14 @@ std::vector<GameObjectId> runesInBase(const GameState& state, PlayerId player) {
 }
 }  // namespace
 
-// `for_unit`: the payment is for playing a unit or for a unit's activated
-// ability, so Energy restricted to those (RunePool::unit_energy) may be used.
+// `purpose`: what the payment is for, which decides the restricted floating
+// resources (RunePool::restricted) that may be used. Restricted Power is [A].
 bool GameEngine::canPayAdditionalCost(PlayerId player, int energy, int power,
-                                       Domain domain, bool for_unit) const {
+                                       Domain domain, SpendPurpose purpose) const {
+    purpose.in_showdown = state_.inShowdown();
     const auto& pool = state_.player(player).rune_pool;
-    int e_need = std::max(0, energy) - pool.energy - (for_unit ? pool.unit_energy : 0);
-    int p_need = std::max(0, power) - pool.universal_power;
+    int e_need = std::max(0, energy) - pool.energyFor(purpose);
+    int p_need = std::max(0, power) - pool.universal_power - pool.restrictedPowerFor(purpose);
     if (domain == Domain::Count) {
         for (int di = 0; di < static_cast<int>(Domain::Count); ++di) p_need -= pool.power[di];
     } else {
@@ -6486,8 +6469,9 @@ bool GameEngine::canPayAdditionalCost(PlayerId player, int energy, int power,
 }
 
 bool GameEngine::payAdditionalCost(PlayerId player, int energy, int power,
-                                    Domain domain, bool for_unit) {
-    if (!canPayAdditionalCost(player, energy, power, domain, for_unit)) return false;
+                                    Domain domain, SpendPurpose purpose) {
+    purpose.in_showdown = state_.inShowdown();
+    if (!canPayAdditionalCost(player, energy, power, domain, purpose)) return false;
     auto& ps = state_.player(player);
     int e_need = std::max(0, energy);
     int p_need = std::max(0, power);
@@ -6498,8 +6482,8 @@ bool GameEngine::payAdditionalCost(PlayerId player, int energy, int power,
         from -= n;
         need -= n;
     };
-    if (for_unit) take(ps.rune_pool.unit_energy, e_need);   // restricted Energy first
-    take(ps.rune_pool.energy, e_need);
+    ps.rune_pool.spendEnergy(purpose, e_need);           // restricted Energy first
+    ps.rune_pool.spendRestrictedPower(purpose, p_need);  // restricted [A] first
     if (domain == Domain::Count) {
         for (int di = 0; di < static_cast<int>(Domain::Count); ++di)
             take(ps.rune_pool.power[di], p_need);
@@ -6565,6 +6549,9 @@ bool GameEngine::payTrashReplayGrant(PlayerId player, GameObjectId card_id) {
                            });
     if (it == ps.trash_replay_grants.end()) return false;
     const auto grant = *it;   // copy before erase
+    const SpendPurpose purpose = state_.objectExists(card_id)
+        ? state_.purposePlaying(state_.getObject(card_id).card_type)
+        : state_.purposeOther();
 
     // Pick a payable domain for an [A] grant; otherwise use the fixed domain.
     Domain domain = grant.power_domain;
@@ -6572,7 +6559,7 @@ bool GameEngine::payTrashReplayGrant(PlayerId player, GameObjectId card_id) {
         bool found = false;
         for (int di = 0; di < static_cast<int>(Domain::Count); ++di) {
             if (canPayAdditionalCost(player, grant.energy, grant.power,
-                                      static_cast<Domain>(di))) {
+                                      static_cast<Domain>(di), purpose)) {
                 domain = static_cast<Domain>(di);
                 found = true;
                 break;
@@ -6580,7 +6567,7 @@ bool GameEngine::payTrashReplayGrant(PlayerId player, GameObjectId card_id) {
         }
         if (!found) return false;  // action gen should have filtered this out
     }
-    bool ok = payAdditionalCost(player, grant.energy, grant.power, domain);
+    bool ok = payAdditionalCost(player, grant.energy, grant.power, domain, purpose);
     if (ok && grant.banish_after && state_.objectExists(card_id))
         state_.getObject(card_id).banish_on_leave_chain = true;
 
@@ -6638,7 +6625,9 @@ bool GameEngine::payCardCost(PlayerId player, GameObjectId card_obj) {
         if (on_decision) on_decision(state_, adv.legal, chosen);
         adv = resolveCostPaymentDecision(chosen);
     }
-    if (extra_any > 0) effect_executor_->payAnyPower(player, extra_any);
+    if (extra_any > 0 && state_.objectExists(card_obj))
+        effect_executor_->payAnyPower(player, extra_any,
+            state_.purposePlaying(state_.getObject(card_obj).card_type));
     return true;
 }
 

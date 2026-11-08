@@ -6,6 +6,20 @@
 
 namespace riftbound {
 
+namespace {
+// Restricted floating resources (RunePool::restricted), e.g. " +1A gear".
+std::string restrictedPoolText(const RunePool& pool) {
+    static const char* kNames[] = {"units", "spells", "gear", "units/gear", "showdown"};
+    std::string out;
+    for (int i = 0; i < RunePool::kScopes; ++i) {
+        const auto& r = pool.restricted[i];
+        if (r.energy > 0) out += " +" + std::to_string(r.energy) + "E " + kNames[i];
+        if (r.power > 0) out += " +" + std::to_string(r.power) + "A " + kNames[i];
+    }
+    return out;
+}
+}  // namespace
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 std::string StateRenderer::padRight(const std::string& s, int width) const {
@@ -121,7 +135,7 @@ std::string StateRenderer::renderPlayerSummary(const GameState& state,
        << "] [Runes:" << state.runesInBase(player).size()
        << "/" << (state.runesInBase(player).size() + ps.rune_deck.size())
        << "] [E:" << ps.rune_pool.energy
-       << " P:" << ps.rune_pool.totalPower() << "]";
+       << " P:" << ps.rune_pool.totalPower() << restrictedPoolText(ps.rune_pool) << "]";
     ss << "\n  Legend: " << legend_name;
 
     // Champion Zone — prominent display
@@ -440,7 +454,7 @@ std::string StateRenderer::renderPlayerSection(const GameState& state,
          << "+" << ps.rune_deck.size()
          << dom_breakdown.str()
          << "  Pool:E" << ps.rune_pool.energy
-         << "/P" << ps.rune_pool.totalPower();
+         << "/P" << ps.rune_pool.totalPower() << restrictedPoolText(ps.rune_pool);
     ss << "|" << padRight(info.str(), w - 2) << "|\n";
 
     // Legend zone — always show the legend, marked as exhausted if it's

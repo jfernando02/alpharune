@@ -19,9 +19,8 @@ public:
     ActivationCost getActivationCost() const override { return {.exhaust = true}; }
     void onActivate(CardContext& ctx,
                     const std::vector<GameObjectId>& /*targets*/) override {
-        ctx.executor.addFloatingEnergy(ctx.controller, 1);
-        ctx.events.logTrace("ACTIVATE: Scorn of the Moon adds [1] energy "
-                            "(showdown-spend earmark not engine-enforced)");
+        // "Spend this Energy only during showdowns.": its own pool.
+        ctx.executor.addRestrictedEnergy(ctx.controller, SpendScope::Showdowns, 1);
     }
 private:
     const CardDef def_ = [] {

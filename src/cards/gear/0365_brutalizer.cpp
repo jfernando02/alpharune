@@ -17,6 +17,9 @@ public:
     const CardDef& def() const override { return def_; }
 
     bool hasEquipAbility() const override { return true; }
+    bool canEquip(const GameState& state, PlayerId controller) const override {
+        return canPayEquipCost(state, controller, 0, Domain::Calm);
+    }
     bool onEquip(CardContext& ctx, GameObjectId unit) override {
         bool ok = standardEquip(ctx, ctx.source, unit, /*energy=*/0, Domain::Calm);
         if (ok && ctx.state.objectExists(ctx.source)) {

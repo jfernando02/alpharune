@@ -371,9 +371,10 @@ int deflectCostFor(const GameState& state, PlayerId chooser, GameObjectId target
     return std::max(1, value);
 }
 
-int payableAnyPower(const GameState& state, PlayerId player) {
+int payableAnyPower(const GameState& state, PlayerId player, SpendPurpose purpose) {
+    purpose.in_showdown = state.inShowdown();
     const auto& pool = state.player(player).rune_pool;
-    int n = pool.universal_power;
+    int n = pool.universal_power + pool.restrictedPowerFor(purpose);
     for (int di = 0; di < static_cast<int>(Domain::Count); ++di) n += pool.power[di];
     LocationId base{BaseLocation{player}};
     for (const auto& [id, obj] : state.objects)
@@ -386,19 +387,21 @@ int EffectExecutor::deflectCostFor(PlayerId chooser, GameObjectId target) const 
     return ::riftbound::deflectCostFor(state_, chooser, target);
 }
 
-int EffectExecutor::payableAnyPower(PlayerId player) const {
-    return ::riftbound::payableAnyPower(state_, player);
+int EffectExecutor::payableAnyPower(PlayerId player, SpendPurpose purpose) const {
+    return ::riftbound::payableAnyPower(state_, player, purpose);
 }
 
-bool EffectExecutor::payAnyPower(PlayerId player, int amount) {
+bool EffectExecutor::payAnyPower(PlayerId player, int amount, SpendPurpose purpose) {
     if (amount <= 0) return true;
-    if (payableAnyPower(player) < amount) return false;
+    purpose.in_showdown = state_.inShowdown();
+    if (payableAnyPower(player, purpose) < amount) return false;
     auto& ps = state_.player(player);
     auto take = [&amount](int& from) {
         int n = std::min(from, amount);
         from -= n;
         amount -= n;
     };
+    ps.rune_pool.spendRestrictedPower(purpose, amount);   // restricted [A] first
     take(ps.rune_pool.universal_power);
     for (int di = 0; di < static_cast<int>(Domain::Count); ++di) take(ps.rune_pool.power[di]);
     if (amount <= 0) return true;
@@ -1033,10 +1036,30 @@ GameObjectId EffectExecutor::chooseObjectNow(PlayerId player,
     return objects.front();
 }
 
-void EffectExecutor::addUnitOnlyEnergy(PlayerId player, int amount) {
-    state_.player(player).rune_pool.unit_energy += amount;
+namespace {
+const char* scopeName(SpendScope s) {
+    switch (s) {
+        case SpendScope::Units:       return "units / unit abilities";
+        case SpendScope::Spells:      return "spells";
+        case SpendScope::Gear:        return "gear / gear abilities";
+        case SpendScope::UnitsOrGear: return "units or gear";
+        case SpendScope::Showdowns:   return "showdowns";
+        case SpendScope::Count:       break;
+    }
+    return "?";
+}
+}  // namespace
+
+void EffectExecutor::addRestrictedEnergy(PlayerId player, SpendScope scope, int amount) {
+    state_.player(player).rune_pool.restrictedFor(scope).energy += amount;
     events_.logTrace("EFFECT: " + std::string(toString(player)) + " adds " +
-                     std::to_string(amount) + " Energy for units / unit abilities only");
+                     std::to_string(amount) + " Energy usable only for " + scopeName(scope));
+}
+
+void EffectExecutor::addRestrictedPower(PlayerId player, SpendScope scope, int amount) {
+    state_.player(player).rune_pool.restrictedFor(scope).power += amount;
+    events_.logTrace("EFFECT: " + std::string(toString(player)) + " adds " +
+                     std::to_string(amount) + " [A] usable only for " + scopeName(scope));
 }
 
 void EffectExecutor::addFloatingEnergy(PlayerId player, int amount) {
@@ -1593,10 +1616,10 @@ bool runeMatches(const GameObject& rune, const std::vector<Domain>& domains) {
 
 // With `pay` false this only answers whether the cost is payable.
 bool plainPay(GameState& state, EventBus& events, PlayerId player, const PlainCost& cost,
-              bool pay) {
+              bool pay, const SpendPurpose& purpose) {
     auto& ps = state.player(player);
-    int e = cost.energy - ps.rune_pool.energy;
-    int p = cost.power - ps.rune_pool.universal_power;
+    int e = cost.energy - ps.rune_pool.energyFor(purpose);
+    int p = cost.power - ps.rune_pool.universal_power - ps.rune_pool.restrictedPowerFor(purpose);
     for (auto d : cost.domains) p -= ps.rune_pool.power[static_cast<int>(d)];
     LocationId base{BaseLocation{player}};
     std::vector<GameObjectId> runes;
@@ -1618,7 +1641,8 @@ bool plainPay(GameState& state, EventBus& events, PlayerId player, const PlainCo
         need -= n;
     };
     int e_need = cost.energy, p_need = cost.power;
-    take(ps.rune_pool.energy, e_need);
+    ps.rune_pool.spendEnergy(purpose, e_need);
+    ps.rune_pool.spendRestrictedPower(purpose, p_need);
     for (auto d : cost.domains) take(ps.rune_pool.power[static_cast<int>(d)], p_need);
     take(ps.rune_pool.universal_power, p_need);
     // Energy from runes that can't pay the Power first; then recycle matching
@@ -1659,7 +1683,8 @@ bool EffectExecutor::canPlayPayingCost(PlayerId player, GameObjectId card,
     if (!can_afford_) {
         StagedEffectCost staged(state_.player(player), cost);
         return plainPay(state_, events_, player,
-                        plainCostOf(state_, card_db_, player, card), /*pay=*/false);
+                        plainCostOf(state_, card_db_, player, card), /*pay=*/false,
+                        state_.purposePlaying(state_.getObject(card).card_type));
     }
     StagedEffectCost staged(state_.player(player), cost);
     return can_afford_(player, card);
@@ -1672,7 +1697,8 @@ bool EffectExecutor::playPayingCost(PlayerId player, GameObjectId card,
     if (!can_afford_ || !pay_cost_) {
         StagedEffectCost staged(state_.player(player), cost);
         if (!plainPay(state_, events_, player,
-                      plainCostOf(state_, card_db_, player, card), /*pay=*/true))
+                      plainCostOf(state_, card_db_, player, card), /*pay=*/true,
+                      state_.purposePlaying(state_.getObject(card).card_type)))
             return false;
     } else {
         StagedEffectCost staged(state_.player(player), cost);

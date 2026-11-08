@@ -20,16 +20,21 @@ public:
         ctx.executor.drawCards(ctx.controller, 1);
         ctx.events.logTrace("PORO SNAX: enter -> draw 1");
     }
+    // "[1][C], [E], Kill this: Draw 1." The engine pays [1][C] and [E] on
+    // activation; "Kill this" is the rest of the cost, paid at finalization
+    // (CR 383.3) — the Snax goes to the trash as it is used, not at resolution.
     bool hasActivatedAbility() const override { return true; }
     ActivationCost getActivationCost() const override {
-        // [1][G], [E], Kill this. Approximated as [1] energy + exhaust
-        // + recycle_self (closest match for "kill this as cost"). The
-        // G domain isn't enforced at this layer.
-        return {.exhaust = true, .energy = 1, .recycle_self = true};
+        return {.exhaust = true, .energy = 1, .power = 1, .power_domain = Domain::Calm};
     }
+    unsigned choicesAtFinalization() const override { return kFinalizeActivate; }
     void onActivate(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
+        if (costDueNow(ctx) && ctx.state.objectExists(ctx.source) &&
+            ctx.state.getObject(ctx.source).location.has_value())
+            ctx.executor.killObject(ctx.source);
+        if (finalizingChoices(ctx)) return;   // the cost ends here
         ctx.executor.drawCards(ctx.controller, 1);
-        ctx.events.logTrace("PORO SNAX: activated -> draw 1");
+        ctx.events.logTrace("PORO SNAX: killed as a cost -> draw 1");
     }
 private:
     const CardDef def_ = [] {

@@ -1182,6 +1182,11 @@ void TriggerManager::onObjectStateChanged(const ObjectStateChangedEvent& e) {
         // "When you play a card from anywhere other than your hand," (trash via
         // Flow, face down, Champion Zone).
         state_.player(controller).cards_played_not_from_hand_this_turn++;
+        // Mark the card itself for "if you played this from your hand" riders:
+        // the turn it was played (+1, so 0 = never), read as it resolves.
+        if (state_.objectExists(e.object))
+            state_.getObject(e.object).card_counters["__played_not_from_hand_turn"] =
+                state_.turn.turn_number + 1;
         std::vector<GameObjectId> watchers;
         for (auto& [id, obj] : state_.objects) {
             if (id == e.object || obj.controller != controller) continue;

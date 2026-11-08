@@ -222,11 +222,13 @@ public:
     EffectExecutor& testHook_executor() { return *effect_executor_; }
     bool testHook_canAfford(PlayerId p, GameObjectId card) const { return canAfford(p, card); }
     bool testHook_payCardCost(PlayerId p, GameObjectId card) { return payCardCost(p, card); }
-    bool testHook_canPayAdditionalCost(PlayerId p, int energy, int power, Domain d) const {
-        return canPayAdditionalCost(p, energy, power, d);
+    bool testHook_canPayAdditionalCost(PlayerId p, int energy, int power, Domain d,
+                                       SpendPurpose purpose = {}) const {
+        return canPayAdditionalCost(p, energy, power, d, purpose);
     }
-    bool testHook_payAdditionalCost(PlayerId p, int energy, int power, Domain d) {
-        return payAdditionalCost(p, energy, power, d);
+    bool testHook_payAdditionalCost(PlayerId p, int energy, int power, Domain d,
+                                    SpendPurpose purpose = {}) {
+        return payAdditionalCost(p, energy, power, d, purpose);
     }
     void testHook_beginningStep() { beginningStep(); }
     void testHook_scoringStep() { scoringStep(); }
@@ -276,6 +278,9 @@ public:
         bool valid = false;
     };
     static RepeatCost parseRepeatCost(const std::string& ability_text);
+    bool testHook_payRepeatCost(PlayerId p, const RepeatCost& cost, SpendPurpose purpose = {}) {
+        return payRepeatCost(p, cost, purpose);
+    }
 
 private:
     const CardDB& card_db_;
@@ -673,10 +678,13 @@ private:
     /// enter ready — that's resolvePermanent's job).
     /// Energy + power affordability / payment for an activated ability whose
     /// cost has a power component (honors ActivationCost::power_any_domain).
+    /// `purpose` decides which restricted floating resources (RunePool::restricted)
+    /// may be used: normally state_.purposeAbilityOf(<source's card type>).
     bool canPayActivationResources(PlayerId player, int energy,
-                                   const ActivationCost& cost, bool for_unit = false) const;
+                                   const ActivationCost& cost,
+                                   SpendPurpose purpose = {}) const;
     bool payActivationResources(PlayerId player, int energy, const ActivationCost& cost,
-                                bool for_unit = false);
+                                SpendPurpose purpose = {});
     /// Apply `assigned` combat damage to a unit through the replacement
     /// effects that govern it (CR 467.2.c.5).
     void applyCombatDamage(GameObjectId target, int assigned);
@@ -701,10 +709,13 @@ private:
     void initSubsystems();
     /// Rebuild the standing [Flow] play-from-trash grants (called from recalculateAuras).
     void refreshFlowGrants();
+    /// `purpose`: what the payment is for (playing a card of a type, an ability
+    /// of an object of a type, or other) — decides which restricted floating
+    /// resources may be used. The default (Other) can use none of them.
     bool canPayAdditionalCost(PlayerId player, int energy, int power,
-                                Domain domain, bool for_unit = false) const;
+                                Domain domain, SpendPurpose purpose = {}) const;
     bool payAdditionalCost(PlayerId player, int energy, int power,
-                            Domain domain, bool for_unit = false);
+                            Domain domain, SpendPurpose purpose = {});
 
     /// Pays the matching PlayerState::TrashReplayGrant's override cost for
     /// `card_id` (auto-spends via payAdditionalCost; an [A] grant picks the
@@ -731,7 +742,7 @@ private:
     /// Pay an extra Repeat tranche on top of an already-paid base cost.
     /// Returns false if the additional payment can't be satisfied (which
     /// indicates a bug in the affordability gate in action gen).
-    bool payRepeatCost(PlayerId player, const RepeatCost& cost);
+    bool payRepeatCost(PlayerId player, const RepeatCost& cost, SpendPurpose purpose = {});
 
     /// "You may pay X as an additional cost to play me." Offers the agent a
     /// yes/no during the play action (called from executePlayCard /
@@ -741,7 +752,7 @@ private:
     void maybePayOptionalAdditionalCost(PlayerId player, GameObjectId card_id);
 
     /// Count available Energy from ready runes (exhaust potential).
-    int availableEnergy(PlayerId player, bool for_unit = false) const;
+    int availableEnergy(PlayerId player, SpendPurpose purpose = {}) const;
 
     /// Count available Power of a specific domain (recycle potential).
     int availablePower(PlayerId player, Domain domain) const;

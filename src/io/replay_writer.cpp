@@ -165,6 +165,8 @@ std::string ReplayWriter::boardJson(const GameState& state, const Intent* chosen
             {"rdeck", ps.rune_deck.size()},
             {"energy", ps.rune_pool.energy},
             {"power", ps.rune_pool.totalPower()},
+            {"restricted_energy", ps.rune_pool.restrictedEnergyTotal()},
+            {"restricted_power", ps.rune_pool.restrictedPowerTotal()},
             {"hand", list(ps.hand)},
             {"units", list(units)},
             {"gear", list(gear)},

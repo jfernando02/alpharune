@@ -31,7 +31,8 @@ ChainItemId ChainManager::addSpell(GameObjectId spell_obj, PlayerId controller,
         for (auto t : targets) {
             const int deflect = executor_->deflectCostFor(controller, t);
             if (deflect > 0) {
-                executor_->payAnyPower(controller, deflect);
+                executor_->payAnyPower(controller, deflect,
+                                       state_.purposePlaying(CardType::Spell));
                 events_.logTrace("DEFLECT: " + std::string(toString(controller)) + " pays " +
                                  std::to_string(deflect) + " [A] to choose " +
                                  state_.getObject(t).name);
@@ -116,7 +117,10 @@ ChainItemId ChainManager::addAbility(GameObjectId source, PlayerId controller,
         for (auto t : targets) {
             const int deflect = executor_->deflectCostFor(controller, t);
             if (deflect > 0) {
-                executor_->payAnyPower(controller, deflect);
+                executor_->payAnyPower(controller, deflect,
+                    is_activated && state_.objectExists(source)
+                        ? state_.purposeAbilityOf(state_.getObject(source).card_type)
+                        : state_.purposeOther());
                 events_.logTrace("DEFLECT: " + std::string(toString(controller)) + " pays " +
                                  std::to_string(deflect) + " [A] to choose " +
                                  state_.getObject(t).name);

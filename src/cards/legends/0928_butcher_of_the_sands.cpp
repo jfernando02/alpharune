@@ -27,7 +27,7 @@ public:
     }
     bool isReactionAbility() const override { return true; }
     void onActivate(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
-        ctx.executor.addUnitOnlyEnergy(ctx.controller, 2);
+        ctx.executor.addRestrictedEnergy(ctx.controller, SpendScope::Units, 2);
     }
 private:
     const CardDef def_ = [] {

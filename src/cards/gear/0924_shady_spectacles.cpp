@@ -123,6 +123,9 @@ public:
     }
 
     bool hasEquipAbility() const override { return true; }
+    bool canEquip(const GameState& state, PlayerId controller) const override {
+        return canPayEquipCost(state, controller, 1, Domain::Order);
+    }
     bool onEquip(CardContext& ctx, GameObjectId unit) override {
         if (!ctx.state.objectExists(unit)) return false;
         if (!standardEquip(ctx, ctx.source, unit, /*energy_cost=*/1, Domain::Order))

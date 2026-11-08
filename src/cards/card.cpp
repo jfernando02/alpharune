@@ -301,10 +301,17 @@ int Card::pickMode(CardContext& ctx, const std::string& label, int num_modes,
 // additional cost is charged at the moment of the choice: an object whose
 // Deflect cost the chooser can't pay isn't offered, and picking one pays it.
 namespace {
+// The Deflect cost of a resolve-time choice belongs to the resolving item
+// (part of playing the spell / using the activated ability).
+SpendPurpose deflectPurpose(const CardContext& ctx) {
+    return ctx.state.chain.resuming.has_value() ? ctx.state.purposeOf(*ctx.state.chain.resuming)
+                                                : ctx.state.purposeOther();
+}
+
 std::vector<GameObjectId> affordableWithDeflect(CardContext& ctx, const Card& card,
                                                 const std::vector<GameObjectId>& in) {
     if (card.ignoresDeflect()) return in;
-    const int payable = ctx.executor.payableAnyPower(ctx.controller);
+    const int payable = ctx.executor.payableAnyPower(ctx.controller, deflectPurpose(ctx));
     std::vector<GameObjectId> out;
     out.reserve(in.size());
     for (auto t : in)
@@ -319,7 +326,7 @@ void commitChoice(CardContext& ctx, const Card& card, GameObjectId t) {
     if (!card.ignoresDeflect()) {
         const int cost = ctx.executor.deflectCostFor(ctx.controller, t);
         if (cost > 0) {
-            ctx.executor.payAnyPower(ctx.controller, cost);
+            ctx.executor.payAnyPower(ctx.controller, cost, deflectPurpose(ctx));
             ctx.events.logTrace("DEFLECT: " + std::string(toString(ctx.controller)) +
                                 " pays " + std::to_string(cost) + " [A] to choose " +
                                 ctx.state.getObject(t).name);
@@ -666,7 +673,11 @@ std::vector<GameObjectId> Card::enumerateLegalTargets(
         // affordability check in pickTarget.
         if (!state.chain.resuming.has_value() &&
             !ignoresDeflect() && obj.controller != controller &&
-            deflectCostFor(state, controller, id) > payableAnyPower(state, controller))
+            deflectCostFor(state, controller, id) >
+                payableAnyPower(state, controller,
+                                def().card_type == CardType::Spell
+                                    ? state.purposePlaying(CardType::Spell)
+                                    : state.purposeOther()))
             continue;
 
         targets.push_back(id);
