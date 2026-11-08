@@ -29,6 +29,9 @@ constexpr const char* kScalarNames[] = {
     "dest_is_battlefield", "dest_my_might",    "dest_opp_might",  "dest_controller",
     "has_chosen_value",   "chosen_value",      "mulligan_count",  "damage_total",
     "damage_lethal",      "is_scripted_pick",  "legal_count",
+    // Appended (slots read 0 in older models, so they stay valid).
+    "acting_temporary",   "chosen_temporary",  "moved_temporary", "dest_my_units",
+    "dest_opp_units",     "chosen_gear_count",
 };
 constexpr int kScalarOffset = kIntentTypeSlots + kKindCount;
 static_assert(kScalarOffset + static_cast<int>(std::size(kScalarNames)) <= kPolicyActionGlobalDim);
@@ -42,6 +45,8 @@ enum Scalar : int {
     DestIsBattlefield, DestMyMight, DestOppMight, DestController,
     HasChosenValue, ChosenValue, MulliganCount, DamageTotal,
     DamageLethal, IsScriptedPick, LegalCount,
+    ActingTemporary, ChosenTemporary, MovedTemporary, DestMyUnits,
+    DestOppUnits, ChosenGearCount,
 };
 
 constexpr const char* kBlockNames[] = {"acting", "chosen", "moved"};
@@ -110,6 +115,7 @@ void extractPolicyFeatures(const GameState& state, const CardDB& card_db,
         set(ActingIsSpell, acting->isSpell() ? 1.0f : 0.0f);
         set(ActingIsGear, acting->isGear() ? 1.0f : 0.0f);
         set(ActingIsMine, acting->controller == me ? 1.0f : 0.0f);
+        set(ActingTemporary, acting->hasKeyword(Keyword::Temporary) ? 1.0f : 0.0f);
     }
     if (a.play_location && std::holds_alternative<BattlefieldLocation>(*a.play_location))
         set(PlayToBattlefield, 1.0f);
@@ -130,6 +136,8 @@ void extractPolicyFeatures(const GameState& state, const CardDB& card_db,
         add(mine ? ChosenMine : ChosenOpp, 1.0f);
         if (o->isUnit()) add(mine ? ChosenMyMight : ChosenOppMight, static_cast<float>(o->current_might));
         if (o->damage_marked > 0) add(ChosenDamaged, 1.0f);
+        if (o->hasKeyword(Keyword::Temporary)) add(ChosenTemporary, 1.0f);
+        add(ChosenGearCount, static_cast<float>(o->attachments.size()));
     };
     for (GameObjectId id : a.targets) chosen(id);
     for (GameObjectId id : a.chosen_objects) chosen(id);
@@ -140,6 +148,7 @@ void extractPolicyFeatures(const GameState& state, const CardDB& card_db,
         if (const GameObject* o = find(state, id)) {
             card(PolicyBlock::Moved, o->card_def_id);
             add(MovedMight, static_cast<float>(o->current_might));
+            if (o->hasKeyword(Keyword::Temporary)) add(MovedTemporary, 1.0f);
         }
     }
     if (a.move_destination && std::holds_alternative<BattlefieldLocation>(*a.move_destination)) {
@@ -150,6 +159,7 @@ void extractPolicyFeatures(const GameState& state, const CardDB& card_db,
             const auto* at = std::get_if<BattlefieldLocation>(&*o.location);
             if (!at || at->id != bf) continue;
             add(o.controller == me ? DestMyMight : DestOppMight, static_cast<float>(o.current_might));
+            add(o.controller == me ? DestMyUnits : DestOppUnits, 1.0f);
         }
         for (const auto& b : state.battlefields)
             if (b.id == bf && b.controller) set(DestController, *b.controller == me ? 1.0f : -1.0f);
