@@ -263,9 +263,11 @@ inline void createGoldToken(CardContext& ctx) {
         ctx.state.getObject(tid).card_def_id = kGoldGearCardDefId;
 }
 
-inline GameObjectId createGoldExhausted(CardContext& ctx) {
-    LocationId loc{BaseLocation{ctx.controller}};
-    auto tok = ctx.executor.createToken(ctx.controller, CardType::Gear, "Gold",
+// `player` (default: the effect's controller) plays the Gold token exhausted.
+inline GameObjectId createGoldExhausted(CardContext& ctx, PlayerId player = PlayerId::None) {
+    if (player == PlayerId::None) player = ctx.controller;
+    LocationId loc{BaseLocation{player}};
+    auto tok = ctx.executor.createToken(player, CardType::Gear, "Gold",
                                         0, {}, {}, loc, /*enter_ready=*/false);
     if (ctx.state.objectExists(tok)) {
         auto& gold = ctx.state.getObject(tok);

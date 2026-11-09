@@ -971,6 +971,18 @@ void register_card_999(CardRegistry&);
 void register_card_1002(CardRegistry&);
 void register_card_1004(CardRegistry&);
 void register_card_1007(CardRegistry&);
+void register_card_958(CardRegistry&);
+void register_card_992(CardRegistry&);
+void register_card_1006(CardRegistry&);
+void register_card_1041(CardRegistry&);
+void register_card_1043(CardRegistry&);
+void register_card_1045(CardRegistry&);
+void register_card_1064(CardRegistry&);
+void register_card_1082(CardRegistry&);
+void register_card_1097(CardRegistry&);
+void register_card_1098(CardRegistry&);
+void register_card_1100(CardRegistry&);
+void register_card_1101(CardRegistry&);
 
 void registerAllCards(CardRegistry& registry) {
     register_card_1(registry);
@@ -1940,6 +1952,18 @@ void registerAllCards(CardRegistry& registry) {
     register_card_1002(registry);
     register_card_1004(registry);
     register_card_1007(registry);
+    register_card_958(registry);
+    register_card_992(registry);
+    register_card_1006(registry);
+    register_card_1041(registry);
+    register_card_1043(registry);
+    register_card_1045(registry);
+    register_card_1064(registry);
+    register_card_1082(registry);
+    register_card_1097(registry);
+    register_card_1098(registry);
+    register_card_1100(registry);
+    register_card_1101(registry);
 }
 
 } // namespace riftbound

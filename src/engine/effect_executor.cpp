@@ -984,8 +984,10 @@ void EffectExecutor::healObject(GameObjectId target) {
 void EffectExecutor::exhaustObject(GameObjectId target) {
     if (!state_.objectExists(target)) return;
     auto& obj = state_.getObject(target);
+    const bool was_ready = !obj.is_exhausted;
     obj.is_exhausted = true;
-    events_.emit(ObjectStateChangedEvent{target, "exhausted"});
+    // Only a ready object "becomes exhausted" ("When I become exhausted").
+    if (was_ready) events_.emit(ObjectStateChangedEvent{target, "exhausted"});
 }
 
 void EffectExecutor::channelRunes(PlayerId player, int count, bool enter_exhausted) {

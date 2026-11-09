@@ -1131,6 +1131,16 @@ void TriggerManager::onObjectStateChanged(const ObjectStateChangedEvent& e) {
         return;
     }
 
+    // "When I become exhausted," — every "exhausted" event is a ready object
+    // becoming exhausted (EffectExecutor::exhaustObject only emits it then).
+    if (e.what_changed == "exhausted") {
+        const auto& xobj = state_.getObject(e.object);
+        if (xobj.isUnit() && xobj.location.has_value() && xobj.card_def_id != kInvalidId &&
+            cardFiresOn(card_registry_, xobj.card_def_id, TriggerType::WhenIBecomeExhausted))
+            fireTrigger(e.object, controller, 0, TriggerType::WhenIBecomeExhausted);
+        return;
+    }
+
     if (e.what_changed == "discarded") {
         // "When you discard me," — the card is already in its owner's trash.
         const auto& dobj = state_.getObject(e.object);

@@ -1701,6 +1701,22 @@ bool GameEngine::payAndQueueAbility(const Intent& intent) {
     // onEquip override is responsible for the pick.
     if (source.isGear() && !source.attached_to.has_value()) {
         Card* gear_card = card_registry_.get(source.card_def_id);
+        // Equip paid by exhausting a friendly unit: targets = {unit, unit to exhaust}.
+        if (gear_card && gear_card->hasEquipAbility() && gear_card->equipByExhaustingAUnit() &&
+            intent.targets.size() >= 2) {
+            const GameObjectId unit = intent.targets[0], payer = intent.targets[1];
+            if (!state_.objectExists(unit) || !state_.objectExists(payer)) return false;
+            const auto& p = state_.getObject(payer);
+            if (!p.isUnit() || p.controller != intent.player || p.is_exhausted ||
+                !p.location.has_value())
+                return false;
+            effect_executor_->exhaustObject(payer);
+            events_.logTrace("EQUIP_COST: exhausted " + p.name + " to equip " + source.name);
+            CardContext equip_ctx{state_, events_, *effect_executor_,
+                                 intent.player, intent.ability_source};
+            if (state_.objectExists(unit) && gear_card->onEquipPaid(equip_ctx, unit)) cleanup();
+            return false;
+        }
         if (gear_card && gear_card->hasEquipAbility()) {
             bool has_target = !intent.targets.empty();
             if (has_target || gear_card->needsEquipTimeTarget()) {
@@ -2495,6 +2511,19 @@ void GameEngine::resolvePermanent(const ChainItem& item) {
                 if (cdef->entersReadyOnPlay(state_, card.controller, card)) enters_ready = true;
             }
         }
+        // Another card of the controller's (on the board or in the Legend Zone)
+        // makes it enter ready (Card::grantsEnterReadyTo).
+        if (!enters_ready) {
+            for (const auto& [oid, obj] : state_.objects) {
+                if (obj.controller != card.controller || obj.card_def_id == kInvalidId) continue;
+                if (!obj.location.has_value() && obj.zone != ZoneType::LegendZone) continue;
+                const Card* granter = card_registry_.get(obj.card_def_id);
+                if (granter && granter->grantsEnterReadyTo(state_, oid, card)) {
+                    enters_ready = true;
+                    break;
+                }
+            }
+        }
         card.is_exhausted = !enters_ready;
     }
     // Gear enters ready (CR 149.1) unless it says "This enters exhausted."
@@ -3148,7 +3177,32 @@ std::vector<Intent> GameEngine::generateMainPhaseActions(PlayerId player) const 
 
         Card* gear_card = card_registry_.get(obj.card_def_id);
         if (!gear_card || !gear_card->hasEquipAbility()) continue;
-        if (!gear_card->canEquip(state_, player)) continue;
+        const bool usual_cost = gear_card->canEquip(state_, player);
+        // "[Equip] — [A] or exhaust a friendly unit": the ready friendly units
+        // that could be exhausted instead (Card::equipByExhaustingAUnit).
+        std::vector<GameObjectId> exhaustable;
+        if (gear_card->equipByExhaustingAUnit()) {
+            for (const auto& [xid, x] : state_.objects)
+                if (x.isUnit() && x.controller == player && x.location.has_value() &&
+                    !x.is_exhausted)
+                    exhaustable.push_back(xid);
+        }
+        if (!usual_cost && exhaustable.empty()) continue;
+        if (!exhaustable.empty()) {
+            for (auto& [uid, unit] : state_.objects) {
+                if (!unit.isUnit() || unit.controller != player) continue;
+                if (!unit.location.has_value()) continue;
+                for (auto xid : exhaustable) {
+                    Intent equip;
+                    equip.type = IntentType::ActivateAbility;
+                    equip.player = player;
+                    equip.ability_source = id;
+                    equip.targets = {uid, xid};   // equip uid, exhaust xid to pay
+                    actions.push_back(equip);
+                }
+            }
+        }
+        if (!usual_cost) continue;
 
         if (gear_card->needsEquipTimeTarget()) {
             // One intent per gear; target chosen at resolve via pickTarget.

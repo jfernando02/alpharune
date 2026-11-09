@@ -720,6 +720,24 @@ public:
         return false;
     }
 
+    /// A continuous effect that makes a unit being played enter ready ("Units
+    /// you play to battlefields you control enter ready"). Asked of each card
+    /// the unit's controller has on the board or in the Legend Zone as the
+    /// unit resolves, `played` already at its destination.
+    virtual bool grantsEnterReadyTo(const GameState& /*state*/, GameObjectId /*self*/,
+                                    const GameObject& /*played*/) const {
+        return false;
+    }
+
+    /// An [Equip] cost that may be paid by exhausting a ready friendly unit
+    /// instead of the usual cost ("[Equip] — [A] or exhaust a friendly unit").
+    /// The engine then offers one equip per (unit to equip, unit to exhaust)
+    /// and calls onEquipPaid once the unit is exhausted.
+    virtual bool equipByExhaustingAUnit() const { return false; }
+    /// Attach after the alternative cost was paid (no other cost). Returns
+    /// whether the gear was attached.
+    virtual bool onEquipPaid(CardContext& /*ctx*/, GameObjectId /*unit*/) { return false; }
+
     /// Change to the points needed to win while this card is a battlefield in
     /// play ("Increase the points needed to win the game by 1").
     virtual int victoryScoreModifier() const { return 0; }
