@@ -12,6 +12,9 @@
 /// HeuristicAgent uses it in place of ScriptedAgent — in its simulations,
 /// and for the decisions it does not search — at the decision kinds the
 /// model covers.
+///
+/// A neural model file (agents/nn_model) loads through the same class: its
+/// policy head scores the actions over the structured observation instead.
 
 #include "gbt_evaluator.h"
 
@@ -25,6 +28,8 @@
 #include <vector>
 
 namespace riftbound {
+
+class NnModel;
 
 class PolicyModel {
 public:
@@ -48,9 +53,11 @@ public:
              int scripted_index) const;
 
     int numTrees() const { return trees_.numTrees(); }
+    bool isNeural() const { return nn_ != nullptr; }
 
 private:
     GbtTrees trees_;
+    std::shared_ptr<const NnModel> nn_;  // set: the scores come from it, not the trees
     std::set<std::string, std::less<>> kinds_;
 };
 

@@ -25,6 +25,7 @@
 #include "agents/gbt_evaluator.h"
 #include "agents/heuristic_agent.h"
 #include "agents/ismcts_bot.h"
+#include "agents/nn_model.h"
 #include "agents/random_agent.h"
 #include "agents/scripted_agent.h"
 #include "cards/card_registry.h"
@@ -205,6 +206,8 @@ bool applyTreeOption(HeuristicConfig& c, const std::string& key, double v) {
     else if (key == "tree_halving") c.tree_halving = v != 0;
     else if (key == "tree_halving_m") c.tree_halving_m = static_cast<int>(v);
     else if (key == "tree_hscale") c.tree_halving_scale = v;
+    else if (key == "tree_skip_rune") c.tree_skip_rune = v != 0;
+    else if (key == "tree_fpu") c.tree_fpu = v;
     else return false;
     return true;
 }
@@ -300,7 +303,7 @@ std::shared_ptr<const PositionModel> loadModelCached(const std::string& path) {
     static std::map<std::string, std::shared_ptr<const PositionModel>> cache;
     std::lock_guard<std::mutex> lock(mutex);
     auto& slot = cache[path];
-    if (!slot) slot = GbtModel::load(path);
+    if (!slot) slot = loadPositionModel(path);
     return slot;
 }
 

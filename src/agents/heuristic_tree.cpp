@@ -13,6 +13,7 @@
 #include "ml/feature_extractor.h"
 #include "ml/policy_features.h"
 
+#include <cstring>
 #include <exception>
 
 namespace riftbound {
@@ -96,7 +97,7 @@ std::vector<double> HeuristicAgent::treePriors(const GameState& state,
 
 double HeuristicAgent::leafValue(const GameState& end, PlayerId me) const {
     if (end.game_over) return end.winner == me ? 1.0 : end.winner == opponent(me) ? 0.0 : 0.5;
-    if (config_.model) return config_.model->winProbability(end, me);
+    if (config_.model) return config_.model->winProbability(end, me, card_db_);
     return 0.5 + 0.5 * std::tanh(evaluate(end, me, config_.weights) / 150.0);
 }
 
@@ -278,7 +279,12 @@ bool HeuristicAgent::treeSimulation(const GameState& state, PlayerId me, uint64_
                steps < config_.max_rollout_steps) {
             const std::vector<Intent>& legal = step.legal;
             int pick = -1;
-            if (legal.size() >= 2 && in_tree) {
+            const bool rune = legal.size() >= 2 && in_tree &&
+                std::strcmp(ml::policyDecisionKind(engine.state(), legal), "rune") == 0;
+            const long tree_steps_before = stats_.tree_steps;
+            // A rune payment gets no node with tree_skip_rune: it is answered
+            // below as in a playout, and the tree goes on after it.
+            if (legal.size() >= 2 && in_tree && !(rune && config_.tree_skip_rune && !at_root)) {
                 const uint64_t key = at_root ? root_key : treeKey(engine.state(), legal, me);
                 auto [it, created] = tree.nodes.try_emplace(key);
                 if (created && !at_root) {
@@ -299,7 +305,7 @@ bool HeuristicAgent::treeSimulation(const GameState& state, PlayerId me, uint64_
                     int child = -1;
                     pick = tree.select(it->second, legal, priors,
                                        at_root ? 0 : static_cast<size_t>(config_.tree_width),
-                                       config_.tree_c, mine, child);
+                                       config_.tree_c, mine, child, config_.tree_fpu);
                     if (pick >= 0) {
                         path.push_back({&it->second, child, mine});
                         ++stats_.tree_steps;
@@ -309,6 +315,7 @@ bool HeuristicAgent::treeSimulation(const GameState& state, PlayerId me, uint64_
                 }
                 at_root = false;
             }
+            if (rune && stats_.tree_steps > tree_steps_before) ++stats_.tree_rune_steps;
             if (pick < 0) pick = std::max(0, defaultIndex(engine.state(), legal, config_.policy_rollouts));
             step = engine.applyChoice(pick);
             ++steps;

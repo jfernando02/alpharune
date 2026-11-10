@@ -148,6 +148,16 @@ struct HeuristicConfig {
     bool tree_halving = false;
     int tree_halving_m = 16;
     double tree_halving_scale = 1.0;
+    // Do not branch on rune payments inside the tree: take the default
+    // answer (the policy's, or ScriptedAgent's) without a node. Which rune
+    // pays rarely matters (2026-11: paying at random plays level with
+    // ScriptedAgent), and every payment node between two real decisions
+    // costs the tree a level of depth and its simulations.
+    bool tree_skip_rune = false;
+    // First-play urgency: the value an unvisited option gets in PUCT is the
+    // node's mean so far minus this (normalized, floored at 0) instead of the
+    // worst value seen. Below 0: off (the worst value, as MuZero).
+    double tree_fpu = -1.0;
     uint64_t seed = 1;              // 0 picks a random seed
 };
 
@@ -177,6 +187,7 @@ public:
         int tree_searches = 0;
         long tree_steps = 0;         // decisions taken inside the tree, all simulations
         int tree_answers = 0;        // unsearched decisions answered from the tree
+        long tree_rune_steps = 0;    // tree_steps that were rune payments
         int max_tree_nodes = 0;
         double root_max_prior = 0;   // sum over tree searches of the root's largest prior
     };

@@ -386,7 +386,7 @@ std::vector<double> IsmctsBot::Evaluate(Sim& sim) {
     } else if (state.game_over) {
         v = state.winner == PlayerId::Player1 ? 1.0 : state.winner == PlayerId::Player2 ? -1.0 : 0.0;
     } else {
-        v = 2.0 * config_.model->winProbability(state, PlayerId::Player1) - 1.0;
+        v = 2.0 * config_.model->winProbability(state, PlayerId::Player1, card_db_) - 1.0;
     }
     return {v, -v};
 }

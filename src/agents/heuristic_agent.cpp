@@ -395,7 +395,7 @@ std::optional<double> HeuristicAgent::simulate(const GameState& guess,
         const GameState& end = engine.state();
         if (!config_.model) return evaluate(end, me, config_.weights);
         if (end.game_over) return end.winner == me ? 1.0 : end.winner == opponent(me) ? 0.0 : 0.5;
-        return config_.model->winProbability(end, me);
+        return config_.model->winProbability(end, me, card_db_);
     } catch (const std::exception&) {
         ++stats_.failed_simulations;
         return std::nullopt;

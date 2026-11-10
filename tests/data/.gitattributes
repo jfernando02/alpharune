@@ -1,0 +1,6 @@
+# Binary fixtures: never convert line endings.
+*.rbnn binary
+*.pos binary
+*.ent binary
+*.act binary
+*.bag binary

@@ -7,6 +7,8 @@
 #include "agents/gbt_evaluator.h"
 #include "agents/heuristic_agent.h"
 #include "agents/ismcts_bot.h"
+#include "agents/nn_model.h"
+#include "agents/policy_agent.h"
 #include "agents/random_agent.h"
 #include "agents/scripted_agent.h"
 #include "cards/card_registry.h"
@@ -65,6 +67,10 @@ inline DeckSet loadLegalDecks(const std::string& dir, const CardDB& db) {
 ///                setup_guesses=N,setup_turns=N,policy=FILE,policy_rollouts=0/1,
 ///                policy_offsearch=0/1,<weight>=X]
 ///   | ismcts[:sims=N,uct_c=X,turns_ahead=N,step_budget=N,showdowns=0/1,model=FILE,<weight>=X]
+///   | policy:policy=FILE[,temp=X,eps=X]   (agents/policy_agent: the policy, no search)
+/// model= and policy= take either kind of file: gradient-boosted trees (JSON)
+/// or the neural model (agents/nn_model). The heuristic agent's tree search
+/// also takes tree_skip_rune=0/1 and tree_fpu=X (HeuristicConfig).
 /// where <weight> is any EvalWeights field (agents/evaluator.h). A model is
 /// loaded once here and shared by every game (models are read-only).
 /// Either look-ahead agent also takes offsearch=random[:KIND]: the decisions
@@ -75,6 +81,7 @@ struct ToolAgentSpec {
     std::string kind = "heuristic";
     HeuristicConfig heuristic;  // kind == "heuristic"; the seed is set per game
     IsmctsConfig ismcts;        // kind == "ismcts"; likewise
+    PolicyAgentConfig policy;   // kind == "policy"; likewise
     bool offsearch_random = false;
     std::string offsearch_kind;  // "" = every unsearched decision
 };
@@ -135,7 +142,7 @@ inline ToolAgentSpec parseToolAgent(const std::string& spec) {
     const auto colon = spec.find(':');
     out.kind = spec.substr(0, colon);
     if (out.kind != "random" && out.kind != "scripted" && out.kind != "heuristic" &&
-        out.kind != "ismcts")
+        out.kind != "ismcts" && out.kind != "policy")
         throw std::runtime_error("unknown agent '" + out.kind + "' in '" + spec + "'");
     if (colon == std::string::npos) return out;
     if (out.kind == "random" || out.kind == "scripted")
@@ -147,6 +154,13 @@ inline ToolAgentSpec parseToolAgent(const std::string& spec) {
         const auto eq = kv.find('=');
         if (eq == std::string::npos) throw std::runtime_error("expected key=value, got '" + kv + "'");
         const std::string key = kv.substr(0, eq), val = kv.substr(eq + 1);
+        if (out.kind == "policy") {
+            if (key == "policy") out.policy.policy = PolicyModel::load(val);
+            else if (key == "temp") out.policy.temperature = std::stod(val);
+            else if (key == "eps") out.policy.epsilon = std::stod(val);
+            else throw std::runtime_error("unknown policy option '" + key + "'");
+            continue;
+        }
         if (key == "offsearch") {
             const std::string how = val.substr(0, val.find(':'));
             if (how != "random" && how != "scripted")
@@ -154,7 +168,7 @@ inline ToolAgentSpec parseToolAgent(const std::string& spec) {
             out.offsearch_random = how == "random";
             if (val.find(':') != std::string::npos) out.offsearch_kind = val.substr(val.find(':') + 1);
         }
-        else if (key == "model") (h ? out.heuristic.model : out.ismcts.model) = GbtModel::load(val);
+        else if (key == "model") (h ? out.heuristic.model : out.ismcts.model) = loadPositionModel(val);
         else if (key == "turns_ahead") (h ? out.heuristic.turns_ahead : out.ismcts.turns_ahead) = std::stoi(val);
         else if (key == "step_budget" && h) out.heuristic.max_rollout_steps_per_turn = std::stol(val);
         else if (key == "step_budget") out.ismcts.max_steps_per_turn = std::stol(val);
@@ -181,6 +195,8 @@ inline ToolAgentSpec parseToolAgent(const std::string& spec) {
         else if (key == "tree_halving" && h) out.heuristic.tree_halving = std::stoi(val) != 0;
         else if (key == "tree_halving_m" && h) out.heuristic.tree_halving_m = std::stoi(val);
         else if (key == "tree_hscale" && h) out.heuristic.tree_halving_scale = std::stod(val);
+        else if (key == "tree_skip_rune" && h) out.heuristic.tree_skip_rune = std::stoi(val) != 0;
+        else if (key == "tree_fpu" && h) out.heuristic.tree_fpu = std::stod(val);
         else if (key == "sims" && !h) out.ismcts.max_simulations = std::stoi(val);
         else if (key == "uct_c" && !h) out.ismcts.uct_c = std::stod(val);
         else if (!setWeight(h ? out.heuristic.weights : out.ismcts.weights, key, std::stod(val)))
@@ -193,6 +209,11 @@ inline std::unique_ptr<AgentInterface> makeToolAgent(const ToolAgentSpec& spec, 
                                                      const CardRegistry& reg, uint64_t seed) {
     if (spec.kind == "random") return std::make_unique<RandomAgent>(seed | 1);
     if (spec.kind == "scripted") return std::make_unique<ScriptedAgent>(db);
+    if (spec.kind == "policy") {
+        PolicyAgentConfig config = spec.policy;
+        config.seed = seed | 1;
+        return std::make_unique<PolicyAgent>(db, config);
+    }
     std::unique_ptr<AgentInterface> agent;
     if (spec.kind == "ismcts") {
         IsmctsConfig config = spec.ismcts;
@@ -217,11 +238,13 @@ struct SearchCounts {
     // search's (HeuristicConfig::tree) searches, in-tree decisions, answers
     // from the tree and sum of the roots' largest priors.
     long sims = 0, sim_steps = 0, tree_searches = 0, tree_steps = 0, tree_answers = 0;
+    long tree_rune_steps = 0;  // in-tree decisions that were rune payments
     double root_max_prior = 0.0;
     void add(const SearchCounts& o) {
         searched += o.searched; fallbacks += o.fallbacks; sims += o.sims;
         sim_steps += o.sim_steps; tree_searches += o.tree_searches; tree_steps += o.tree_steps;
         tree_answers += o.tree_answers; root_max_prior += o.root_max_prior;
+        tree_rune_steps += o.tree_rune_steps;
     }
     /// One line for a report, e.g. "1200 sims (14.2 steps), tree: ...".
     std::string describe() const {
@@ -231,7 +254,8 @@ struct SearchCounts {
         if (tree_searches > 0)
             out << ", " << tree_searches << " tree searches (" << static_cast<double>(sims) / tree_searches
                 << " sims, " << (sims ? static_cast<double>(tree_steps) / sims : 0.0)
-                << " tree steps each, root max prior " << root_max_prior / tree_searches << "), "
+                << " tree steps each, " << (tree_steps ? 100.0 * tree_rune_steps / tree_steps : 0.0)
+                << "% of them rune payments, root max prior " << root_max_prior / tree_searches << "), "
                 << tree_answers << " answers from the tree";
         return out.str();
     }
@@ -249,6 +273,7 @@ inline SearchCounts searchCounts(const AgentInterface& agent) {
         c.tree_searches = s.tree_searches;
         c.tree_steps = s.tree_steps;
         c.tree_answers = s.tree_answers;
+        c.tree_rune_steps = s.tree_rune_steps;
         c.root_max_prior = s.root_max_prior;
         return c;
     }

@@ -84,8 +84,10 @@ struct HeuristicAgent::Tree {
     /// PUCT: the index in `legal` of the option to take at `node`, counting
     /// the visit; `child` gets its index in node.children. Candidates are
     /// the `width` options with the best priors (0: all). Concede never is.
+    /// `fpu` >= 0: an unvisited option is valued at the node's mean so far
+    /// minus `fpu` (HeuristicConfig::tree_fpu) instead of the worst seen.
     int select(Node& node, const std::vector<Intent>& legal, const std::vector<double>& priors,
-               size_t width, double c, bool mine, int& child) {
+               size_t width, double c, bool mine, int& child, double fpu = -1.0) {
         std::vector<int> order;
         order.reserve(legal.size());
         for (size_t i = 0; i < legal.size(); ++i)
@@ -93,6 +95,17 @@ struct HeuristicAgent::Tree {
         std::stable_sort(order.begin(), order.end(),
                          [&](int a, int b) { return priors[a] > priors[b]; });
         if (width > 0 && order.size() > width) order.resize(width);
+
+        double unvisited_q = 0.0;
+        if (fpu >= 0.0) {
+            double sum = 0.0;
+            int visits = 0;
+            for (const Child& ch : node.children) {
+                sum += ch.value_sum;
+                visits += ch.visits;
+            }
+            if (visits > 0) unvisited_q = std::max(0.0, normalized(sum / visits, mine) - fpu);
+        }
 
         int best = -1;
         double best_score = -std::numeric_limits<double>::infinity();
@@ -107,7 +120,7 @@ struct HeuristicAgent::Tree {
             ch.prior += (priors[i] - ch.prior) / ch.available;
             // Unvisited options count as the worst seen (MuZero); the prior
             // decides which of them is tried first.
-            const double q = ch.visits > 0 ? normalized(ch.mean(), mine) : 0.0;
+            const double q = ch.visits > 0 ? normalized(ch.mean(), mine) : unvisited_q;
             const double score = q + c * ch.prior * std::sqrt(static_cast<double>(ch.available)) /
                                          (1.0 + ch.visits);
             if (score > best_score) {

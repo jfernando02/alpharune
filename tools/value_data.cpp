@@ -30,11 +30,22 @@
 /// the follow-ups answered from their plans — one line per legal action:
 ///   <decision> <score|nan> <chosen 0/1> <kind> <game> <turn> <index>:<value> ...
 /// (ml::extractPolicyFeatures; names to FILE.names), for policy_gbt.py.
+///
+/// --nn-out PREFIX records the same positions for the neural model as a
+/// binary shard (ml/obs_io.h): every turn's first decision from both
+/// players' views (value only), and every searched decision with its legal
+/// actions and their scores. With it --out may be left out.
+///
+/// --agent also takes policy:policy=FILE[,temp=X,eps=X] (agents/policy_agent):
+/// the policy with no search, thousands of games an hour, for value data.
+/// --self-play makes every game that agent against itself (no ScriptedAgent
+/// or random seats).
 
 #include "tool_common.h"
 
 #include "core/events.h"
 #include "engine/game_engine.h"
+#include "ml/obs_io.h"
 #include "ml/policy_features.h"
 #include "ml/value_features.h"
 
@@ -69,6 +80,8 @@ struct Options {
     int guesses = 0;    // heuristic determinizations; 0 = HeuristicConfig's default
     std::string agent;  // full heuristic spec, replacing --model / --guesses
     std::string policy_out;
+    std::string nn_out;
+    bool self_play = false;
 };
 
 Options parse(int argc, char** argv) {
@@ -88,9 +101,11 @@ Options parse(int argc, char** argv) {
         else if (a == "--guesses") o.guesses = std::stoi(next());
         else if (a == "--agent") o.agent = next();
         else if (a == "--policy-out") o.policy_out = next();
+        else if (a == "--nn-out") o.nn_out = next();
+        else if (a == "--self-play") o.self_play = true;
         else throw std::runtime_error("unknown argument " + a);
     }
-    if (o.out.empty()) throw std::runtime_error("--out is required");
+    if (o.out.empty() && o.nn_out.empty()) throw std::runtime_error("--out or --nn-out is required");
     if (o.threads <= 0) o.threads = static_cast<int>(std::max(1u, std::thread::hardware_concurrency()));
     return o;
 }
@@ -105,6 +120,64 @@ constexpr Matchup kMatchups[] = {
     {Kind::Scripted, Kind::Scripted, 2},
     {Kind::Heuristic, Kind::Random, 1}, {Kind::Random, Kind::Heuristic, 1},
 };
+
+/// A JSON string literal of `text`.
+std::string quoted(const std::string& text) {
+    std::string out = "\"";
+    for (char c : text) {
+        if (c == '"' || c == '\\') out += '\\';
+        out += c;
+    }
+    return out + "\"";
+}
+
+/// The shard's description for the trainer: versions, record sizes (so a
+/// reader with another layout fails loudly), feature and deck names.
+void writeShardMeta(const std::string& path, const CardDB& db,
+                    const std::vector<std::string>& deck_names, const Options& opt) {
+    std::ofstream meta(path);
+    if (!meta) throw std::runtime_error("cannot write " + path);
+    const auto list = [&](const char* key, const std::vector<std::string>& names) {
+        meta << "  \"" << key << "\": [";
+        for (size_t i = 0; i < names.size(); ++i) meta << (i ? ", " : "") << quoted(names[i]);
+        meta << "],\n";
+    };
+    const std::vector<std::string> policy_names = ml::policyFeatureNames(db);
+    const std::vector<std::string> action_names(
+        policy_names.begin() + ml::kPolicyActionOffset,
+        policy_names.begin() + ml::kPolicyActionOffset + ml::kObsActionDim);
+    std::vector<std::string> cards(ml::kObsCardVocab, "unused");
+    for (const auto& [id, def] : db.all())
+        if (id >= 1 && id < static_cast<CardDefId>(ml::kObsCardVocab)) cards[id] = def.name;
+    meta << "{\n"
+         << "  \"obs_version\": " << ml::kObsVersion << ",\n"
+         << "  \"globals\": " << ml::kObsGlobalDim << ",\n"
+         << "  \"entity_features\": " << ml::kObsEntityDim << ",\n"
+         << "  \"action_features\": " << ml::kObsActionDim << ",\n"
+         << "  \"card_vocab\": " << ml::kObsCardVocab << ",\n"
+         << "  \"groups\": " << ml::kObsGroupSlots << ",\n"
+         << "  \"pools\": " << ml::kObsPoolCount << ",\n"
+         << "  \"fixed_pools\": " << ml::kObsPoolBattlefield << ",\n"
+         << "  \"max_battlefields\": " << ml::kObsMaxBattlefields << ",\n"
+         << "  \"max_chosen\": " << ml::kObsMaxChosen << ",\n"
+         << "  \"max_moved\": " << ml::kObsMaxMoved << ",\n"
+         << "  \"bags\": " << static_cast<int>(ml::ObsBag::Count) << ",\n"
+         << "  \"battlefield_group\": " << static_cast<int>(ml::ObsGroup::Battlefield) << ",\n"
+         << "  \"first_single_group\": " << static_cast<int>(ml::ObsGroup::MyLegend) << ",\n"
+         << "  \"pos_size\": " << sizeof(ml::PosRecord) << ",\n"
+         << "  \"ent_size\": " << sizeof(ml::EntRecord) << ",\n"
+         << "  \"act_size\": " << sizeof(ml::ActRecord) << ",\n"
+         << "  \"bag_size\": " << sizeof(ml::BagRecord) << ",\n";
+    list("kinds", ml::obsKindNames());
+    list("global_names", ml::obsGlobalNames());
+    list("entity_names", ml::obsEntityNames());
+    list("action_names", action_names);
+    list("cards", cards);
+    list("decks", deck_names);
+    meta << "  \"agent\": " << quoted(opt.agent) << ",\n"
+         << "  \"seed\": " << opt.seed << ",\n"
+         << "  \"games\": " << opt.games << "\n}\n";
+}
 
 std::unique_ptr<AgentInterface> makeAgent(Kind kind, const tools::ToolAgentSpec& heuristic,
                                           const CardDB& db, const CardRegistry& reg,
@@ -138,9 +211,10 @@ int main(int argc, char** argv) {
     try {
         if (!opt.agent.empty()) {
             heuristic = tools::parseToolAgent(opt.agent);
-            if (heuristic.kind != "heuristic") throw std::runtime_error("--agent must be a heuristic spec");
+            if (heuristic.kind != "heuristic" && heuristic.kind != "policy")
+                throw std::runtime_error("--agent must be a heuristic or policy spec");
         } else if (!opt.model.empty()) {
-            heuristic.heuristic.model = GbtModel::load(opt.model);
+            heuristic.heuristic.model = loadPositionModel(opt.model);
         }
     } catch (const std::exception& e) {
         std::cerr << "bad agent / model: " << e.what() << "\n";
@@ -158,16 +232,29 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    {
+    const bool text_out = !opt.out.empty();
+    std::ofstream out, search_out;
+    if (text_out) {
         std::ofstream names(opt.out + ".names");
         for (const auto& n : ml::valueFeatureNames(db)) names << n << "\n";
         std::ofstream deck_list(opt.out + ".decks");
         for (const auto& n : deck_names) deck_list << n << "\n";
+        out.open(opt.out);
+        search_out.open(opt.out + ".search");
+        if (!out || !search_out) {
+            std::cerr << "cannot write " << opt.out << "\n";
+            return 1;
+        }
     }
-    std::ofstream out(opt.out), search_out(opt.out + ".search");
-    if (!out || !search_out) {
-        std::cerr << "cannot write " << opt.out << "\n";
-        return 1;
+    std::unique_ptr<ml::ObsShardWriter> nn_out;
+    if (!opt.nn_out.empty()) {
+        try {
+            nn_out = std::make_unique<ml::ObsShardWriter>(opt.nn_out);
+            writeShardMeta(opt.nn_out + ".meta.json", db, deck_names, opt);
+        } catch (const std::exception& e) {
+            std::cerr << e.what() << "\n";
+            return 1;
+        }
     }
     std::ofstream policy_out;
     if (!opt.policy_out.empty()) {
@@ -200,6 +287,7 @@ int main(int argc, char** argv) {
                 if (w < candidate.weight) { m = &candidate; break; }
                 w -= candidate.weight;
             }
+            if (opt.self_play) m = &kMatchups[0];
             const uint64_t game_seed = (rng() & 0x7FFFFFFFULL) | 1;
 
             auto a1 = makeAgent(m->p1, heuristic, db, registry, rng());
@@ -215,14 +303,28 @@ int main(int argc, char** argv) {
                 double search = std::nan("");
             };
             std::vector<Row> rows;
+            // The same positions for the neural model, plus its searched
+            // decisions; turn_sample is each player's value-only sample of
+            // the current turn.
+            std::vector<ml::ObsSample> samples;
+            int turn_sample[2] = {-1, -1};
             int last_turn = -1;
             engine.on_decision = [&](const GameState& s, const std::vector<Intent>&, const Intent&) {
                 if (s.turn.phase == TurnPhase::Setup || s.turn.phase == TurnPhase::Mulligan) return;
                 if (s.turn.turn_number == last_turn) return;
                 last_turn = s.turn.turn_number;
                 for (PlayerId p : {PlayerId::Player1, PlayerId::Player2}) {
-                    rows.push_back({p, s.turn.turn_number, {}});
-                    ml::extractValueFeatures(s, p, rows.back().features);
+                    if (text_out) {
+                        rows.push_back({p, s.turn.turn_number, {}});
+                        ml::extractValueFeatures(s, p, rows.back().features);
+                    }
+                    if (nn_out) {
+                        turn_sample[playerIndex(p)] = static_cast<int>(samples.size());
+                        samples.emplace_back();
+                        samples.back().player = p;
+                        samples.back().turn = s.turn.turn_number;
+                        ml::encodeObs(s, p, db, samples.back().obs);
+                    }
                 }
             };
 
@@ -247,10 +349,29 @@ int main(int argc, char** argv) {
                         break;
                     }
                 }
-                if (!policy_out.is_open()) return;
-                const long decision = next_decision++;
                 const char* kind = ml::policyDecisionKind(s, legal);
                 const int scripted_pick = scripted.selectIndex(s, legal);
+                if (nn_out) {
+                    const bool in_game = s.turn.phase != TurnPhase::Setup && s.turn.phase != TurnPhase::Mulligan;
+                    const double estimate = scores_are_probabilities
+                        ? std::clamp(scores[chosen], 0.0, 1.0) : std::nan("");
+                    const int ts = turn_sample[playerIndex(p)];
+                    if (in_game && ts >= 0 && samples[ts].turn == s.turn.turn_number &&
+                        std::isnan(samples[ts].search_value))
+                        samples[ts].search_value = estimate;
+                    samples.emplace_back();
+                    ml::ObsSample& sample = samples.back();
+                    sample.player = p;
+                    sample.turn = s.turn.turn_number;
+                    sample.kind = ml::obsKindIndex(kind);
+                    sample.chosen = chosen;
+                    sample.search_value = estimate;
+                    sample.scores = scores;
+                    ml::encodeObs(s, p, db, sample.obs);
+                    ml::encodeActions(s, db, legal, sample.obs, kind, scripted_pick, sample.actions);
+                }
+                if (!policy_out.is_open()) return;
+                const long decision = next_decision++;
                 ml::SparseRow position, row;
                 ml::extractValueFeatures(s, p, position);
                 for (size_t i = 0; i < legal.size(); ++i) {
@@ -292,9 +413,17 @@ int main(int argc, char** argv) {
                 }
                 const std::string policy_text = policy_buf.str();
                 std::lock_guard<std::mutex> lock(out_mutex);
-                out << buf.str();
-                search_out << search_buf.str();
+                if (text_out) {
+                    out << buf.str();
+                    search_out << search_buf.str();
+                }
                 rows_written += static_cast<long>(rows.size());
+                if (nn_out)
+                    for (const ml::ObsSample& sample : samples) {
+                        const bool p1 = sample.player == PlayerId::Player1;
+                        nn_out->write(sample, static_cast<uint32_t>(g), sample.player == result.winner ? 1 : 0,
+                                      static_cast<int>(p1 ? d1 : d2), static_cast<int>(p1 ? d2 : d1));
+                    }
                 if (policy_out.is_open()) {
                     policy_out << policy_text;
                     policy_rows += std::count(policy_text.begin(), policy_text.end(), '\n');
@@ -318,6 +447,9 @@ int main(int argc, char** argv) {
 
     std::cerr << "done: " << games_done.load() << " games (" << games_dropped.load()
               << " dropped), " << rows_written.load() << " rows -> " << opt.out;
+    if (nn_out)
+        std::cerr << ", " << nn_out->positions() << " positions (" << nn_out->actions()
+                  << " actions) -> " << opt.nn_out;
     if (policy_out.is_open())
         std::cerr << ", " << policy_rows.load() << " policy rows -> " << opt.policy_out;
     std::cerr << "\n";

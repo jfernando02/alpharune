@@ -349,9 +349,11 @@ add_library(riftbound_core
     src/agents/ismcts_bot.cpp
     src/agents/gbt_evaluator.cpp
     src/agents/policy_model.cpp
+    src/agents/nn_model.cpp
     src/ml/feature_extractor.cpp
     src/ml/value_features.cpp
     src/ml/policy_features.cpp
+    src/ml/obs_encoder.cpp
     src/ml/cfr_util.cpp
     src/openspiel/action_vocab.cpp
 )
@@ -417,6 +419,10 @@ target_link_libraries(riftbound_arena PRIVATE riftbound_core)
 # Candidate decks against a field of decks, same agent in both seats.
 add_executable(riftbound_gauntlet tools/gauntlet.cpp)
 target_link_libraries(riftbound_gauntlet PRIVATE riftbound_core)
+# The neural model over recorded positions: the check that the engine's
+# forward pass matches the trainer's (tools/nn_eval.cpp).
+add_executable(riftbound_nn_eval tools/nn_eval.cpp)
+target_link_libraries(riftbound_nn_eval PRIVATE riftbound_core)
 
 # Config parsing (src/config/) moved to riftbound-trainer along with the
 # training driver — engine has no current consumers. A future engine

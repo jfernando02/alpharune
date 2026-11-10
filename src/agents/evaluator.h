@@ -9,6 +9,7 @@
 ///
 /// Every term is "mine minus theirs", so evaluate(s, P1) == -evaluate(s, P2).
 
+#include "core/card_db.h"
 #include "core/game_state.h"
 
 #include <string>
@@ -68,6 +69,11 @@ public:
     virtual ~PositionModel() = default;
     /// Probability in [0, 1] that `me` wins from `state` (not game over).
     virtual double winProbability(const GameState& state, PlayerId me) const = 0;
+    /// The same for callers that have the card database, which a model whose
+    /// encoding reads printed card data needs (agents/nn_model).
+    virtual double winProbability(const GameState& state, PlayerId me, const CardDB&) const {
+        return winProbability(state, me);
+    }
 };
 
 } // namespace riftbound

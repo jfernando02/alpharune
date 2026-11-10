@@ -1,5 +1,8 @@
 #include "policy_model.h"
 
+#include "nn_model.h"
+
+#include "ml/obs_encoder.h"
 #include "ml/policy_features.h"
 
 #include <nlohmann/json.hpp>
@@ -12,6 +15,14 @@ namespace riftbound {
 using json = nlohmann::json;
 
 std::shared_ptr<const PolicyModel> PolicyModel::load(const std::string& path) {
+    if (NnModel::isNnFile(path)) {
+        auto model = std::shared_ptr<PolicyModel>(new PolicyModel());
+        model->nn_ = NnModel::load(path);
+        if (!model->nn_->hasPolicy())
+            throw std::runtime_error("PolicyModel: " + path + " has no policy head");
+        model->kinds_ = model->nn_->kinds();
+        return model;
+    }
     std::ifstream in(path);
     if (!in) throw std::runtime_error("PolicyModel: cannot open " + path);
     const json root = json::parse(in);
@@ -34,6 +45,14 @@ std::vector<double> PolicyModel::scores(const GameState& state, const CardDB& ca
     thread_local ml::SparseRow position, row;
     std::vector<double> out(legal.size(), 0.0);
     if (legal.empty()) return out;
+    if (nn_) {
+        thread_local ml::Obs obs;
+        thread_local std::vector<ml::ObsAction> actions;
+        ml::encodeObs(state, legal[0].player, card_db, obs);
+        ml::encodeActions(state, card_db, legal, obs, kind, scripted_index, actions);
+        nn_->forward(obs, &actions, nullptr, &out);
+        return out;
+    }
     ml::extractValueFeatures(state, legal[0].player, position);
     for (size_t i = 0; i < legal.size(); ++i) {
         ml::extractPolicyFeatures(state, card_db, legal, static_cast<int>(i), position, kind,

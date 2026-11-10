@@ -62,6 +62,7 @@ public:
     /// Sum of the trees' leaves for one encoded position.
     double rawScore(const ml::SparseRow& row) const { return trees_.rawScore(row); }
 
+    using PositionModel::winProbability;
     double winProbability(const GameState& state, PlayerId me) const override;
 
     int numTrees() const { return trees_.numTrees(); }
