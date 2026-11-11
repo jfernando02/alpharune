@@ -451,6 +451,7 @@ bool EffectExecutor::burnOut(PlayerId player) {
                                            : " deck empty, shuffled trash; ") +
                      toString(opp_id) + " gains 1 point (CR 432.2.c) -> " +
                      std::to_string(opp_ps.score));
+    events_.emit(PointsGainedEvent{opp_id, 1, opp_ps.score});
     // CR 432.3.c.1: a burn-out point that reaches the Victory Score with more
     // points than every opponent wins immediately, without waiting for cleanup.
     if (opp_ps.score >= effectiveVictoryScore() &&
