@@ -17,85 +17,31 @@ public:
     const CardDef& def() const override { return def_; }
 
     bool hasEquipAbility() const override { return true; }
-    // onEquip's pre-check for the most favourable unit: a rune in base to recycle for [A],
-    // and enough ready runes for [3] minus the Might of some friendly unit.
+    // "[Equip] [3][A]. This ability's Energy cost is reduced by the Might of the unit you
+    // choose." Paid like any Equip cost (pool first, then runes: equip_base.h).
+    static int energyFor(const GameState& state, GameObjectId unit) {
+        return std::max(0, 3 - state.getObject(unit).current_might);
+    }
+    bool canEquipTo(const GameState& state, PlayerId controller, GameObjectId unit) const override {
+        return state.objectExists(unit) &&
+               canPayEquipCost(state, controller, energyFor(state, unit), std::nullopt);
+    }
     bool canEquip(const GameState& state, PlayerId controller) const override {
-        int ready = 0, runes = 0, best_might = -1;
-        for (const auto& [id, obj] : state.objects) {
-            if (obj.controller != controller || !obj.location.has_value()) continue;
-            if (obj.isUnit()) best_might = std::max(best_might, obj.current_might);
-            if (obj.isRune() && *obj.location == LocationId{BaseLocation{controller}}) {
-                ++runes;
-                if (!obj.is_exhausted) ++ready;
-            }
-        }
-        return best_might >= 0 && runes > 0 && ready >= std::max(0, 3 - best_might);
+        for (const auto& [id, obj] : state.objects)
+            if (obj.isUnit() && obj.controller == controller && obj.location.has_value() &&
+                canEquipTo(state, controller, id))
+                return true;
+        return false;
     }
 
     // Weaponmaster (CR 821): [3][A] reduced by [A], Energy reduced by the unit's Might.
     bool weaponmasterEquip(CardContext& ctx, GameObjectId unit, bool check_only) override {
         if (!ctx.state.objectExists(unit)) return false;
-        const int energy = std::max(0, 3 - ctx.state.getObject(unit).current_might);
-        return weaponmasterPayEnergyAndAttach(ctx, unit, energy, check_only);
+        return weaponmasterPayEnergyAndAttach(ctx, unit, energyFor(ctx.state, unit), check_only);
     }
     bool onEquip(CardContext& ctx, GameObjectId unit) override {
         if (!ctx.state.objectExists(unit)) return false;
-        auto& state = ctx.state;
-        auto player = ctx.controller;
-        auto& ps = state.player(player);
-        auto base_loc = BaseLocation{player};
-
-        // Energy cost = [3] reduced by chosen unit's Might (min 0).
-        int reduction = state.getObject(unit).current_might;
-        int energy_cost = 3 - reduction;
-        if (energy_cost < 0) energy_cost = 0;
-
-        // Pre-check: enough ready runes for energy AND one rune to recycle for
-        // [A]. Bail (no state change) if either is unpayable.
-        int ready_count = 0;
-        GameObjectId any_rune = kInvalidId;
-        for (auto& [id, obj] : state.objects) {
-            if (!obj.isRune() || obj.controller != player) continue;
-            if (!obj.location.has_value() || *obj.location != LocationId{base_loc}) continue;
-            if (!obj.is_exhausted) ready_count++;
-            if (any_rune == kInvalidId) any_rune = id;
-        }
-        if (ready_count < energy_cost) return false;
-        if (any_rune == kInvalidId) return false;
-
-        // Pay energy: exhaust `energy_cost` ready runes.
-        int e_remaining = energy_cost;
-        for (auto& [id, obj] : state.objects) {
-            if (e_remaining <= 0) break;
-            if (!obj.isRune() || obj.controller != player || obj.is_exhausted) continue;
-            if (!obj.location.has_value() || *obj.location != LocationId{base_loc}) continue;
-            obj.is_exhausted = true;
-            e_remaining--;
-        }
-        // Recycle any rune for [A] power.
-        {
-            auto& r = state.getObject(any_rune);
-            ctx.events.logTrace("  EQUIP_COST: recycled " + r.name + " for [A]");
-            r.location = std::nullopt;
-            r.zone = ZoneType::RuneDeck;
-            ps.rune_deck.insert(ps.rune_deck.begin(), any_rune);
-        }
-
-        // Attach.
-        auto& gear = state.getObject(ctx.source);
-        auto& unit_obj = state.getObject(unit);
-        ctx.events.logTrace("EQUIP: Hextech Gauntlets -> " + unit_obj.name +
-                            " (energy paid=" + std::to_string(energy_cost) +
-                            ", reduced by Might " + std::to_string(reduction) + ")");
-        gear.attached_to = unit;
-        unit_obj.attachments.push_back(ctx.source);
-        gear.location = unit_obj.location;
-        gear.zone = unit_obj.zone;
-        unit_obj.attachment_might_bonus += gear.might_bonus;
-        unit_obj.recomputeMight();
-        ctx.events.emit(ObjectStateChangedEvent{ctx.source, "attached"});
-        ctx.events.emit(ObjectStateChangedEvent{unit, "equipped"});
-        return true;
+        return standardEquip(ctx, ctx.source, unit, energyFor(ctx.state, unit), std::nullopt);
     }
 
     TriggerType equippedTriggerType() const override { return TriggerType::WhenIConquer; }

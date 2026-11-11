@@ -563,6 +563,10 @@ public:
     /// action generator offers equip only when true, so an equip that
     /// onEquip would refuse is not a legal action that changes nothing.
     virtual bool canEquip(const GameState& state, PlayerId controller) const { return true; }
+    /// Same, for equipping `unit` in particular (a cost that depends on the unit chosen,
+    /// Hextech Gauntlets). The generator offers only the units this allows.
+    virtual bool canEquipTo(const GameState& /*state*/, PlayerId /*controller*/,
+                            GameObjectId /*unit*/) const { return true; }
 
     /// Weaponmaster (CR 821.1.c): pay this Equipment's Equip cost reduced by [A] (one Power
     /// of any domain) and attach it to `unit`, moving it off anything it is attached to.

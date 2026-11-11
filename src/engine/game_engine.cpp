@@ -3227,6 +3227,7 @@ std::vector<Intent> GameEngine::generateMainPhaseActions(PlayerId player) const 
         for (auto& [uid, unit] : state_.objects) {
             if (!unit.isUnit() || unit.controller != player) continue;
             if (!unit.location.has_value()) continue;
+            if (!gear_card->canEquipTo(state_, player, uid)) continue;
 
             Intent equip;
             equip.type = IntentType::ActivateAbility;

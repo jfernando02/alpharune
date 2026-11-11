@@ -20,6 +20,7 @@ constexpr CardDefId kMegatusk = 688;
 constexpr CardDefId kGrandmasterAtArms = 554;
 constexpr CardDefId kDoransBlade = 417;
 constexpr CardDefId kSettBrawler = 164;
+constexpr CardDefId kHextechGauntlets = 748;
 
 class AbilityGatesTest : public CardTestFixture {
 protected:
@@ -235,6 +236,32 @@ TEST_F(AbilityGatesTest, SpendMyBuffIsPaidByThisUnitAtActivation) {
     EXPECT_TRUE(card_registry.get(kSettBrawler)->getActivationCost().spend_buff_self);
     s.getObject(buffed).buff_count = 0;   // spent
     EXPECT_FALSE(ability(buffed).has_value());
+}
+
+// Hextech Gauntlets: "[Equip] [3][A]. This ability's Energy cost is reduced by the Might of the
+// unit you choose." The cost depends on the unit, so only units it can be paid for are offered;
+// the generator used to offer every unit once ANY unit made it affordable, and the failed equip
+// onto a weak unit repeated (495 times in one fuzzed game).
+TEST_F(AbilityGatesTest, EquipWithAUnitDependentCostOffersOnlyPayableUnits) {
+    GameEngine engine(card_db, events, card_registry);
+    auto& s = showdownState(engine);
+    s.turn.ns_state = NeutralShowdownState::Neutral;
+    s.turn.focus_holder.reset();
+    auto gauntlets = place(s, kHextechGauntlets, BaseLocation{P1});
+    auto strong = plainUnit(s, BattlefieldLocation{0});
+    auto weak = plainUnit(s, BattlefieldLocation{0});
+    s.getObject(strong).current_might = 3;   // [3] - 3 = nothing but the [A]
+    s.getObject(weak).current_might = 1;     // still owes [2]
+    auto rune = s.createObject();
+    auto& r = s.getObject(rune);
+    r.owner = P1; r.controller = P1; r.card_type = CardType::Rune;
+    r.domains = {Domain::Fury}; r.zone = ZoneType::Base; r.location = BaseLocation{P1};
+    std::vector<GameObjectId> targets;
+    for (const auto& a : engine.generateLegalActions())
+        if (a.ability_source == gauntlets && !a.targets.empty()) targets.push_back(a.targets[0]);
+    EXPECT_NE(std::find(targets.begin(), targets.end(), strong), targets.end());
+    EXPECT_EQ(std::find(targets.begin(), targets.end(), weak), targets.end())
+        << "one rune can't pay [2] and the [A]";
 }
 
 }  // namespace riftbound::test
