@@ -22,17 +22,13 @@ public:
 
     // "Spend 2 XP: [Buff] me. (Give me a +1 [M] buff if I don't have one.)"
     bool hasActivatedAbility() const override { return true; }
-    ActivationCost getActivationCost() const override { return {}; }  // XP handled in onActivate
-    bool canActivateAbility(const GameState& state, PlayerId controller) const override {
-        return state.player(controller).xp >= 2;
-    }
+    // "Spend 2 XP" is the cost, paid by the engine even when I already have a buff (then the
+    // ability does nothing); were it free in that case, it could be activated forever.
+    ActivationCost getActivationCost() const override { return {.xp_cost = 2}; }
     void onActivate(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
         if (!ctx.state.objectExists(ctx.source)) return;
-        auto& ps = ctx.state.player(ctx.controller);
-        if (ps.xp < 2) return;
         // "if I don't have one" — only buff when no buff present.
         if (ctx.state.getObject(ctx.source).buff_count > 0) return;
-        ps.xp -= 2;
         ctx.executor.buffUnit(ctx.source);
         ctx.events.logTrace("CROWD FAVORITE: spent 2 XP -> [Buff] me");
     }

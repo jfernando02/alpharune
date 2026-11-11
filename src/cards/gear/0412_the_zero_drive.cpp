@@ -18,6 +18,18 @@ public:
 
     // ── Equip [1][B] ──
     bool hasEquipAbility() const override { return true; }
+    // payEquipAndAttach's pre-check: 1 ready rune for [1] and a Mind rune to recycle for [B].
+    bool canEquip(const GameState& state, PlayerId controller) const override {
+        int ready = 0;
+        bool mind_rune = false;
+        for (const auto& [id, obj] : state.objects) {
+            if (!obj.isRune() || obj.controller != controller) continue;
+            if (!obj.location.has_value() || *obj.location != LocationId{BaseLocation{controller}}) continue;
+            if (!obj.is_exhausted) ++ready;
+            for (auto d : obj.domains) if (d == Domain::Mind) mind_rune = true;
+        }
+        return ready >= 1 && mind_rune;
+    }
     bool onEquip(CardContext& ctx, GameObjectId unit) override {
         return payEquipAndAttach(ctx, ctx.source, unit, /*energy=*/1, Domain::Mind);
     }

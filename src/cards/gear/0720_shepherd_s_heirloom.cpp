@@ -23,6 +23,10 @@ public:
     }
 
     bool hasEquipAbility() const override { return true; }
+    // The engine offers [Equip] only when onEquip can pay "Spend 1 XP".
+    bool canEquip(const GameState& state, PlayerId controller) const override {
+        return state.player(controller).xp >= 1;
+    }
     bool onEquip(CardContext& ctx, GameObjectId unit) override {
         auto& ps = ctx.state.player(ctx.controller);
         if (ps.xp < 1) return false;  // can't pay the cost

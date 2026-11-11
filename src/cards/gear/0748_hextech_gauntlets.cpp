@@ -17,6 +17,20 @@ public:
     const CardDef& def() const override { return def_; }
 
     bool hasEquipAbility() const override { return true; }
+    // onEquip's pre-check for the most favourable unit: a rune in base to recycle for [A],
+    // and enough ready runes for [3] minus the Might of some friendly unit.
+    bool canEquip(const GameState& state, PlayerId controller) const override {
+        int ready = 0, runes = 0, best_might = -1;
+        for (const auto& [id, obj] : state.objects) {
+            if (obj.controller != controller || !obj.location.has_value()) continue;
+            if (obj.isUnit()) best_might = std::max(best_might, obj.current_might);
+            if (obj.isRune() && *obj.location == LocationId{BaseLocation{controller}}) {
+                ++runes;
+                if (!obj.is_exhausted) ++ready;
+            }
+        }
+        return best_might >= 0 && runes > 0 && ready >= std::max(0, 3 - best_might);
+    }
 
     bool onEquip(CardContext& ctx, GameObjectId unit) override {
         if (!ctx.state.objectExists(unit)) return false;

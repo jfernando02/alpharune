@@ -72,6 +72,11 @@ public:
     void onActivate(CardContext& ctx, const std::vector<GameObjectId>& targets) override {
         if (!ctx.state.objectExists(ctx.source)) return;
         GameObjectId source = ctx.source;
+        // "Use only once per turn" counts the activation, not a successful
+        // swap: mark it with the cost, so a countered or mistargeted use
+        // still uses it up (stored as turn_number+1 so 0 = never).
+        if (costDueNow(ctx))
+            ctx.state.getObject(source).card_counters["azir_used_turn"] = ctx.state.turn.turn_number + 1;
 
         // Pair pick: (1) the friendly unit to swap with, (2) optionally one of
         // its Equipment to attach to me (legal_b = gear on the chosen unit).
@@ -102,8 +107,6 @@ public:
         auto& azir = ctx.state.getObject(source);
         auto& other = ctx.state.getObject(picked);
 
-        // Mark once-per-turn used (store turn_number+1 so 0 = never).
-        azir.card_counters["azir_used_turn"] = ctx.state.turn.turn_number + 1;
 
         // Swap locations. Capture before moving.
         auto azir_loc = azir.location;

@@ -43,6 +43,8 @@
 
 #include "tool_common.h"
 
+#include "agents/policy_agent.h"
+
 #include "core/events.h"
 #include "engine/game_engine.h"
 #include "ml/obs_io.h"
@@ -272,6 +274,8 @@ int main(int argc, char** argv) {
 
     std::atomic<int> next_game{0}, games_done{0}, games_dropped{0};
     std::atomic<long> rows_written{0}, next_decision{0}, policy_rows{0};
+    // Policy agents that hit their per-turn decision guard (a repeatable action).
+    std::atomic<long> capped_games{0}, capped_decisions{0};
     std::mutex out_mutex;
     const auto start = std::chrono::steady_clock::now();
 
@@ -398,6 +402,10 @@ int main(int argc, char** argv) {
                 ++games_dropped;
                 continue;
             }
+            long capped = 0;
+            for (AgentInterface* a : {a1.get(), a2.get()})
+                if (auto* p = dynamic_cast<PolicyAgent*>(a)) capped += p->cappedDecisions();
+            if (capped > 0) { ++capped_games; capped_decisions += capped; }
             if (result.winner == PlayerId::None) {
                 ++games_dropped;
             } else {
@@ -453,5 +461,7 @@ int main(int argc, char** argv) {
     if (policy_out.is_open())
         std::cerr << ", " << policy_rows.load() << " policy rows -> " << opt.policy_out;
     std::cerr << "\n";
+    std::cerr << "policy decision guard: " << capped_games.load() << " games, "
+              << capped_decisions.load() << " decisions passed" << std::endl;
     return 0;
 }

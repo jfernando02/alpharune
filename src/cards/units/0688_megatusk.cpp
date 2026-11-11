@@ -16,12 +16,10 @@ class Megatusk : public UnitCard {
 public:
     const CardDef& def() const override { return def_; }
     bool hasActivatedAbility() const override { return true; }
-    ActivationCost getActivationCost() const override { return {}; }
+    // "Spend 3 XP" is the ability's cost: the engine offers it only with 3 XP and pays it.
+    ActivationCost getActivationCost() const override { return {.xp_cost = 3}; }
     void onActivate(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
         if (!ctx.state.objectExists(ctx.source)) return;
-        auto& ps = ctx.state.player(ctx.controller);
-        if (ps.xp < 3) return;
-        ps.xp -= 3;
         auto bf_id = ctx.state.getObject(ctx.source).battlefieldId();
         if (!bf_id) return;
         for (auto& [id, obj] : ctx.state.objects) {

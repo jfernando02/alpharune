@@ -15,6 +15,19 @@ class BladeOfTheRuinedKing : public GearCard {
 public:
     const CardDef& def() const override { return def_; }
     bool hasEquipAbility() const override { return true; }
+    // The checks onEquip makes before paying: an Order rune in base to recycle for [Y],
+    // and a friendly unit to kill besides the one being equipped (so two on the board).
+    bool canEquip(const GameState& state, PlayerId controller) const override {
+        bool order_rune = false;
+        int friendly_units = 0;
+        for (const auto& [id, obj] : state.objects) {
+            if (obj.controller != controller || !obj.location.has_value()) continue;
+            if (obj.isUnit()) ++friendly_units;
+            if (obj.isRune() && *obj.location == LocationId{BaseLocation{controller}})
+                for (auto d : obj.domains) if (d == Domain::Order) order_rune = true;
+        }
+        return order_rune && friendly_units >= 2;
+    }
 
     bool onEquip(CardContext& ctx, GameObjectId unit) override {
         auto& state = ctx.state;

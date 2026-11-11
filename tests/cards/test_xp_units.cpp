@@ -420,32 +420,14 @@ class XpMegatuskTest : public CardTestFixture {};
 TEST_F(XpMegatuskTest, HasActivatedAbility) {
     Card* c = card_registry.get(kMegatusk);
     EXPECT_TRUE(c->hasActivatedAbility());
-    // Cost is paid manually inside onActivate via XP (xp_cost not exposed
-    // through the ActivationCost struct here — see the deck_cards.cpp
-    // comment). Make sure we don't accidentally regress to declaring a
-    // non-zero standard cost.
+    // "Spend 3 XP" is declared as the cost: the engine offers the ability only
+    // with 3 XP and pays it (test_ability_gates.cpp checks the offer).
     auto cost = c->getActivationCost();
     EXPECT_EQ(cost.energy, 0);
-    EXPECT_EQ(cost.xp_cost, 0)
-        << "Megatusk pays its 3 XP manually inside onActivate, not via the "
-           "ActivationCost field (see deck_cards.cpp comment)";
+    EXPECT_EQ(cost.xp_cost, 3);
 }
 
-TEST_F(XpMegatuskTest, BelowThreeXpIsNoOp) {
-    auto megatusk = addUnit(P1, kMegatusk, /*might=*/4, /*at_bf=*/0);
-    auto buddy    = addUnit(P1, kInvalidId, /*might=*/2, /*at_bf=*/0);
-    setXp(P1, 2);
-
-    EffectExecutor exec(state, events, card_db);
-    CardContext ctx{state, events, exec, P1, megatusk};
-    card_registry.get(kMegatusk)->onActivate(ctx, {});
-
-    EXPECT_EQ(state.player(P1).xp, 2) << "no XP spent when can't afford";
-    EXPECT_FALSE(state.getObject(buddy).keywords.has(Keyword::Ganking))
-        << "no Ganking granted when can't afford";
-}
-
-TEST_F(XpMegatuskTest, SpendsThreeXpAndGrantsGanking) {
+TEST_F(XpMegatuskTest, GrantsGankingHere) {
     auto megatusk = addUnit(P1, kMegatusk, /*might=*/4, /*at_bf=*/0);
     auto buddy    = addUnit(P1, kInvalidId, /*might=*/2, /*at_bf=*/0);
     setXp(P1, 5);
@@ -454,7 +436,7 @@ TEST_F(XpMegatuskTest, SpendsThreeXpAndGrantsGanking) {
     CardContext ctx{state, events, exec, P1, megatusk};
     card_registry.get(kMegatusk)->onActivate(ctx, {});
 
-    EXPECT_EQ(state.player(P1).xp, 2) << "3 XP spent";
+    EXPECT_EQ(state.player(P1).xp, 5) << "the engine pays the XP, not onActivate";
     EXPECT_TRUE(state.getObject(buddy).keywords.has(Keyword::Ganking))
         << "buddy at same BF gets Ganking";
     EXPECT_TRUE(state.getObject(megatusk).keywords.has(Keyword::Ganking))

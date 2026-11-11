@@ -587,6 +587,15 @@ private:
                                      std::vector<Intent>& actions) const;
     void generateActivateAbilityActions(PlayerId player,
                                          std::vector<Intent>& actions) const;
+    /// Whether ability `ai` of object `id` (card `card`, its descriptors
+    /// `abilities`) may be activated now, apart from timing: the card's
+    /// "use only if" gates (incl. once-per-turn limits), an exhaust cost
+    /// needing a ready source, affordability (energy, power, discard, XP)
+    /// and target legality. Shared by the main-phase and Showdown
+    /// generators so both offer exactly the same abilities.
+    bool abilityActivatable(PlayerId player, GameObjectId id, const GameObject& obj,
+                            const Card& card, const std::vector<ActivatedAbility>& abilities,
+                            size_t ai) const;
 
     // ── Queries ──
     Intent queryAgent(PlayerId player);

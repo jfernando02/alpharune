@@ -3366,7 +3366,10 @@ std::vector<Intent> GameEngine::generateShowdownActions(PlayerId player) const {
         for (size_t ai = 0; ai < abilities.size(); ++ai) {
             const auto& ab = abilities[ai];
             if (!ab.is_action) continue;
-            if (ab.cost.exhaust && obj.is_exhausted) continue;
+            // The same gates as the main phase: once-per-turn and other
+            // "use only if" limits, a ready source for an exhaust cost,
+            // affordability and target legality.
+            if (!abilityActivatable(player, id, obj, *card, abilities, ai)) continue;
 
             auto legal_targets = card->enumerateLegalTargets(
                 state_, player, static_cast<int>(ai), id);
@@ -3565,25 +3568,12 @@ std::vector<Intent> GameEngine::generateClosedStateActions(
             if (obj.card_def_id == kInvalidId) continue;
             Card* card_obj = card_registry_.get(obj.card_def_id);
             if (!card_obj) continue;
-            // Same gates as the main-phase generator (generateActivateAbilityActions).
-            if (!card_obj->canActivateAbility(state_, player)) continue;
+            // Same gates as the main-phase generator (abilityActivatable).
             auto abilities = card_obj->activatedAbilities();
             for (size_t ai = 0; ai < abilities.size(); ++ai) {
                 const auto& ab = abilities[ai];
                 if (!ab.is_reaction) continue;
-                if (!card_obj->canActivateAbilityAt(state_, player, id, (int)ai)) continue;
-                if (ab.cost.exhaust && obj.is_exhausted) continue;
-                int net_energy = std::max(0, ab.cost.energy -
-                    activationEnergyReduction(*card_obj, player, id, (int)ai));
-                if (net_energy > 0 && availableEnergy(player, state_.purposeAbilityOf(obj.card_type)) < net_energy) continue;
-                if (ab.cost.power > 0 &&
-                    !canPayActivationResources(player, net_energy, ab.cost,
-                                               state_.purposeAbilityOf(obj.card_type))) continue;
-                if (ab.cost.discard && ab.cost.discard_count > 0 &&
-                    static_cast<int>(state_.player(player).hand.size()) <
-                        ab.cost.discard_count) continue;
-                if (ab.cost.xp_cost > 0 &&
-                    state_.player(player).xp < ab.cost.xp_cost) continue;
+                if (!abilityActivatable(player, id, obj, *card_obj, abilities, ai)) continue;
 
                 auto legal_targets = card_obj->enumerateLegalTargets(
                     state_, player, static_cast<int>(ai), id);
@@ -3870,6 +3860,61 @@ void GameEngine::generateTrashReplayActions(PlayerId player, bool action_ok,
     }
 }
 
+bool GameEngine::abilityActivatable(PlayerId player, GameObjectId id, const GameObject& obj,
+                                    const Card& card_ref,
+                                    const std::vector<ActivatedAbility>& abilities,
+                                    size_t ai) const {
+    const Card* card = &card_ref;
+    // Per-card "Use only if ..." gate (Emperor of the Sands etc.).
+    if (!card->canActivateAbility(state_, player)) return false;
+    const auto& ab = abilities[ai];
+    const auto& act_cost = ab.cost;
+
+    // Per-ability gate ([Empower]: only if not Empowered; "Disempower
+    // this" costs need an Empowered status).
+    if (!card->canActivateAbilityAt(state_, player, id, (int)ai)) return false;
+
+    // Check activation cost: must be ready if exhaust required
+    if (act_cost.exhaust && obj.is_exhausted) return false;
+    int net_energy = std::max(0, act_cost.energy -
+        activationEnergyReduction(*card, player, id, (int)ai));
+    if (net_energy > 0 && availableEnergy(player, state_.purposeAbilityOf(obj.card_type)) < net_energy) return false;
+    if (act_cost.power > 0 &&
+        !canPayActivationResources(player, net_energy, act_cost,
+                                   state_.purposeAbilityOf(obj.card_type))) return false;
+    if (act_cost.discard && act_cost.discard_count > 0) {
+        int matching = 0;
+        for (auto hid : state_.player(player).hand) {
+            if (act_cost.discard_type_filter == 0 ||
+                static_cast<int>(state_.getObject(hid).card_type) + 1 ==
+                    act_cost.discard_type_filter) ++matching;
+        }
+        if (matching < act_cost.discard_count) return false;
+    }
+    if (act_cost.xp_cost > 0 &&
+        state_.player(player).xp < act_cost.xp_cost) return false;
+
+    // Universal legality gate (CR 700.x). For multi-ability cards
+    // the per-ability target requirements live on the descriptor;
+    // ALWAYS consult ab.targets first. Only fall back to the
+    // legacy Card::hasLegalTargets path for single-ability cards
+    // that don't declare per-ability targets — e.g. counter
+    // spells that gate on chain-item presence via their own
+    // hasLegalTargets override. This fixes a bug where single-
+    // ability cards with .targets.count>0 were being offered
+    // even when no legal board targets existed (Bounty Hunter
+    // at Turn 0 with no units on the board).
+    if (ab.targets.count > 0 && !ab.targets.optional) {
+        auto legal = card->enumerateLegalTargets(state_, player,
+                                                  static_cast<int>(ai), id);
+        if (legal.empty()) return false;
+    } else if (abilities.size() == 1 &&
+                !card->hasLegalTargets(state_, player)) {
+        return false;
+    }
+    return true;
+}
+
 void GameEngine::generateActivateAbilityActions(PlayerId player,
                                                   std::vector<Intent>& actions) const {
     // Phase 6r — multi-ability per Card. Loop over each ability descriptor
@@ -3892,50 +3937,7 @@ void GameEngine::generateActivateAbilityActions(PlayerId player,
 
         for (size_t ai = 0; ai < abilities.size(); ++ai) {
             const auto& ab = abilities[ai];
-            const auto& act_cost = ab.cost;
-
-            // Per-ability gate ([Empower]: only if not Empowered; "Disempower
-            // this" costs need an Empowered status).
-            if (!card->canActivateAbilityAt(state_, player, id, (int)ai)) continue;
-
-            // Check activation cost: must be ready if exhaust required
-            if (act_cost.exhaust && obj.is_exhausted) continue;
-            int net_energy = std::max(0, act_cost.energy -
-                activationEnergyReduction(*card, player, id, (int)ai));
-            if (net_energy > 0 && availableEnergy(player, state_.purposeAbilityOf(obj.card_type)) < net_energy) continue;
-            if (act_cost.power > 0 &&
-                !canPayActivationResources(player, net_energy, act_cost,
-                                           state_.purposeAbilityOf(obj.card_type))) continue;
-            if (act_cost.discard && act_cost.discard_count > 0) {
-                int matching = 0;
-                for (auto hid : state_.player(player).hand) {
-                    if (act_cost.discard_type_filter == 0 ||
-                        static_cast<int>(state_.getObject(hid).card_type) + 1 ==
-                            act_cost.discard_type_filter) ++matching;
-                }
-                if (matching < act_cost.discard_count) continue;
-            }
-            if (act_cost.xp_cost > 0 &&
-                state_.player(player).xp < act_cost.xp_cost) continue;
-
-            // Universal legality gate (CR 700.x). For multi-ability cards
-            // the per-ability target requirements live on the descriptor;
-            // ALWAYS consult ab.targets first. Only fall back to the
-            // legacy Card::hasLegalTargets path for single-ability cards
-            // that don't declare per-ability targets — e.g. counter
-            // spells that gate on chain-item presence via their own
-            // hasLegalTargets override. This fixes a bug where single-
-            // ability cards with .targets.count>0 were being offered
-            // even when no legal board targets existed (Bounty Hunter
-            // at Turn 0 with no units on the board).
-            if (ab.targets.count > 0 && !ab.targets.optional) {
-                auto legal = card->enumerateLegalTargets(state_, player,
-                                                          static_cast<int>(ai), id);
-                if (legal.empty()) continue;
-            } else if (abilities.size() == 1 &&
-                        !card->hasLegalTargets(state_, player)) {
-                continue;
-            }
+            if (!abilityActivatable(player, id, obj, *card, abilities, ai)) continue;
 
             // Phase 6q+ — if this ability defers target selection to
             // resolve-time via pickTarget (action-vocab collision fix),
