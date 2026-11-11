@@ -219,6 +219,7 @@ public:
     void testHook_drawCards(PlayerId p, int n) { drawCards(p, n); }
     void testHook_processLethalDamage() { processLethalDamage(); }
     void testHook_cleanup() { cleanup(); }
+    void testHook_finishShowdown(BattlefieldId bf) { finishShowdown(bf); }
     EffectExecutor& testHook_executor() { return *effect_executor_; }
     bool testHook_canAfford(PlayerId p, GameObjectId card) const { return canAfford(p, card); }
     bool testHook_payCardCost(PlayerId p, GameObjectId card) { return payCardCost(p, card); }
@@ -637,6 +638,10 @@ private:
     void runShowdownLoop(BattlefieldId bf, bool resume = false);
     /// The end of a non-combat Showdown, after its loop (CR 348.2.a).
     void finishShowdown(BattlefieldId bf);
+    /// CR 309.1: the turn is Closed while a Chain exists, Open otherwise.
+    OpenClosedState openUnlessChain() const {
+        return state_.chain.exists() ? OpenClosedState::Closed : OpenClosedState::Open;
+    }
     void runCombat(BattlefieldId bf);
     /// runCombat after its attack / defend triggers: the Showdown step, or
     /// straight to resolution if one side has no units left.

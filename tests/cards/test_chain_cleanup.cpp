@@ -7,6 +7,7 @@
 
 #include "engine/chain_manager.h"
 #include "engine/effect_executor.h"
+#include "engine/game_engine.h"
 
 namespace riftbound::test {
 namespace {
@@ -82,6 +83,25 @@ TEST_F(ChainCleanupTest, TheTurnStaysClosedWhileAChainExists) {
         });
     EXPECT_GE(priority_checks, 2);
     EXPECT_EQ(open_with_chain, 0);
+}
+
+// A Showdown that ends while a chain item is still pending (a conquer trigger) leaves the turn
+// Closed until the chain is gone (CR 309.1).
+TEST_F(ChainCleanupTest, AShowdownEndingWithAChainLeavesTheTurnClosed) {
+    GameEngine engine(card_db, events, card_registry);
+    auto& s = engine.mutableState();
+    BattlefieldState b0; b0.id = 0; s.battlefields.push_back(b0);
+    s.turn.phase = TurnPhase::MainPhase;
+    s.turn.ns_state = NeutralShowdownState::Showdown;
+    auto spell = s.createObject();
+    s.getObject(spell).owner = P1; s.getObject(spell).controller = P1;
+    ChainItem item; item.id = s.chain.allocateId(); item.source = spell; item.controller = P1;
+    s.chain.items.push_back(item);
+    engine.testHook_finishShowdown(0);
+    EXPECT_TRUE(s.turn.isClosedState());
+    s.chain.items.clear();
+    engine.testHook_finishShowdown(0);
+    EXPECT_FALSE(s.turn.isClosedState());
 }
 
 }  // namespace

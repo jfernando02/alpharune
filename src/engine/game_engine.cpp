@@ -4069,7 +4069,7 @@ void GameEngine::runShowdown(BattlefieldId bf_id) {
 
     bf.showdown_in_progress = true;
     state_.turn.ns_state = NeutralShowdownState::Showdown;
-    state_.turn.oc_state = OpenClosedState::Open;
+    state_.turn.oc_state = openUnlessChain();   // CR 309.1
 
     events_.emit(ShowdownStartedEvent{bf_id, bf.combat_staged});
 
@@ -4083,7 +4083,7 @@ void GameEngine::finishShowdown(BattlefieldId bf_id) {
     auto& bf = getBattlefield(bf_id);
     bf.showdown_in_progress = false;
     state_.turn.ns_state = NeutralShowdownState::Neutral;
-    state_.turn.oc_state = OpenClosedState::Open;
+    state_.turn.oc_state = openUnlessChain();   // CR 309.1
     events_.emit(ShowdownEndedEvent{bf_id});
 
     // Non-combat showdown resolution: if only one player has units,
@@ -4128,7 +4128,7 @@ GameEngine::ShowdownAdvance GameEngine::advanceShowdown(BattlefieldId bf_id,
     }
     state_.turn.focus_holder = focus_holder;
     state_.turn.priority_holder = focus_holder;
-    state_.turn.oc_state = OpenClosedState::Open;
+    state_.turn.oc_state = openUnlessChain();   // CR 309.1
 
     events_.emit(PriorityGrantedEvent{focus_holder, true});
 
