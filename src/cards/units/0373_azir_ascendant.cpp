@@ -103,6 +103,8 @@ public:
             return;
         }
         if (!ctx.state.objectExists(picked) || picked == source) return;
+        // Both must still be on the board (Azir killed in response stays in the trash).
+        if (!ctx.state.getObject(source).location || !ctx.state.getObject(picked).location) return;
 
         auto& azir = ctx.state.getObject(source);
         auto& other = ctx.state.getObject(picked);

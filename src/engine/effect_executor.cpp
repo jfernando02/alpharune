@@ -739,6 +739,12 @@ void EffectExecutor::unattachGear(GameObjectId gear) {
 void EffectExecutor::moveToBase(GameObjectId target) {
     if (!state_.objectExists(target)) return;
     auto& obj = state_.getObject(target);
+    // A move takes an object from one board location to another; one that has left the board
+    // (killed in response) stays where it went.
+    if (!obj.location.has_value()) {
+        events_.logTrace("MOVE_SKIPPED: " + obj.name + " is not on the board");
+        return;
+    }
     // Jagged Cutlass: "can't be moved by enemy spells and abilities."
     if (obj.cant_be_moved_by_enemy && state_.chain.resuming.has_value() &&
         state_.chain.resuming->controller != obj.controller) {
@@ -758,6 +764,12 @@ void EffectExecutor::moveToBase(GameObjectId target) {
 void EffectExecutor::moveToBattlefield(GameObjectId target, BattlefieldId bf) {
     if (!state_.objectExists(target)) return;
     auto& obj = state_.getObject(target);
+    // A move takes an object from one board location to another; one that has left the board
+    // (killed in response) stays where it went.
+    if (!obj.location.has_value()) {
+        events_.logTrace("MOVE_SKIPPED: " + obj.name + " is not on the board");
+        return;
+    }
     // Jagged Cutlass: "can't be moved by enemy spells and abilities."
     if (obj.cant_be_moved_by_enemy && state_.chain.resuming.has_value() &&
         state_.chain.resuming->controller != obj.controller) {

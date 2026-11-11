@@ -97,5 +97,21 @@ TEST_F(ZoneIntegrityTest, KeepersVerdictOnATokenRemovesIt) {
     EXPECT_FALSE(state.getObject(token).location.has_value()) << "it left the board";
 }
 
+// A move goes from one board location to another. Azir, Ascendant killed in response to his own
+// swap ability was "moved" back to his base out of the trash (found by the fuzzer, seed 5).
+TEST_F(ZoneIntegrityTest, MovingAnObjectThatLeftTheBoardDoesNothing) {
+    auto unit = addUnit(P1, kInvalidId, 2, /*at_bf=*/0);
+    auto& u = state.getObject(unit);
+    u.location.reset();
+    u.zone = ZoneType::Trash;
+    state.player(P1).trash.push_back(unit);
+    EffectExecutor exec(state, events, card_db, &card_registry);
+    exec.moveToBase(unit);
+    exec.moveToBattlefield(unit, 1);
+    EXPECT_EQ(state.getObject(unit).zone, ZoneType::Trash);
+    EXPECT_FALSE(state.getObject(unit).location.has_value());
+    EXPECT_EQ(listed(unit), 1);
+}
+
 }  // namespace
 }  // namespace riftbound::test
