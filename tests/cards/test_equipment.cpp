@@ -810,6 +810,7 @@ protected:
         ASSERT_NE(c, nullptr);
         EXPECT_EQ(c->triggerType(), TriggerType::WhenYouPlayMe);
         CardContext ctx{state, events, exec, P1, weapon_master};
+        ctx.registry = &card_registry;   // each Equipment answers its own Equip cost
         c->onTrigger(ctx, {});
     }
 };
@@ -899,6 +900,95 @@ TEST_F(WeaponmasterTest, IgnoresNonEquipmentGear) {
     EXPECT_FALSE(state.getObject(fake).attached_to.has_value())
         << "Weaponmaster should ignore gear without 'Equipment' tag";
     EXPECT_EQ(state.getObject(wm).attachment_might_bonus, 0);
+}
+
+// CR 821.1.c: Weaponmaster pays the Equipment's Equip cost reduced by [A] -- one Power of any
+// domain comes off; Energy does not. Skyfall of Areion's [1][R] still costs [1].
+TEST_F(WeaponmasterTest, ReducedCostStillChargesTheEnergy) {
+    auto wm = addUnit(P1, kArmedAssailant, /*might=*/0, /*at_bf=*/0);
+    auto gear = addEquipmentGear(P1, kSkyfallAreion, /*at_bf=*/0);
+    EffectExecutor exec(state, events, card_db, &card_registry);
+    fireWeaponmasterTrigger(wm, kArmedAssailant, exec);
+    EXPECT_FALSE(state.getObject(gear).attached_to.has_value()) << "no rune for the [1]";
+
+    auto rune = addRune(P1, Domain::Mind);   // any rune pays Energy
+    fireWeaponmasterTrigger(wm, kArmedAssailant, exec);
+    EXPECT_EQ(state.getObject(gear).attached_to, std::optional<GameObjectId>(wm));
+    EXPECT_TRUE(state.getObject(rune).is_exhausted) << "[1] paid";
+    EXPECT_TRUE(state.getObject(rune).location.has_value()) << "no Power paid: not recycled";
+}
+
+// CR 821.1.c.5: the Equipment attaches to the unit with Weaponmaster; if that unit has left
+// the board when the trigger resolves, nothing happens (the gear stays where it is).
+TEST_F(WeaponmasterTest, NothingHappensWhenTheWeaponmasterLeftTheBoard) {
+    auto holder = addUnit(P1, kInvalidId, /*might=*/2, /*at_bf=*/0);
+    auto gear = addEquipmentGear(P1, kLongSword, /*at_bf=*/0);
+    state.getObject(gear).attached_to = holder;
+    state.getObject(holder).attachments.push_back(gear);
+    auto wm = addUnit(P1, kLucianMerciless, /*might=*/0, /*at_bf=*/0);
+    auto& w = state.getObject(wm);
+    w.location.reset();
+    w.zone = ZoneType::Trash;   // died with the trigger on the chain
+    EffectExecutor exec(state, events, card_db, &card_registry);
+    driveResumableTrigger(kLucianMerciless, P1, wm,
+                          [](const std::vector<Intent>& l) { return l.back(); }, exec,
+                          TriggerType::WhenYouPlayMe);
+    EXPECT_EQ(state.getObject(gear).attached_to, std::optional<GameObjectId>(holder));
+    EXPECT_TRUE(w.attachments.empty());
+}
+
+// "You may": declining leaves the Equipment where it is.
+TEST_F(WeaponmasterTest, TheControllerMayDecline) {
+    auto wm = addUnit(P1, kOrnnForgeGod, /*might=*/0, /*at_bf=*/0);
+    auto gear = addEquipmentGear(P1, kLongSword, /*at_bf=*/0);
+    EffectExecutor exec(state, events, card_db, &card_registry);
+    driveResumableTrigger(kOrnnForgeGod, P1, wm,
+                          [](const std::vector<Intent>& l) { return l.front(); }, exec);
+    EXPECT_FALSE(state.getObject(gear).attached_to.has_value());
+}
+
+// The controller chooses which Equipment, including one attached to another unit.
+TEST_F(WeaponmasterTest, TheControllerChoosesTheEquipment) {
+    auto holder = addUnit(P1, kInvalidId, /*might=*/2, /*at_bf=*/0);
+    auto first = addEquipmentGear(P1, kLongSword, /*at_bf=*/0);
+    auto second = addEquipmentGear(P1, kBFSword, /*at_bf=*/0);
+    state.getObject(second).attached_to = holder;
+    state.getObject(holder).attachments.push_back(second);
+    auto wm = addUnit(P1, kOrnnForgeGod, /*might=*/0, /*at_bf=*/0);
+    EffectExecutor exec(state, events, card_db, &card_registry);
+    driveResumableTrigger(kOrnnForgeGod, P1, wm,
+                          [&](const std::vector<Intent>& l) {
+                              for (const auto& i : l)
+                                  if (!i.chosen_objects.empty() && i.chosen_objects[0] == second)
+                                      return i;
+                              return l.back();   // "yes" to the may
+                          }, exec);
+    EXPECT_EQ(state.getObject(second).attached_to, std::optional<GameObjectId>(wm));
+    EXPECT_FALSE(state.getObject(first).attached_to.has_value());
+    const auto& ha = state.getObject(holder).attachments;
+    EXPECT_EQ(std::find(ha.begin(), ha.end(), second), ha.end());
+}
+
+// Last Rites: "[P], Recycle 2 cards from your trash" reduced by [A] leaves the recycle.
+TEST_F(WeaponmasterTest, LastRitesStillRecyclesTwoCards) {
+    auto wm = addUnit(P1, kArmedAssailant, /*might=*/0, /*at_bf=*/0);
+    auto gear = addEquipmentGear(P1, kLastRites, /*at_bf=*/0);
+    auto a = addToDeck(P1, kInvalidId);
+    EffectExecutor exec(state, events, card_db, &card_registry);
+    auto& ps = state.player(P1);
+    ps.main_deck.erase(std::find(ps.main_deck.begin(), ps.main_deck.end(), a));
+    ps.trash.push_back(a);
+    state.getObject(a).zone = ZoneType::Trash;
+    fireWeaponmasterTrigger(wm, kArmedAssailant, exec);
+    EXPECT_FALSE(state.getObject(gear).attached_to.has_value()) << "only 1 card in trash";
+
+    auto b = addToDeck(P1, kInvalidId);
+    ps.main_deck.erase(std::find(ps.main_deck.begin(), ps.main_deck.end(), b));
+    ps.trash.push_back(b);
+    state.getObject(b).zone = ZoneType::Trash;
+    fireWeaponmasterTrigger(wm, kArmedAssailant, exec);
+    EXPECT_EQ(state.getObject(gear).attached_to, std::optional<GameObjectId>(wm));
+    EXPECT_TRUE(ps.trash.empty());
 }
 
 }  // namespace

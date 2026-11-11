@@ -21,6 +21,17 @@ public:
         return state.player(controller).trash.size() >= 2 &&
                canPayEquipCost(state, controller, 0, Domain::Chaos);
     }
+    // Weaponmaster (CR 821): [P] reduced by [A] leaves "Recycle 2 cards from your trash".
+    bool weaponmasterEquip(CardContext& ctx, GameObjectId unit, bool check_only) override {
+        auto& trash = ctx.state.player(ctx.controller).trash;
+        if (trash.size() < 2) return false;
+        if (check_only) return true;
+        std::vector<GameObjectId> two(trash.end() - 2, trash.end());
+        ctx.executor.recycleCards(ctx.controller, two);
+        ctx.executor.unattachGear(ctx.source);
+        attachEquipment(ctx, ctx.source, unit);
+        return true;
+    }
     bool onEquip(CardContext& ctx, GameObjectId unit) override {
         auto& ps = ctx.state.player(ctx.controller);
         if (ps.trash.size() < 2) return false;

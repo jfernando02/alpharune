@@ -327,7 +327,7 @@ TEST_F(AuditFix2Test, Lucian_WeaponmasterEquipsFreeFromAnotherUnit) {
     int gear_bonus = state.getObject(gear).might_bonus;
     ASSERT_GT(gear_bonus, 0);
 
-    EffectExecutor exec(state, events, card_db);
+    EffectExecutor exec(state, events, card_db, &card_registry);
     fireTriggerAs(kLucianMerciless, P1, lucian, TriggerType::WhenYouPlayMe, exec);
 
     EXPECT_EQ(state.getObject(gear).attached_to, std::optional<GameObjectId>(lucian));

@@ -169,11 +169,12 @@ TEST_F(AuditFix7Test, Ornn_OnlyCountsFriendlyGear) {
 }
 
 TEST_F(AuditFix7Test, Ornn_WeaponmasterEquipsEquipmentGear) {
-    EffectExecutor exec(state, events, card_db);
+    EffectExecutor exec(state, events, card_db, &card_registry);
     exec.setCardRegistry(&card_registry);
     auto ornn = addUnit(P1, 407, 0, /*at_bf=*/0);
     // A friendly gear tagged "Equipment" with a might bonus.
     auto gear = addGear(P1, kInvalidId, /*might_bonus=*/3, /*at_bf=*/0);
+    state.getObject(gear).card_def_id = 345;  // Long Sword: Equip [R], [A] less = free (CR 821)
     state.getObject(gear).tags = {"Equipment"};
 
     fireTriggerAs(407, P1, ornn, TriggerType::WhenYouPlayMe, exec);

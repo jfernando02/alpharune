@@ -30,6 +30,9 @@ public:
         }
         return ready >= 1 && mind_rune;
     }
+    bool weaponmasterEquip(CardContext& ctx, GameObjectId unit, bool check_only) override {
+        return weaponmasterPayEnergyAndAttach(ctx, unit, /*energy=*/1, check_only);  // CR 821
+    }
     bool onEquip(CardContext& ctx, GameObjectId unit) override {
         return payEquipAndAttach(ctx, ctx.source, unit, /*energy=*/1, Domain::Mind);
     }

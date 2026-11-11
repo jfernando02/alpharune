@@ -46,8 +46,9 @@ inline std::vector<GameObjectId> runesInBase(const GameState& state, PlayerId pl
 }
 }  // namespace equip_detail
 
+// `power` is 1, or 0 for a cost Weaponmaster reduced by [A] (CR 821.1.c).
 inline bool canPayEquipCost(const GameState& state, PlayerId player, int energy_cost,
-                            std::optional<Domain> domain) {
+                            std::optional<Domain> domain, int power = 1) {
     const auto& pool = state.player(player).rune_pool;
     const SpendPurpose purpose = state.purposeAbilityOf(CardType::Gear);
     int ready = 0;
@@ -58,13 +59,14 @@ inline bool canPayEquipCost(const GameState& state, PlayerId player, int energy_
         if (equip_detail::runeMatches(rune, domain)) rune_for_power = true;
     }
     return ready + pool.energyFor(purpose) >= std::max(0, energy_cost) &&
-           (equip_detail::poolHasPower(pool, purpose, domain) || rune_for_power);
+           (power <= 0 || equip_detail::poolHasPower(pool, purpose, domain) || rune_for_power);
 }
 
-inline bool payEquipCost(CardContext& ctx, int energy_cost, std::optional<Domain> domain) {
+inline bool payEquipCost(CardContext& ctx, int energy_cost, std::optional<Domain> domain,
+                         int power = 1) {
     auto& state = ctx.state;
     const PlayerId player = ctx.controller;
-    if (!canPayEquipCost(state, player, energy_cost, domain)) return false;
+    if (!canPayEquipCost(state, player, energy_cost, domain, power)) return false;
     auto& ps = state.player(player);
     auto& pool = ps.rune_pool;
     const SpendPurpose purpose = state.purposeAbilityOf(CardType::Gear);
@@ -90,6 +92,7 @@ inline bool payEquipCost(CardContext& ctx, int energy_cost, std::optional<Domain
             --e_need;
         }
     }
+    if (power <= 0) return true;
 
     if (power_from_pool) {
         int p_need = 1;
@@ -143,6 +146,20 @@ inline void attachEquipment(CardContext& ctx, GameObjectId gear_id, GameObjectId
     ctx.events.emit(ObjectStateChangedEvent{unit_id, "equipped"});
 }
 
+// ─── Weaponmaster (CR 821.1.c): an "[energy][domain]" Equip cost reduced by [A] ──
+// leaves [energy]. Pays it (or with `check_only` only checks), then moves the gear
+// onto `unit`. `ctx.source` is the gear.
+inline bool weaponmasterPayEnergyAndAttach(CardContext& ctx, GameObjectId unit, int energy,
+                                           bool check_only) {
+    if (!canPayEquipCost(ctx.state, ctx.controller, energy, std::nullopt, /*power=*/0))
+        return false;
+    if (check_only) return true;
+    if (!payEquipCost(ctx, energy, std::nullopt, /*power=*/0)) return false;
+    ctx.executor.unattachGear(ctx.source);
+    attachEquipment(ctx, ctx.source, unit);
+    return true;
+}
+
 // ─── Canonical standard equip: pay [energy] + one [domain] power, then attach ──
 inline bool standardEquip(CardContext& ctx, GameObjectId gear_id, GameObjectId unit_id,
                           int energy_cost, std::optional<Domain> domain) {
@@ -168,6 +185,9 @@ public:
     bool canEquip(const GameState& state, PlayerId controller) const override {
         return canPayEquipCost(state, controller, energy_cost_, equip_domain_);
     }
+    bool weaponmasterEquip(CardContext& ctx, GameObjectId unit, bool check_only) override {
+        return weaponmasterPayEnergyAndAttach(ctx, unit, energy_cost_, check_only);
+    }
 
 protected:
     Domain equip_domain_;
@@ -186,6 +206,9 @@ public:
     }
     bool canEquip(const GameState& state, PlayerId controller) const override {
         return canPayEquipCost(state, controller, energy_cost_, std::nullopt);
+    }
+    bool weaponmasterEquip(CardContext& ctx, GameObjectId unit, bool check_only) override {
+        return weaponmasterPayEnergyAndAttach(ctx, unit, energy_cost_, check_only);
     }
 
 protected:

@@ -564,6 +564,14 @@ public:
     /// onEquip would refuse is not a legal action that changes nothing.
     virtual bool canEquip(const GameState& state, PlayerId controller) const { return true; }
 
+    /// Weaponmaster (CR 821.1.c): pay this Equipment's Equip cost reduced by [A] (one Power
+    /// of any domain) and attach it to `unit`, moving it off anything it is attached to.
+    /// `ctx.source` is this gear. With `check_only`, nothing changes and the answer says
+    /// whether it can be done now. Default: no Equip cost, which can't be paid (821.1.c.4).
+    virtual bool weaponmasterEquip(CardContext& ctx, GameObjectId unit, bool check_only) {
+        return false;
+    }
+
     /// Whether THIS gear defers equip-time target selection to onEquip
     /// via pickTarget. When true, generateMainPhaseActions emits ONE
     /// equip intent per gear (no per-target enumeration), and the

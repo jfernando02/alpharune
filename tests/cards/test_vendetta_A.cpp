@@ -757,6 +757,7 @@ TEST_F(VendettaA, Vendetta_Riven_WeaponmasterEquipsOnPlay) {
     EffectExecutor exec(state, events, card_db, &card_registry);
     auto riven = addUnit(P1, kRiven, 0, 0);
     auto sword = addGear(P1, /*equipment=*/true);
+    state.getObject(sword).card_def_id = 345;  // Long Sword: Equip [R], [A] less = free (CR 821)
     auto enemy = addUnit(P2, kInvalidId, 9, 0);
     fireTriggerAs(kRiven, P1, riven, TriggerType::WhenYouPlayMe, exec);
     ASSERT_TRUE(state.getObject(sword).attached_to.has_value());

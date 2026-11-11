@@ -9,6 +9,8 @@
 #include <vector>
 #include "cards/card_helpers.h"
 
+#include "cards/units/weaponmaster_base.h"
+
 namespace riftbound {
 namespace {
 
@@ -19,58 +21,18 @@ public:
     std::vector<TriggerType> triggerTypes() const override {
         return {TriggerType::WhenYouPlayMe, TriggerType::WhenIConquer};
     }
+    unsigned choicesAtFinalization() const override { return kFinalizeTrigger; }
 
     void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
         if (ctx.firing_trigger == TriggerType::WhenYouPlayMe) {
-            weaponmasterEquip(ctx);
+            resolveWeaponmaster(*this, ctx, def().name);
         } else if (ctx.firing_trigger == TriggerType::WhenIConquer) {
+            if (finalizingChoices(ctx)) return;   // no choices
             firstConquerReady(ctx);
         }
     }
 
 private:
-    void weaponmasterEquip(CardContext& ctx) {
-        // Find any friendly Equipment gear on board.
-        GameObjectId best_gear = kInvalidId;
-        for (auto& [id, obj] : ctx.state.objects) {
-            if (!obj.isGear() || obj.controller != ctx.controller) continue;
-            if (!obj.location.has_value()) continue;
-            bool is_equipment = false;
-            for (auto& tag : obj.tags) {
-                if (tag == "Equipment") { is_equipment = true; break; }
-            }
-            if (!is_equipment) continue;
-            best_gear = id;
-            break;
-        }
-        if (best_gear == kInvalidId) return;
-
-        auto& gear = ctx.state.getObject(best_gear);
-        // "Even if it's already attached" — detach first.
-        if (gear.attached_to.has_value()) {
-            auto old_unit = *gear.attached_to;
-            if (ctx.state.objectExists(old_unit)) {
-                auto& old = ctx.state.getObject(old_unit);
-                old.attachment_might_bonus -= gear.might_bonus;
-                auto it = std::find(old.attachments.begin(), old.attachments.end(), best_gear);
-                if (it != old.attachments.end()) old.attachments.erase(it);
-                old.recomputeMight();
-            }
-            gear.attached_to = std::nullopt;
-        }
-
-        if (!ctx.state.objectExists(ctx.source)) return;
-        auto& self = ctx.state.getObject(ctx.source);
-        gear.attached_to = ctx.source;
-        self.attachments.push_back(best_gear);
-        gear.location = self.location;
-        gear.zone = self.zone;
-        self.attachment_might_bonus += gear.might_bonus;
-        self.recomputeMight();
-        ctx.events.logTrace("LUCIAN MERCILESS: weaponmaster-equips " + gear.name);
-        ctx.events.emit(ObjectStateChangedEvent{best_gear, "attached"});
-        ctx.events.emit(ObjectStateChangedEvent{ctx.source, "equipped"});
-    }
 
     void firstConquerReady(CardContext& ctx) {
         if (!ctx.state.objectExists(ctx.source)) return;

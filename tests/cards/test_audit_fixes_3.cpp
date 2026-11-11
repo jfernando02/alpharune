@@ -287,9 +287,10 @@ TEST_F(AuditFix3Test, EmperorsDivide_DoesNotMoveEnemyUnits) {
 // ─── [440] Jax, Unrelenting — Weaponmaster equip + pay [1] draw 1 rider ──────
 
 TEST_F(AuditFix3Test, Jax_EquipsEquipmentAndPaysForDraw) {
-    EffectExecutor exec(state, events, card_db);
+    EffectExecutor exec(state, events, card_db, &card_registry);
     auto jax = addUnit(P1, kJax, 3, 0);
     auto gear = addEquipment(P1, /*might_bonus=*/2, /*at_bf=*/0);
+    state.getObject(gear).card_def_id = 345;  // Long Sword: Equip [R], [A] less = free (CR 821)
     state.player(P1).rune_pool.energy = 1;
     addToDeck(P1, kInvalidId);  // something to draw
 
@@ -312,7 +313,7 @@ TEST_F(AuditFix3Test, Jax_EquipsEquipmentAndPaysForDraw) {
 }
 
 TEST_F(AuditFix3Test, Jax_NoEquipmentNoRider) {
-    EffectExecutor exec(state, events, card_db);
+    EffectExecutor exec(state, events, card_db, &card_registry);
     auto jax = addUnit(P1, kJax, 3, 0);
     state.player(P1).rune_pool.energy = 1;
     addToDeck(P1, kInvalidId);
@@ -328,9 +329,10 @@ TEST_F(AuditFix3Test, Jax_NoEquipmentNoRider) {
 }
 
 TEST_F(AuditFix3Test, Jax_DeclineRiderKeepsEnergy) {
-    EffectExecutor exec(state, events, card_db);
+    EffectExecutor exec(state, events, card_db, &card_registry);
     auto jax = addUnit(P1, kJax, 3, 0);
     auto gear = addEquipment(P1, /*might_bonus=*/2, /*at_bf=*/0);
+    state.getObject(gear).card_def_id = 345;  // Long Sword: Equip [R], [A] less = free (CR 821)
     state.player(P1).rune_pool.energy = 1;
     addToDeck(P1, kInvalidId);
 
@@ -350,9 +352,10 @@ TEST_F(AuditFix3Test, Jax_DeclineRiderKeepsEnergy) {
 }
 
 TEST_F(AuditFix3Test, Jax_RiderNotOfferedWhenNoEnergy) {
-    EffectExecutor exec(state, events, card_db);
+    EffectExecutor exec(state, events, card_db, &card_registry);
     auto jax = addUnit(P1, kJax, 3, 0);
     auto gear = addEquipment(P1, /*might_bonus=*/2, /*at_bf=*/0);
+    state.getObject(gear).card_def_id = 345;  // Long Sword: Equip [R], [A] less = free (CR 821)
     state.player(P1).rune_pool.energy = 0;  // can't pay [1]
     addToDeck(P1, kInvalidId);
 

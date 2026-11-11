@@ -51,6 +51,7 @@ public:
     /// spawn, etc.). Tests that don't exercise the play path may leave
     /// this null.
     void setCardRegistry(const CardRegistry* registry) { card_registry_ = registry; }
+    const CardRegistry* cardRegistry() const { return card_registry_; }
 
     /// Access the CardDB for card-side code that needs to look up static
     /// card data (e.g. Virtuoso needs to read a chain item's energy_cost

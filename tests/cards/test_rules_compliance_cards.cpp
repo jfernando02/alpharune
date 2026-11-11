@@ -451,6 +451,7 @@ TEST_F(RulesCardsTest, RulesCards_CR445_JaxUnrelenting_RiderPaysWithAReadyRune) 
     EffectExecutor exec(state, events, card_db, &card_registry);
     auto jax = addUnit(P1, kJaxUnrelenting, 3, /*at_bf=*/0);
     auto gear = addGear(P1, kInvalidId, {"Equipment"}, /*might_bonus=*/2);
+    state.getObject(gear).card_def_id = 345;  // Long Sword: Equip [R], [A] less = free (CR 821)
     addToDeck(P1, kInvalidId);
     auto rune = addRune(P1, Domain::Fury);
 

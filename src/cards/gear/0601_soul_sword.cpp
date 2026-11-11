@@ -19,6 +19,9 @@ public:
     bool canEquip(const GameState& state, PlayerId controller) const override {
         return canPayEquipCost(state, controller, 0, Domain::Calm);
     }
+    bool weaponmasterEquip(CardContext& ctx, GameObjectId unit, bool check_only) override {
+        return weaponmasterPayEnergyAndAttach(ctx, unit, /*energy=*/0, check_only);  // CR 821
+    }
     bool onEquip(CardContext& ctx, GameObjectId unit) override {
         // [G] equip: recycle a Calm rune for power.
         return standardEquip(ctx, ctx.source, unit, Domain::Calm);

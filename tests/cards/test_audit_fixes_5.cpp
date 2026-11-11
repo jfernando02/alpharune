@@ -407,9 +407,10 @@ TEST_F(AuditFix5Test, Yone_ConquerNoEnemyNoop) {
 
 // WhenYouPlayMe (Weaponmaster): free-equip a friendly Equipment gear onto Yone.
 TEST_F(AuditFix5Test, Yone_WeaponmasterFreeEquip) {
-    EffectExecutor exec(state, events, card_db);
+    EffectExecutor exec(state, events, card_db, &card_registry);
     auto yone = addUnit(P1, kYone, 5);
     auto gear = addGear(P1, kInvalidId, /*might_bonus=*/3, /*equipment_tag=*/true);
+    state.getObject(gear).card_def_id = 345;  // Long Sword: Equip [R], [A] less = free (CR 821)
 
     fireTriggerAs(kYone, P1, yone, TriggerType::WhenYouPlayMe, exec);
 

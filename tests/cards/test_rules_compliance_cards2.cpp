@@ -1280,7 +1280,9 @@ TEST_F(RulesCards2Test, RulesCards2_Jax_WeaponmasterChoosesWhichEquipment) {
     EffectExecutor exec(state, events, card_db, &card_registry);
     auto jax = addUnit(P1, kJaxUnrelenting, 0, /*at_bf=*/0);
     auto first = addGear(P1, kInvalidId, {"Equipment"}, /*might_bonus=*/1);
+    state.getObject(first).card_def_id = 345;  // Long Sword: Equip [R], [A] less = free (CR 821)
     auto second = addGear(P1, kInvalidId, {"Equipment"}, /*might_bonus=*/2);
+    state.getObject(second).card_def_id = 345;  // Long Sword: Equip [R], [A] less = free (CR 821)
     auto not_equipment = addGear(P1, kInvalidId, {}, /*might_bonus=*/5);
     Seen seen;
 
@@ -1300,6 +1302,7 @@ TEST_F(RulesCards2Test, RulesCards2_Jax_WeaponmasterIsOptional) {
     EffectExecutor exec(state, events, card_db, &card_registry);
     auto jax = addUnit(P1, kJaxUnrelenting, 0, /*at_bf=*/0);
     auto gear = addGear(P1, kInvalidId, {"Equipment"}, /*might_bonus=*/2);
+    state.getObject(gear).card_def_id = 345;  // Long Sword: Equip [R], [A] less = free (CR 821)
 
     driveTrigger(kJaxUnrelenting, P1, jax, TriggerType::WhenYouPlayMe,
                  &RulesCards2Test::no, exec);
@@ -1313,6 +1316,7 @@ TEST_F(RulesCards2Test, RulesCards2_Jax_WeaponmasterTakesAnEquipmentOffAnotherUn
     auto jax = addUnit(P1, kJaxUnrelenting, 0, /*at_bf=*/0);
     auto other = addUnit(P1, kInvalidId, 3, /*at_bf=*/1);
     auto gear = addGear(P1, kInvalidId, {"Equipment"}, /*might_bonus=*/2);
+    state.getObject(gear).card_def_id = 345;  // Long Sword: Equip [R], [A] less = free (CR 821)
     attach(gear, other);
     ASSERT_EQ(state.getObject(other).current_might, 5);
 
@@ -1361,7 +1365,7 @@ TEST_F(RulesCards2Test, RulesCards2_Jax_WeaponmasterStillChargesThePrintedEnergy
     EXPECT_TRUE(onBoard(rune)) << "no rune recycled: the Power was the discount";
 }
 
-TEST_F(RulesCards2Test, RulesCards2_Jax_WeaponmasterDoesNotOfferAnEquipCostItCannotCharge) {
+TEST_F(RulesCards2Test, RulesCards2_Jax_WeaponmasterPaysAnEquipCostWithoutPowerInFull) {
     EffectExecutor exec(state, events, card_db, &card_registry);
     auto jax = addUnit(P1, kJaxUnrelenting, 0, /*at_bf=*/0);
     auto heirloom = addGear(P1, kShepherdsHeirloom);  // "[Equip] — Spend 1 XP"
@@ -1371,9 +1375,9 @@ TEST_F(RulesCards2Test, RulesCards2_Jax_WeaponmasterDoesNotOfferAnEquipCostItCan
     driveTrigger(kJaxUnrelenting, P1, jax, TriggerType::WhenYouPlayMe,
                  pickObj(heirloom, &seen), exec);
 
-    EXPECT_FALSE(seen.wasOffered(heirloom)) << "never attached for free";
-    EXPECT_FALSE(state.getObject(heirloom).attached_to.has_value());
-    EXPECT_EQ(state.player(P1).xp, 5);
+    EXPECT_TRUE(seen.wasOffered(heirloom)) << "CR 821.1.c.3: no [A] to reduce, paid in full";
+    EXPECT_TRUE(state.getObject(heirloom).attached_to == std::optional<GameObjectId>(jax));
+    EXPECT_EQ(state.player(P1).xp, 4) << "Spend 1 XP";
 }
 
 TEST_F(RulesCards2Test, RulesCards2_CR383_Jax_AttachTriggerIsItsOwnAbility) {

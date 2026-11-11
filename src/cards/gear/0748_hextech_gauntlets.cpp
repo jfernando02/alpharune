@@ -32,6 +32,12 @@ public:
         return best_might >= 0 && runes > 0 && ready >= std::max(0, 3 - best_might);
     }
 
+    // Weaponmaster (CR 821): [3][A] reduced by [A], Energy reduced by the unit's Might.
+    bool weaponmasterEquip(CardContext& ctx, GameObjectId unit, bool check_only) override {
+        if (!ctx.state.objectExists(unit)) return false;
+        const int energy = std::max(0, 3 - ctx.state.getObject(unit).current_might);
+        return weaponmasterPayEnergyAndAttach(ctx, unit, energy, check_only);
+    }
     bool onEquip(CardContext& ctx, GameObjectId unit) override {
         if (!ctx.state.objectExists(unit)) return false;
         auto& state = ctx.state;

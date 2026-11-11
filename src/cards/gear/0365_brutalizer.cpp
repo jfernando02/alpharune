@@ -20,6 +20,13 @@ public:
     bool canEquip(const GameState& state, PlayerId controller) const override {
         return canPayEquipCost(state, controller, 0, Domain::Calm);
     }
+    bool weaponmasterEquip(CardContext& ctx, GameObjectId unit, bool check_only) override {
+        if (!weaponmasterPayEnergyAndAttach(ctx, unit, /*energy=*/0, check_only)) return false;
+        if (!check_only)
+            ctx.state.getObject(ctx.source).card_counters["__brutalizer_attach_turn"] =
+                ctx.state.turn.turn_number;
+        return true;
+    }
     bool onEquip(CardContext& ctx, GameObjectId unit) override {
         bool ok = standardEquip(ctx, ctx.source, unit, /*energy=*/0, Domain::Calm);
         if (ok && ctx.state.objectExists(ctx.source)) {

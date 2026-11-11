@@ -27,6 +27,16 @@ public:
     bool canEquip(const GameState& state, PlayerId controller) const override {
         return state.player(controller).xp >= 1;
     }
+    // Weaponmaster (CR 821.1.c.3): "Spend 1 XP" has no [A] to reduce.
+    bool weaponmasterEquip(CardContext& ctx, GameObjectId unit, bool check_only) override {
+        auto& ps = ctx.state.player(ctx.controller);
+        if (ps.xp < 1) return false;
+        if (check_only) return true;
+        ps.xp -= 1;
+        ctx.executor.unattachGear(ctx.source);
+        attachEquipment(ctx, ctx.source, unit);
+        return true;
+    }
     bool onEquip(CardContext& ctx, GameObjectId unit) override {
         auto& ps = ctx.state.player(ctx.controller);
         if (ps.xp < 1) return false;  // can't pay the cost
