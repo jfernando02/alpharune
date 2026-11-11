@@ -37,28 +37,37 @@ public:
         return false;
     }
 
+    // Equipment you control on the board: detached for the first ability, attached for the
+    // second. (Equipment in a deck, hand or trash is not "Equipment you control".)
+    static std::vector<GameObjectId> equipment(const GameState& s, PlayerId me, int ability_index) {
+        std::vector<GameObjectId> out;
+        for (const auto& [id, g] : s.objects) {
+            if (g.controller != me || !isEquipment(g) || !g.location.has_value()) continue;
+            if (g.zone != ZoneType::Base && g.zone != ZoneType::BattlefieldZone) continue;
+            if (g.attached_to.has_value() != (ability_index == 1)) continue;
+            out.push_back(id);
+        }
+        return out;
+    }
+
+    bool canActivateAbilityAt(const GameState& state, PlayerId controller, GameObjectId /*source*/,
+                              int ability_index) const override {
+        return !equipment(state, controller, ability_index).empty();
+    }
+
     void onActivate(CardContext& ctx, int ability_index,
                     const std::vector<GameObjectId>& /*targets*/) override {
         PlayerId me = ctx.controller;
-        // Find an eligible friendly Equipment: detached (idx0) or attached (idx1).
-        GameObjectId gear = kInvalidId;
-        for (auto& [id, g] : ctx.state.objects) {
-            if (g.controller != me || !isEquipment(g)) continue;
-            bool attached = g.attached_to.has_value();
-            if (ability_index == 0 && attached) continue;   // need detached
-            if (ability_index == 1 && !attached) continue;  // need attached
-            gear = id; break;
-        }
-        if (gear == kInvalidId) return;
-        // Pick a friendly unit to attach it to.
-        std::vector<GameObjectId> units;
-        for (auto& [id, u] : ctx.state.objects) {
-            if (u.isUnit() && u.controller == me && u.location.has_value())
-                units.push_back(id);
-        }
-        GameObjectId unit = pickTarget(ctx, "Grandmaster: attach Equipment to unit",
-                                       units);
-        if (unit == kInvalidId || !ctx.state.objectExists(unit) ||
+        const auto unitsOf = [&ctx, me](GameObjectId /*gear*/) {
+            std::vector<GameObjectId> units;
+            for (auto& [id, u] : ctx.state.objects)
+                if (u.isUnit() && u.controller == me && u.location.has_value()) units.push_back(id);
+            return units;
+        };
+        // The player chooses the Equipment, then the unit to attach it to.
+        auto [gear, unit] = pickTargetPair(ctx, "Grandmaster: attach Equipment to unit",
+                                           equipment(ctx.state, me, ability_index), unitsOf);
+        if (gear == kInvalidId || unit == kInvalidId || !ctx.state.objectExists(unit) ||
             !ctx.state.objectExists(gear)) return;
         auto& g = ctx.state.getObject(gear);
         // Detach from current bearer first (refund its might bonus).

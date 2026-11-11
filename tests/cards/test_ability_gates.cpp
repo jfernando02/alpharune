@@ -17,6 +17,8 @@ constexpr CardDefId kDiviningShells = 723;
 constexpr CardDefId kShepherdsHeirloom = 720;
 constexpr CardDefId kCrowdFavorite = 664;
 constexpr CardDefId kMegatusk = 688;
+constexpr CardDefId kGrandmasterAtArms = 554;
+constexpr CardDefId kDoransBlade = 417;
 
 class AbilityGatesTest : public CardTestFixture {
 protected:
@@ -45,6 +47,9 @@ protected:
         o.card_def_id = def_id;
         o.name = def.name;
         o.card_type = def.card_type;
+        o.tags = def.tags;
+        o.domains = def.domains;
+        o.keywords = def.keywords;
         o.base_might = def.might;
         o.current_might = o.base_might;
         o.zone = ZoneType::Base;
@@ -165,6 +170,44 @@ TEST_F(AbilityGatesTest, XpCostAbilitiesNeedTheXpAndPayIt) {
     s.getObject(fav).buff_count = 1;
     s.player(P1).xp = 1;
     EXPECT_FALSE(abilityOffered(fav));
+}
+
+// Grandmaster at Arms: "[1], [E]: Attach a detached Equipment you control to a unit you control."
+// Equipment you control is Equipment on the board; the ability used to take one from the deck.
+TEST_F(AbilityGatesTest, GrandmasterAttachesOnlyEquipmentOnTheBoard) {
+    GameEngine engine(card_db, events, card_registry);
+    auto& s = showdownState(engine);
+    s.turn.ns_state = NeutralShowdownState::Neutral;  // main phase, open
+    s.turn.focus_holder.reset();
+    auto legend = place(s, kGrandmasterAtArms, BaseLocation{P1});
+    s.getObject(legend).zone = ZoneType::LegendZone;
+    s.getObject(legend).location.reset();
+    s.player(P1).legend_zone = legend;
+    plainUnit(s, BaseLocation{P1});
+    auto rune = s.createObject();
+    auto& r = s.getObject(rune);
+    r.owner = P1; r.controller = P1;
+    r.card_type = CardType::Rune;
+    r.domains = {Domain::Calm};
+    r.zone = ZoneType::Base;
+    r.location = BaseLocation{P1};
+    // The Equipment is still in the deck.
+    auto blade = place(s, kDoransBlade, BaseLocation{P1});
+    s.getObject(blade).zone = ZoneType::MainDeck;
+    s.getObject(blade).location.reset();
+    s.player(P1).main_deck.push_back(blade);
+    const auto attachOffered = [&] {
+        for (const auto& a : engine.generateLegalActions())
+            if (a.type == IntentType::ActivateAbility && a.ability_source == legend && a.ability_index == 0)
+                return true;
+        return false;
+    };
+    EXPECT_FALSE(attachOffered()) << "no Equipment on the board";
+
+    s.player(P1).main_deck.clear();
+    s.getObject(blade).zone = ZoneType::Base;
+    s.getObject(blade).location = BaseLocation{P1};
+    EXPECT_TRUE(attachOffered()) << "a detached Equipment at base";
 }
 
 }  // namespace
