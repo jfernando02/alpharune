@@ -54,22 +54,35 @@ inline std::vector<GameObjectId> weaponmasterCandidates(CardContext& ctx) {
     return out;
 }
 
+/// The Weaponmaster choices (CR 821.1.c): "you may choose a card you control with the
+/// Equipment tag". Returns the chosen Equipment, or kInvalidId when declined, when there is
+/// none, or while waiting for an answer (then ctx.executor.hasPendingChoice() is true).
+/// Uses confirmOptional and pickTarget.
+inline GameObjectId chooseWeaponmasterEquipment(Card& self, CardContext& ctx, const std::string& name) {
+    const auto cands = weaponmasterCandidates(ctx);
+    const int conf = self.confirmOptional(ctx, name + ": [Weaponmaster] equip an Equipment to me?",
+                                          [&cands] { return !cands.empty(); });
+    if (conf != 1) return kInvalidId;   // declined, none, or waiting for the answer
+    return self.pickTarget(ctx, name + ": [Weaponmaster] which Equipment?", cands);
+}
+
+/// Pays the chosen Equipment's Equip cost reduced by [A] and attaches it (CR 821.1.c.3-5).
+inline void applyWeaponmaster(CardContext& ctx, GameObjectId picked, const std::string& name) {
+    if (picked == kInvalidId || !ctx.state.objectExists(picked)) return;
+    if (!weaponmaster_detail::equip(ctx, picked, /*check_only=*/false)) return;
+    ctx.events.logTrace(name + ": [Weaponmaster] equipped " + ctx.state.getObject(picked).name);
+}
+
 /// The Weaponmaster trigger, CR 821.1.c: "When you play me, you may choose a card you control
 /// with the Equipment tag. Pay the cost of its Equip ability, reduced by [A], to attach it to
 /// this unit" -- even one attached to another unit, which then moves over. The choices are
 /// made when the trigger is finalized: the calling card's choicesAtFinalization() must include
 /// kFinalizeTrigger. This ends with the finalizingChoices marker.
 inline void resolveWeaponmaster(Card& self, CardContext& ctx, const std::string& name) {
-    const auto cands = weaponmasterCandidates(ctx);
-    const int conf = self.confirmOptional(ctx, name + ": [Weaponmaster] equip an Equipment to me?",
-                                          [&cands] { return !cands.empty(); });
-    if (conf == -1) return;   // waiting for the answer
-    GameObjectId picked = kInvalidId;
-    if (conf == 1) picked = self.pickTarget(ctx, name + ": [Weaponmaster] which Equipment?", cands);
-    if (Card::finalizingChoices(ctx)) return;   // choices end here (CR 383.3)
-    if (picked == kInvalidId) return;           // declined, waiting, or no longer possible
-    if (!weaponmaster_detail::equip(ctx, picked, /*check_only=*/false)) return;
-    ctx.events.logTrace(name + ": [Weaponmaster] equipped " + ctx.state.getObject(picked).name);
+    const GameObjectId picked = chooseWeaponmasterEquipment(self, ctx, name);
+    if (ctx.executor.hasPendingChoice()) return;   // waiting for the answer
+    if (Card::finalizingChoices(ctx)) return;      // choices end here (CR 383.3)
+    applyWeaponmaster(ctx, picked, name);
 }
 
 /// A unit whose only triggered ability is [Weaponmaster].

@@ -1,5 +1,7 @@
 #include "cards/card.h"
 #include "cards/card_registry.h"
+#include "cards/gear/equip_base.h"
+#include "cards/units/weaponmaster_base.h"
 #include "core/game_state.h"
 #include "core/events.h"
 #include "engine/effect_executor.h"
@@ -20,57 +22,55 @@ public:
         return {/*valid=*/true, /*energy=*/0, /*power=*/2, Domain::Order,
                 /*any_domain=*/false, /*paid_flag=*/"__akshan_paid"};
     }
+    // Two "when you play me" abilities ([Weaponmaster], CR 821, and the gear steal) share one
+    // chain item: the trigger manager queues one item per trigger type per card. The steal
+    // resolves first, then the Weaponmaster equip. All choices are made at finalization.
     TriggerType triggerType() const override { return TriggerType::WhenYouPlayMe; }
+    unsigned choicesAtFinalization() const override { return kFinalizeTrigger; }
     void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
         if (!ctx.state.objectExists(ctx.source)) return;
-        // "if you paid the additional cost" — gate on the flag set at play time.
-        auto& self_obj = ctx.state.getObject(ctx.source);
-        if (self_obj.card_counters["__akshan_paid"] != 1) return;
-        PlayerId me = ctx.controller;
+        const PlayerId me = ctx.controller;
+        // "if you paid the additional cost" -- the flag is set at play time.
+        const bool paid = ctx.state.getObject(ctx.source).card_counters["__akshan_paid"] == 1;
 
-        // Find an enemy gear on the board.
+        // "move an enemy gear to your base": the controller chooses which (pickTargetPair's
+        // first pick; it has no second pick, so it does not collide with pickTarget below).
         GameObjectId target_gear = kInvalidId;
-        for (auto& [id, obj] : ctx.state.objects) {
-            if (!obj.isGear()) continue;
-            if (obj.controller == me) continue;       // must be enemy-controlled
-            if (!obj.location.has_value()) continue;   // on board
-            target_gear = id;
-            break;
+        if (paid) {
+            std::vector<GameObjectId> enemy_gear;
+            for (const auto& [id, obj] : ctx.state.objects)
+                if (obj.isGear() && obj.controller != me && obj.location.has_value())
+                    enemy_gear.push_back(id);
+            std::sort(enemy_gear.begin(), enemy_gear.end());
+            target_gear = pickTargetPair(ctx, "Akshan: which enemy gear to move to your base?",
+                                         enemy_gear,
+                                         [](GameObjectId) { return std::vector<GameObjectId>{}; })
+                              .first;
+            if (ctx.executor.hasPendingChoice()) return;
         }
-        if (target_gear == kInvalidId) return;
+        const GameObjectId equipment = chooseWeaponmasterEquipment(*this, ctx, def().name);
+        if (ctx.executor.hasPendingChoice()) return;
+        if (finalizingChoices(ctx)) return;   // choices end here (CR 383.3)
 
-        // Detach it from whatever it was equipped to (it moves zones).
-        auto& gear = ctx.state.getObject(target_gear);
-        bool is_equipment = false;
-        for (auto& tag : gear.tags) {
-            if (tag == "Equipment") { is_equipment = true; break; }
+        if (target_gear != kInvalidId && ctx.state.objectExists(target_gear) &&
+            ctx.state.getObject(target_gear).location.has_value()) {
+            if (ctx.state.getObject(target_gear).attached_to.has_value())
+                ctx.executor.unattachGear(target_gear);
+            // "You control it until I leave the board." Reverts to the original owner via
+            // GameEngine::revertLapsedControl once this Akshan is gone.
+            ctx.executor.takeControlUntilSourceLeaves(target_gear, me, ctx.source);
+            ctx.executor.moveToBase(target_gear);
+            ctx.events.logTrace("AKSHAN: stole enemy gear until I leave the board");
+            const auto& g = ctx.state.getObject(target_gear);
+            const bool is_equipment = std::find(g.tags.begin(), g.tags.end(), "Equipment") != g.tags.end();
+            const auto& self = ctx.state.getObject(ctx.source);
+            if (is_equipment && self.location.has_value()) {
+                attachEquipment(ctx, target_gear, ctx.source);
+                ctx.state.getObject(target_gear).controller = me;
+                ctx.events.logTrace("AKSHAN: attached stolen Equipment to me");
+            }
         }
-        if (gear.attached_to.has_value()) {
-            ctx.executor.unattachGear(target_gear);
-        }
-
-        // "You control it until I leave the board." Reverts to the original
-        // owner via GameEngine::revertLapsedControl once this Akshan is gone.
-        ctx.executor.takeControlUntilSourceLeaves(target_gear, me, ctx.source);
-        ctx.executor.moveToBase(target_gear);
-        ctx.events.logTrace("AKSHAN: stole enemy gear until I leave the board");
-
-        // If it's an Equipment, attach it to me.
-        if (is_equipment && ctx.state.objectExists(target_gear) &&
-            ctx.state.objectExists(ctx.source)) {
-            auto& g = ctx.state.getObject(target_gear);
-            auto& self = ctx.state.getObject(ctx.source);
-            g.attached_to = ctx.source;
-            self.attachments.push_back(target_gear);
-            g.location = self.location;
-            g.zone = self.zone;
-            g.controller = me;
-            self.attachment_might_bonus += g.might_bonus;
-            self.recomputeMight();
-            ctx.events.emit(ObjectStateChangedEvent{target_gear, "attached"});
-            ctx.events.emit(ObjectStateChangedEvent{ctx.source, "equipped"});
-            ctx.events.logTrace("AKSHAN: attached stolen Equipment to me");
-        }
+        applyWeaponmaster(ctx, equipment, def().name);
     }
 private:
     const CardDef def_ = [] {

@@ -66,6 +66,7 @@ constexpr CardDefId kHextechGauntlets    = 748;  // [3][A] +3M
 constexpr CardDefId kArmedAssailant      = 324;
 constexpr CardDefId kSentinelAdept       = 331;
 constexpr CardDefId kOrnnForgeGod        = 407;
+constexpr CardDefId kAkshanMischievous   = 431;
 constexpr CardDefId kCombatChef          = 414;
 constexpr CardDefId kVeteranPoro         = 421;
 constexpr CardDefId kLucianMerciless     = 435;
@@ -989,6 +990,43 @@ TEST_F(WeaponmasterTest, LastRitesStillRecyclesTwoCards) {
     fireWeaponmasterTrigger(wm, kArmedAssailant, exec);
     EXPECT_EQ(state.getObject(gear).attached_to, std::optional<GameObjectId>(wm));
     EXPECT_TRUE(ps.trash.empty());
+}
+
+// Akshan, Mischievous: "[Weaponmaster] ... When you play me, if you paid the additional cost,
+// move an enemy gear to your base ... If it's an Equipment, attach it to me."
+// The controller chooses which enemy gear.
+TEST_F(WeaponmasterTest, AkshanLetsTheControllerChooseTheEnemyGear) {
+    auto first = addEquipmentGear(P2, kLongSword, /*at_bf=*/0);
+    auto second = addEquipmentGear(P2, kBFSword, /*at_bf=*/0);
+    auto akshan = addUnit(P1, kAkshanMischievous, /*might=*/4, /*at_bf=*/0);
+    state.getObject(akshan).card_counters["__akshan_paid"] = 1;
+    EffectExecutor exec(state, events, card_db, &card_registry);
+    driveResumableTrigger(kAkshanMischievous, P1, akshan,
+                          [&](const std::vector<Intent>& l) {
+                              for (const auto& i : l)
+                                  if (!i.chosen_objects.empty() && i.chosen_objects[0] == second)
+                                      return i;
+                              return l.back();
+                          }, exec);
+    EXPECT_EQ(state.getObject(second).controller, P1);
+    EXPECT_EQ(state.getObject(second).attached_to, std::optional<GameObjectId>(akshan));
+    EXPECT_EQ(state.getObject(first).controller, P2);
+    EXPECT_FALSE(state.getObject(first).attached_to.has_value());
+}
+
+// Akshan has [Weaponmaster] (CR 821) even when the additional cost was not paid.
+TEST_F(WeaponmasterTest, AkshanIsAWeaponmaster) {
+    auto sword = addEquipmentGear(P1, kLongSword, /*at_bf=*/0);
+    auto akshan = addUnit(P1, kAkshanMischievous, /*might=*/4, /*at_bf=*/0);
+    EffectExecutor exec(state, events, card_db, &card_registry);
+    driveResumableTrigger(kAkshanMischievous, P1, akshan,
+                          [&](const std::vector<Intent>& l) {
+                              for (const auto& i : l)
+                                  if (!i.chosen_objects.empty() && i.chosen_objects[0] == sword)
+                                      return i;
+                              return l.back();   // "yes" to the may
+                          }, exec);
+    EXPECT_EQ(state.getObject(sword).attached_to, std::optional<GameObjectId>(akshan));
 }
 
 }  // namespace
