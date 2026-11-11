@@ -926,7 +926,19 @@ void GameEngine::beginningStep() {
     // CR 319: a Cleanup follows these state changes, before the Scoring Step.
     // Without it a battlefield whose last unit just died ([Temporary], a
     // start-of-turn kill) is still "controlled" and would wrongly score a Hold.
+    cleanupAndRunChain(ChainStep::BeginningStep);
+}
+
+// A Cleanup can add triggered abilities (a unit becoming [Mighty], a death). They resolve in
+// the step they were added in, with a Cleanup after each, so no step hands a Chain to the next
+// (the Main Phase would open with one: CR 309.1).
+void GameEngine::cleanupAndRunChain(ChainStep step, std::optional<BattlefieldId> bf) {
     cleanup();
+    while (!state_.game_over && chain_manager_->chainExists()) {
+        runChainInStep(step, bf);
+        if (state_.game_over) return;
+        cleanup();
+    }
 }
 
 void GameEngine::scoringStep() {
@@ -954,7 +966,9 @@ void GameEngine::scoreHolds(size_t first) {
         }
     }
 
-    cleanup();
+    // Resumed after the last battlefield, scoreHolds only finishes this Cleanup and chain.
+    if (state_.battlefields.empty()) cleanup();
+    else cleanupAndRunChain(ChainStep::ScoringStep, state_.battlefields.back().id);
 }
 
 size_t GameEngine::battlefieldIndex(BattlefieldId bf_id) const {
@@ -1205,6 +1219,8 @@ void GameEngine::resumeChain() {
             resumeShowdown(*bf_id);
             break;
         case ChainStep::BeginningStep:
+            cleanupAndRunChain(ChainStep::BeginningStep);
+            break;
         case ChainStep::EndingStep:
             cleanup();
             break;

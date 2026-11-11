@@ -225,6 +225,41 @@ TEST_F(BurnOutScoringTest, Hold_ScoredWhenUnitSurvivesBeginningStep) {
     EXPECT_EQ(s.player(P1).score, 1);
 }
 
+// CR 309.1 / 319: a trigger added by the Beginning Step's Cleanup (here Grand Duelist's "when
+// one of your units becomes [Mighty]", after a "this turn" Might loss expired) resolves in that
+// step. It used to stay on the chain until the Main Phase, which then opened with a Chain.
+// Found by riftbound_rules_fuzz (docs/rules-audit/).
+TEST_F(BurnOutScoringTest, ATriggerFromTheBeginningStepCleanupResolvesBeforeTheMainPhase) {
+    makeEngineAndSeedBattlefields(2);
+    FirstChoiceAgent a1, a2;
+    engine_->testHook_setAgents(&a1, &a2);
+    seedLegends();
+    auto& s = *eng_state();
+    s.turn.turn_player = P1;
+    {
+        auto& leg = s.getObject(s.player(P2).legend_zone);
+        leg.card_def_id = 519;   // Grand Duelist
+        leg.name = "Grand Duelist";
+    }
+    auto unit = s.createObject();
+    {
+        auto& u = s.getObject(unit);
+        u.owner = u.controller = P2;
+        u.card_type = CardType::Unit;
+        u.name = "MightyNow";
+        u.base_might = u.current_might = 5;
+        u.zone = ZoneType::BattlefieldZone;
+        u.location = BattlefieldLocation{0};
+        u.card_counters["__was_mighty"] = 0;
+    }
+
+    engine_->testHook_beginningStep();
+
+    EXPECT_EQ(s.getObject(unit).card_counters["__was_mighty"], 1) << "the Cleanup saw it become Mighty";
+    EXPECT_TRUE(s.chain.items.empty()) << "the trigger resolves in the Beginning Step";
+    EXPECT_FALSE(s.chain.resuming.has_value());
+}
+
 // ─── CR 431.1.c — Reveal beyond deck does NOT cause Burn Out ────────────────
 
 TEST_F(BurnOutScoringTest, RevealUntil_EmptyDeck_DoesNotBurnOut) {

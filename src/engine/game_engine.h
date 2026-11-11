@@ -561,6 +561,7 @@ private:
     void runChain(bool resume = false);
     /// runChain with TurnState::chain_step (and chain_step_bf) set to the
     /// step it runs in, so its priority decisions are resume points.
+    void cleanupAndRunChain(ChainStep step, std::optional<BattlefieldId> bf = std::nullopt);
     void runChainInStep(ChainStep step, std::optional<BattlefieldId> bf = std::nullopt);
     /// resumeFromSnapshot at a chain priority decision: finishes the chain,
     /// then the step it ran in (TurnState::chain_step).
