@@ -53,6 +53,15 @@ public:
         u.damage_marked = 0;
         u.combat_designation = CombatDesignation::None;
         u.location = std::nullopt;
+        if (u.is_token) {
+            // CR 183.1: a token sent to a non-board zone ceases to exist (parked in
+            // Banishment, in no player's list, as killObject does).
+            u.zone = ZoneType::Banishment;
+            ctx.events.emit(LeftBoardEvent{picked, owner, CardType::Unit, was_at,
+                                           ZoneType::Banishment, /*was_killed=*/false});
+            ctx.events.logTrace("KEEPER'S VERDICT: token " + u.name + " ceases to exist");
+            return;
+        }
         u.zone = ZoneType::MainDeck;
         auto& deck = ctx.state.player(owner).main_deck;
         if (mode == 0) deck.push_back(picked);            // top = back

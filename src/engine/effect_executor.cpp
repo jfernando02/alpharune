@@ -909,8 +909,21 @@ void EffectExecutor::recycleCards(PlayerId /*effect_controller*/,
     }
     auto recycle_one = [&](GameObjectId cid) {
         auto& obj = state_.getObject(cid);
-        obj.zone = ZoneType::MainDeck;
+        // A card is in one zone: take it out of whichever list held it (a caller that already
+        // removed it loses nothing). Without this, "then recycle it" left a spell in the trash
+        // AND the deck.
+        for (auto& ps : state_.players)
+            for (auto* list : {&ps.hand, &ps.main_deck, &ps.rune_deck, &ps.trash, &ps.banishment})
+                list->erase(std::remove(list->begin(), list->end(), cid), list->end());
         obj.location = std::nullopt;
+        obj.attached_to.reset();
+        if (obj.is_token) {
+            // CR 183.1: a token sent to a non-board zone ceases to exist (same convention as
+            // killObject: parked in Banishment, in no player's list).
+            obj.zone = ZoneType::Banishment;
+            return;
+        }
+        obj.zone = ZoneType::MainDeck;
         if (obj.card_type == CardType::Rune) {
             obj.zone = ZoneType::RuneDeck;
             state_.player(obj.owner).rune_deck.insert(

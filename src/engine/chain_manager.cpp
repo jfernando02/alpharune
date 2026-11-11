@@ -469,7 +469,10 @@ void ChainManager::stepResolve(
 
     if (resolved.is_spell) {
         // Spell goes to controller's trash after resolving (CR 359.3)
-        if (state_.objectExists(resolved.source)) {
+        // A spell its own effect already moved off the chain ("Banish this": Time Warp, Arcane
+        // Shift) stays where it went; trashing it as well would put it in two zones.
+        if (state_.objectExists(resolved.source) &&
+            state_.getObject(resolved.source).zone == ZoneType::Chain) {
             auto& spell_obj = state_.getObject(resolved.source);
             // [Flow] / "then banish this": banished instead of trashed as it
             // leaves the chain (a replacement effect, Vendetta rules update).
