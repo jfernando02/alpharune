@@ -416,6 +416,9 @@ add_executable(riftbound_value_data tools/value_data.cpp)
 target_link_libraries(riftbound_value_data PRIVATE riftbound_core)
 add_executable(riftbound_arena tools/arena.cpp)
 target_link_libraries(riftbound_arena PRIVATE riftbound_core)
+# Rule-invariant fuzzer over the deck pairs (docs/rules-audit/).
+add_executable(riftbound_rules_fuzz tools/rules_fuzz.cpp)
+target_link_libraries(riftbound_rules_fuzz PRIVATE riftbound_core)
 # Candidate decks against a field of decks, same agent in both seats.
 add_executable(riftbound_gauntlet tools/gauntlet.cpp)
 target_link_libraries(riftbound_gauntlet PRIVATE riftbound_core)
