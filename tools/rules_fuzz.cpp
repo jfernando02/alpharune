@@ -798,7 +798,7 @@ void writeUsage(const Options& opt, Shared& sh) {
         const double wr = static_cast<double>(u.wins_when_played) / u.games_played;
         const double base = n > 0 ? expected / n : 0.5;
         const double g = static_cast<double>(u.games_played);
-        out << d << ',' << csvQuote(sh.db.get(d).name) << ',' << u.games_played << ',' << u.plays / g << ','
+        out << d << ',' << csvQuote(sh.db.all().count(d) ? sh.db.get(d).name : "#" + std::to_string(d)) << ',' << u.games_played << ',' << u.plays / g << ','
             << u.max_plays_turn << ',' << u.activations / g << ',' << u.max_activations_turn << ',' << u.triggers / g << ','
             << u.max_triggers_turn << ',' << wr << ',' << base << ',' << wr - base << "\n";
     }
