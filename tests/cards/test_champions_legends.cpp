@@ -694,12 +694,10 @@ TEST_F(SettBrawlerTest, ActivateSpendsBuffForBigMight) {
     CardContext ctx{state, events, exec, P1, src};
     card_registry.get(kSettBrawler)->onActivate(ctx, {});
 
-    // Activation: spend the 1 permanent buff (buff_count 1->0, -1M) then
-    // +4 temp might. buff_count is now properly consumed (temp might no longer
-    // pollutes it), so the buff is truly spent and the ability can't re-fire.
-    EXPECT_EQ(state.getObject(src).buff_count, 0) << "the buff is spent";
-    EXPECT_EQ(state.getObject(src).current_might, with_buff + 3)
-        << "spend a buff (-1M) then +4M = net +3M over the previously buffed state";
+    // The buff is the activation cost, taken by the engine as the ability is activated
+    // (ActivationCost::spend_buff_self); resolving gives +4 [M] this turn.
+    EXPECT_TRUE(card_registry.get(kSettBrawler)->getActivationCost().spend_buff_self);
+    EXPECT_EQ(state.getObject(src).current_might, with_buff + 4);
 }
 
 TEST_F(SettBrawlerTest, ActivateNoOpWithoutBuff) {
@@ -707,13 +705,9 @@ TEST_F(SettBrawlerTest, ActivateNoOpWithoutBuff) {
     int base = state.getObject(src).current_might;
     EXPECT_EQ(state.getObject(src).buff_count, 0);
 
-    EffectExecutor exec(state, events, card_db);
-    CardContext ctx{state, events, exec, P1, src};
-    card_registry.get(kSettBrawler)->onActivate(ctx, {});
-
-    EXPECT_EQ(state.getObject(src).buff_count, 0)
-        << "no buff to spend -> activate is a no-op";
-    EXPECT_EQ(state.getObject(src).current_might, base);
+    (void)base;
+    EXPECT_FALSE(card_registry.get(kSettBrawler)->canActivateAbilityAt(state, P1, src, 0))
+        << "no buff to spend -> the ability can't be activated";
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

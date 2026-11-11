@@ -1763,6 +1763,12 @@ bool GameEngine::payAndQueueAbility(const Intent& intent) {
     // "Disempower this," as a cost (Questionable Tome, Hextech Disc, ...).
     if (act_cost.disempower_self)
         effect_executor_->disempower(intent.ability_source);
+    // "Spend my buff:" as a cost (Sett, Brawler; Udyr, Wildman).
+    if (act_cost.spend_buff_self && source.buff_count > 0) {
+        source.buff_count -= 1;
+        source.recomputeMight();
+        events_.logTrace("ACTIVATE_COST: " + source.name + " spends a buff");
+    }
     // "Kill a friendly unit" as a cost: the chosen unit rides in targets.
     if (act_cost.kill_friendly_unit && !intent.targets.empty() &&
         state_.objectExists(intent.targets[0]))

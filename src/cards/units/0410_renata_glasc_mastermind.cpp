@@ -19,12 +19,13 @@ class RenataGlascMastermind : public UnitCard {
 public:
     const CardDef& def() const override { return def_; }
 
-    bool canActivateAbility(const GameState& state, PlayerId controller) const override {
-        for (auto& [id, obj] : state.objects) {
-            if (obj.card_def_id != cardDefId() || obj.controller != controller) continue;
-            if (obj.isAtBattlefield()) return true;
-        }
-        return false;
+    // Gated on THIS object (another copy of the card does not let this one activate).
+    bool canActivateAbilityAt(const GameState& state, PlayerId controller, GameObjectId source,
+                              int ability_index) const override {
+        if (!Card::canActivateAbilityAt(state, controller, source, ability_index)) return false;
+        if (!state.objectExists(source)) return false;
+        const auto& obj = state.getObject(source);
+        return obj.isAtBattlefield();
     }
     std::vector<ActivatedAbility> activatedAbilities() const override {
         return {

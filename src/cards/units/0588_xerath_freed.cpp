@@ -23,13 +23,13 @@ public:
     ActivationCost getActivationCost() const override {
         return ActivationCost{.exhaust = true, .power = 1, .power_domain = Domain::Fury};
     }
-    bool canActivateAbility(const GameState& state, PlayerId controller) const override {
-        for (auto& [id, obj] : state.objects) {
-            if (obj.card_def_id != cardDefId()) continue;
-            if (obj.controller != controller) continue;
-            if (obj.isAtBattlefield()) return true;
-        }
-        return false;
+    // Gated on THIS object (another copy of the card does not let this one activate).
+    bool canActivateAbilityAt(const GameState& state, PlayerId controller, GameObjectId source,
+                              int ability_index) const override {
+        if (!Card::canActivateAbilityAt(state, controller, source, ability_index)) return false;
+        if (!state.objectExists(source)) return false;
+        const auto& obj = state.getObject(source);
+        return obj.isAtBattlefield();
     }
     std::vector<ActivatedAbility> activatedAbilities() const override {
         return {{

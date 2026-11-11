@@ -287,6 +287,7 @@ struct ActivationCost {
     int xp_cost = 0;            // "Spend N XP" (deducts from controller's PlayerState.xp)
     bool power_any_domain = false;   // the `power` above is [A] (any domain), not power_domain
     bool disempower_self = false;    // "Disempower this/me," — source must be Empowered
+    bool spend_buff_self = false;    // "Spend my buff:" — the source must have a buff
     // Discard-cost type filter for `discard` ("Discard a spell" / "Discard a
     // gear"): 0 = any card, else 1 + static_cast<int>(CardType).
     int discard_type_filter = 0;

@@ -34,12 +34,13 @@ public:
     // Activated: "Spend my buff: Give me +4 [M] this turn." Spending a buff
     // is the whole cost; no exhaust / rune cost. Gated on having a buff.
     bool hasActivatedAbility() const override { return true; }
-    ActivationCost getActivationCost() const override { return {}; }
+    ActivationCost getActivationCost() const override {
+        ActivationCost c;
+        c.spend_buff_self = true;   // paid at activation, by this Sett (Card::canActivateAbilityAt)
+        return c;
+    }
     void onActivate(CardContext& ctx, const std::vector<GameObjectId>&) override {
         if (!ctx.state.objectExists(ctx.source)) return;
-        auto& self = ctx.state.getObject(ctx.source);
-        if (self.buff_count <= 0) return;  // no buff to spend
-        self.buff_count -= 1;
         ctx.executor.giveTemporaryMight(ctx.source, 4);
         ctx.events.logTrace("SETT: spent a buff for +4M this turn");
     }

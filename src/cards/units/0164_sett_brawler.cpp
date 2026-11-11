@@ -28,19 +28,13 @@ public:
     }
     // "Spend my buff: Give me +4 [M] this turn."
     bool hasActivatedAbility() const override { return true; }
-    ActivationCost getActivationCost() const override { return {}; }
-    bool canActivateAbility(const GameState& state, PlayerId controller) const override {
-        for (auto& [id, obj] : state.objects)
-            if (obj.card_def_id == cardDefId() && obj.controller == controller &&
-                obj.location.has_value() && obj.buff_count > 0)
-                return true;
-        return false;
+    ActivationCost getActivationCost() const override {
+        ActivationCost c;
+        c.spend_buff_self = true;   // paid at activation, by this Sett (Card::canActivateAbilityAt)
+        return c;
     }
     void onActivate(CardContext& ctx, const std::vector<GameObjectId>&) override {
         if (!ctx.state.objectExists(ctx.source)) return;
-        auto& self = ctx.state.getObject(ctx.source);
-        if (self.buff_count <= 0) return;
-        self.buff_count -= 1;
         ctx.executor.giveTemporaryMight(ctx.source, 4);
         ctx.events.logTrace("SETT, BRAWLER: spent a buff for +4M this turn");
     }

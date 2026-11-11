@@ -739,6 +739,8 @@ bool Card::canActivateAbilityAt(const GameState& state, PlayerId /*controller*/,
     if (ab.is_empower && maxEmpower() <= 1 && obj.isEmpowered()) return false;
     // "Disempower this" as a cost needs an Empowered status to remove.
     if (ab.cost.disempower_self && !obj.isEmpowered()) return false;
+    // "Spend my buff" as a cost needs a buff on this object (not on another copy of the card).
+    if (ab.cost.spend_buff_self && obj.buff_count <= 0) return false;
     return true;
 }
 

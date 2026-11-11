@@ -333,26 +333,22 @@ TEST_F(AuditFix4Test, Sett_SpendBuffGivesPlus4Might) {
     ASSERT_EQ(state.getObject(sett).buff_count, 1);
     int might_before = state.getObject(sett).current_might;  // 4 + 1 buff = 5
 
+    // The buff is the activation cost (ActivationCost::spend_buff_self), taken by the engine
+    // as the ability is activated; the effect is the +4 [M].
+    EXPECT_TRUE(c->getActivationCost().spend_buff_self);
     CardContext ctx{state, events, exec, P1, sett};
     c->onActivate(ctx, {});
-    // Observable might: -1 (buff consumed via buff_count--) then +4 = +3 net.
-    EXPECT_EQ(state.getObject(sett).current_might, might_before - 1 + 4);
-    // The permanent buff is properly spent now that temp might (the +4) lives
-    // in temp_might_bonus, not buff_count — so buff_count returns to 0 and the
-    // ability can't be re-activated until Sett gains another buff.
-    EXPECT_EQ(state.getObject(sett).buff_count, 0);
+    EXPECT_EQ(state.getObject(sett).current_might, might_before + 4);
 }
 
 TEST_F(AuditFix4Test, Sett_ActivateWithoutBuffIsNoOp) {
     auto sett = addUnit(P1, kSett, /*might=*/4, /*at_bf=*/0);
     EffectExecutor exec(state, events, card_db);
     Card* c = card_registry.get(kSett);
-    int might_before = state.getObject(sett).current_might;
-    CardContext ctx{state, events, exec, P1, sett};
-    c->onActivate(ctx, {});
-    EXPECT_EQ(state.getObject(sett).buff_count, 0);
-    EXPECT_EQ(state.getObject(sett).current_might, might_before)
-        << "no buff to spend -> no +4M";
+    (void)exec;
+    EXPECT_FALSE(c->canActivateAbilityAt(state, P1, sett, 0)) << "no buff to spend";
+    state.getObject(sett).buff_count = 1;
+    EXPECT_TRUE(c->canActivateAbilityAt(state, P1, sett, 0));
 }
 
 // ─── 612 Iascylla ───────────────────────────────────────────────────────────

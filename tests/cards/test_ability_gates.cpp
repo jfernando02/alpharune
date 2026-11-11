@@ -19,6 +19,7 @@ constexpr CardDefId kCrowdFavorite = 664;
 constexpr CardDefId kMegatusk = 688;
 constexpr CardDefId kGrandmasterAtArms = 554;
 constexpr CardDefId kDoransBlade = 417;
+constexpr CardDefId kSettBrawler = 164;
 
 class AbilityGatesTest : public CardTestFixture {
 protected:
@@ -211,4 +212,29 @@ TEST_F(AbilityGatesTest, GrandmasterAttachesOnlyEquipmentOnTheBoard) {
 }
 
 }  // namespace
+// Sett, Brawler: "Spend my buff: Give me +4 [M] this turn." The buff is the cost, paid by THIS
+// Sett as the ability is activated. The gate used to ask whether any Sett its controller had
+// was buffed, and the buff was only taken at resolution, so with one buffed Sett an unbuffed
+// copy could activate without end (1,994 activations in one fuzzed game, each doing nothing).
+TEST_F(AbilityGatesTest, SpendMyBuffIsPaidByThisUnitAtActivation) {
+    GameEngine engine(card_db, events, card_registry);
+    auto& s = showdownState(engine);
+    s.turn.ns_state = NeutralShowdownState::Neutral;
+    s.turn.focus_holder.reset();
+    auto buffed = place(s, kSettBrawler, BattlefieldLocation{0});
+    auto plain = place(s, kSettBrawler, BattlefieldLocation{0});
+    s.getObject(buffed).buff_count = 1;
+    const auto ability = [&](GameObjectId src) -> std::optional<Intent> {
+        for (const auto& a : engine.generateLegalActions())
+            if (a.type == IntentType::ActivateAbility && a.ability_source == src) return a;
+        return std::nullopt;
+    };
+    EXPECT_FALSE(ability(plain).has_value()) << "this Sett has no buff to spend";
+    EXPECT_TRUE(ability(buffed).has_value());
+    // The buff is a declared cost, so the engine takes it as the ability is activated.
+    EXPECT_TRUE(card_registry.get(kSettBrawler)->getActivationCost().spend_buff_self);
+    s.getObject(buffed).buff_count = 0;   // spent
+    EXPECT_FALSE(ability(buffed).has_value());
+}
+
 }  // namespace riftbound::test

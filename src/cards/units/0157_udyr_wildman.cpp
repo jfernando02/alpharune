@@ -17,17 +17,12 @@ public:
 
     // "Spend my buff: Choose one you've not chosen this turn — Deal 2 to a unit
     // at a battlefield / Stun a unit at a battlefield / Ready me / Give me
-    // [Ganking] this turn." Cost = spend a buff (gated below).
+    // [Ganking] this turn." Cost = spend a buff (ActivationCost::spend_buff_self).
     bool hasActivatedAbility() const override { return true; }
-    ActivationCost getActivationCost() const override { return {}; }
-    bool canActivateAbility(const GameState& state, PlayerId controller) const override {
-        // Need a buff to spend.
-        for (auto& [id, obj] : state.objects) {
-            if (obj.card_def_id == cardDefId() && obj.controller == controller &&
-                obj.location.has_value() && obj.buff_count > 0)
-                return true;
-        }
-        return false;
+    ActivationCost getActivationCost() const override {
+        ActivationCost c;
+        c.spend_buff_self = true;   // paid at activation, by this Udyr (Card::canActivateAbilityAt)
+        return c;
     }
 
     void onActivate(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
@@ -51,9 +46,6 @@ public:
         // spend.
         bool first_commit = !(chosen_mask & (1u << mode));
         if (first_commit) {
-            if (self.buff_count <= 0) return;
-            self.buff_count -= 1;
-            self.recomputeMight();
             self.card_counters["__udyr_modes_mask"] =
                 static_cast<int>(chosen_mask | (1u << mode));
         }

@@ -18,12 +18,13 @@ public:
     bool hasActivatedAbility() const override { return true; }
     ActivationCost getActivationCost() const override { return {.exhaust = true}; }
     // "Use this ability only while I'm at a battlefield."
-    bool canActivateAbility(const GameState& state, PlayerId controller) const override {
-        for (auto& [id, obj] : state.objects) {
-            if (obj.card_def_id != cardDefId() || obj.controller != controller) continue;
-            if (obj.isAtBattlefield()) return true;
-        }
-        return false;
+    // Gated on THIS object (another copy of the card does not let this one activate).
+    bool canActivateAbilityAt(const GameState& state, PlayerId controller, GameObjectId source,
+                              int ability_index) const override {
+        if (!Card::canActivateAbilityAt(state, controller, source, ability_index)) return false;
+        if (!state.objectExists(source)) return false;
+        const auto& obj = state.getObject(source);
+        return obj.isAtBattlefield();
     }
     // "[E]: Play two [1] [M] Bird unit tokens with [Deflect]."
     void onActivate(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {

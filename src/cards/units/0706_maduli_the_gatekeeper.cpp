@@ -29,12 +29,13 @@ public:
         return {.power = 1, .power_domain = Domain::Chaos};
     }
     // Legality: there must be at least one qualifying enemy battlefield.
-    bool canActivateAbility(const GameState& state, PlayerId controller) const override {
-        for (auto& [id, obj] : state.objects) {
-            if (obj.card_def_id != cardDefId() || obj.controller != controller) continue;
-            return !qualifyingBfs(state, controller, obj.current_might, id).empty();
-        }
-        return false;
+    // Gated on THIS object (another copy of the card does not let this one activate).
+    bool canActivateAbilityAt(const GameState& state, PlayerId controller, GameObjectId source,
+                              int ability_index) const override {
+        if (!Card::canActivateAbilityAt(state, controller, source, ability_index)) return false;
+        if (!state.objectExists(source)) return false;
+        const auto& obj = state.getObject(source);
+        return !qualifyingBfs(state, controller, obj.current_might, source).empty();
     }
     void onActivate(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
         if (!ctx.state.objectExists(ctx.source)) return;

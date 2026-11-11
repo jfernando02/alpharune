@@ -47,18 +47,15 @@ public:
     // [E]: Play a unit banished with this.
     bool hasActivatedAbility() const override { return true; }
     ActivationCost getActivationCost() const override { return {.exhaust = true}; }
-    bool canActivateAbility(const GameState& state, PlayerId controller) const override {
-        // Find this gear instance and check it has any tracked banished unit
-        // still in banishment.
-        for (auto& [id, obj] : state.objects) {
-            if (obj.card_def_id != cardDefId() || obj.controller != controller) continue;
-            for (auto bid : obj.tracked_objects) {
-                if (state.objectExists(bid) &&
-                    state.getObject(bid).zone == ZoneType::Banishment) {
-                    return true;
-                }
-            }
-        }
+    // Gated on THIS object (another copy of the card does not let this one activate).
+    bool canActivateAbilityAt(const GameState& state, PlayerId controller, GameObjectId source,
+                              int ability_index) const override {
+        if (!Card::canActivateAbilityAt(state, controller, source, ability_index)) return false;
+        if (!state.objectExists(source)) return false;
+        const auto& obj = state.getObject(source);
+        for (auto bid : obj.tracked_objects)
+            if (state.objectExists(bid) && state.getObject(bid).zone == ZoneType::Banishment)
+                return true;
         return false;
     }
     void onActivate(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
