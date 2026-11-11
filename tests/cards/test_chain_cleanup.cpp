@@ -48,5 +48,41 @@ TEST_F(ChainCleanupTest, CleanupAfterEachItemAndNothingResolvesAfterAWin) {
     EXPECT_GE(cleanups, 1);
 }
 
+// CR 309.1: while a Chain exists the turn is Closed. A Cleanup between items that reopened the
+// turn (a Showdown ending there) let a spell without [Reaction] be offered at chain priority as
+// a normal play, which the priority loop then ignored -- an action that changed nothing, chosen
+// again and again (Fading Memories, found by the fuzzer's no-op check).
+TEST_F(ChainCleanupTest, TheTurnStaysClosedWhileAChainExists) {
+    for (int i = 0; i < 6; ++i) addToDeck(P1, kInvalidId);
+    auto first = addToHand(P1, kConcentrate);
+    auto second = addToHand(P1, kConcentrate);
+    EffectExecutor exec(state, events, card_db, &card_registry);
+    ChainManager cm(state, events, card_db);
+    cm.setEffectExecutor(&exec);
+    cm.setCleanup([&] { state.turn.oc_state = OpenClosedState::Open; });
+    for (auto id : {first, second}) {
+        auto& h = state.player(P1).hand;
+        h.erase(std::remove(h.begin(), h.end(), id), h.end());
+        cm.addSpell(id, P1, {});
+    }
+    int priority_checks = 0, open_with_chain = 0;
+    FirstChoiceAgent agent;
+    cm.processFEPR(
+        [&](PlayerId, const std::vector<Intent>& legal) { return agent.selectAction(state, legal); },
+        [](const ChainItem&) {},
+        [&](const ChainItem& item) {
+            Card* c = card_registry.get(item.card_def_id);
+            CardContext ctx{state, events, exec, item.controller, item.source};
+            c->onResolve(ctx, item.targets);
+        },
+        [&](PlayerId p) {
+            ++priority_checks;
+            if (!state.turn.isClosedState()) ++open_with_chain;
+            return std::vector<Intent>{Intent::passPriority(p)};
+        });
+    EXPECT_GE(priority_checks, 2);
+    EXPECT_EQ(open_with_chain, 0);
+}
+
 }  // namespace
 }  // namespace riftbound::test

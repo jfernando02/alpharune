@@ -169,6 +169,9 @@ void ChainManager::processFEPR(
     while (state_.chain.exists() && iterations < kMaxIterations) {
         iterations++;
         if (state_.game_over) return;
+        // CR 309.1: while a Chain exists the turn is in a Closed State, whatever a Cleanup between
+        // items did (a Showdown ending there reopens the turn).
+        state_.turn.oc_state = OpenClosedState::Closed;
 
         // A resumed loop starts at the priority decision it was waiting on:
         // every item was already finalized.
