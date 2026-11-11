@@ -168,6 +168,7 @@ void ChainManager::processFEPR(
 
     while (state_.chain.exists() && iterations < kMaxIterations) {
         iterations++;
+        if (state_.game_over) return;
 
         // A resumed loop starts at the priority decision it was waiting on:
         // every item was already finalized.
@@ -197,6 +198,11 @@ void ChainManager::processFEPR(
 
         // Step 4: Resolve top item
         stepResolve(query_agent, resolve_spell);
+        // CR 319.5: removing a chain item makes a Cleanup outstanding (it waits while an item is
+        // resolving, CR 321). Its first task is the win check (CR 323.1): a player who reached
+        // the Victory Score with this item wins now, before the next item resolves.
+        if (cleanup_ && !state_.chain.resuming) cleanup_();
+        if (state_.game_over) return;
 
         // After resolve, check chain state:
         if (!state_.chain.exists()) {

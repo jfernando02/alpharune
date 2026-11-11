@@ -91,6 +91,9 @@ public:
     void setFinalizeChoices(FinalizeChoices fn) { finalize_choices_ = std::move(fn); }
     using ActivateAbility = std::function<bool(const Intent&)>;
     void setActivateAbility(ActivateAbility fn) { activate_ability_ = std::move(fn); }
+    /// The Cleanup run after each chain item resolves (CR 319.5); its first task is the win
+    /// check (CR 323.1), and the loop stops once the game is over.
+    void setCleanup(std::function<void()> fn) { cleanup_ = std::move(fn); }
 
     /// Inject the EffectExecutor so stepResolve can detect mid-resolution
     /// pending choices published by Card::onResolve / onTrigger via
@@ -107,6 +110,7 @@ private:
     AffordCheck can_afford_;
     PayCost pay_cost_;
     ActivateAbility activate_ability_;
+    std::function<void()> cleanup_;
     FinalizeChoices finalize_choices_;
     EffectExecutor* executor_ = nullptr;
 

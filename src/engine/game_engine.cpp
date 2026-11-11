@@ -70,6 +70,7 @@ void GameEngine::initSubsystems() {
     chain_manager_->setFinalizeChoices([this](ChainItem& item) { chooseTargetsAtFinalize(item); });
     chain_manager_->setActivateAbility(
         [this](const Intent& i) { return payAndQueueAbility(i); });
+    chain_manager_->setCleanup([this]() { cleanup(); });
     trigger_manager_ = std::make_unique<TriggerManager>(
         state_, events_, card_db_, *chain_manager_, card_registry_);
     trigger_manager_->setEffectExecutor(effect_executor_.get());
