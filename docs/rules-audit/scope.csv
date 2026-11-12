@@ -1,0 +1,356 @@
+id,name,type,decks,per_card_test
+1,Blazing Scorcher,unit,1,yes
+4,Cleave,spell,4,yes
+7,Fury Rune,rune,11,yes
+12,Noxus Hopeful,unit,7,yes
+13,Pouty Poro,unit,1,no
+14,Sky Splitter,spell,1,no
+26,Brynhir Thundersong,unit,1,no
+27,"Darius, Trifarian",unit,3,yes
+28,"Draven, Showboat",unit,2,yes
+29,Falling Star,spell,5,yes
+33,Shakedown,spell,1,yes
+36,"Vi, Destructive",unit,1,no
+38,Kadregrin the Infernal,unit,1,no
+39,"Kai'Sa, Survivor",unit,8,yes
+41,"Volibear, Furious",unit,1,yes
+42,Calm Rune,rune,13,yes
+43,Charm,spell,12,no
+45,Defy,spell,12,yes
+46,En Garde,spell,5,yes
+48,Meditation,spell,2,yes
+52,Stalwart Poro,unit,3,no
+56,Adaptatron,unit,1,no
+58,Discipline,spell,11,yes
+66,"Ahri, Alluring",unit,2,yes
+69,Last Stand,spell,1,no
+73,"Sona, Harmonious",unit,2,no
+77,Zhonya's Hourglass,gear,3,yes
+79,"Leona, Zealot",unit,1,yes
+81,Seal of Focus,gear,1,yes
+83,Consult the Past,spell,3,yes
+84,Eager Apprentice,unit,1,no
+85,Falling Comet,spell,1,no
+89,Mind Rune,rune,13,yes
+91,Pit Crew,unit,1,yes
+93,Smoke Screen,spell,1,no
+94,Sprite Call,spell,1,no
+95,Stupefy,spell,6,yes
+96,Watchful Sentry,unit,1,yes
+103,Ravenbloom Student,unit,4,no
+105,Singularity,spell,7,yes
+106,Sprite Mother,unit,1,yes
+114,Progress Day,spell,1,no
+116,Thousand-Tailed Watcher,unit,8,yes
+121,"Teemo, Strategist",unit,1,no
+122,Time Warp,spell,3,yes
+123,Unchecked Power,spell,3,yes
+126,Body Rune,rune,14,no
+128,Challenge,spell,10,no
+129,Confront,spell,2,no
+131,Dune Drake,unit,1,yes
+132,First Mate,unit,7,no
+133,Flurry of Blades,spell,2,yes
+134,Mobilize,spell,3,no
+136,Pit Rookie,unit,4,no
+138,Catalyst of Aeons,spell,3,no
+140,Herald of Scales,unit,1,no
+155,"Qiyana, Victorious",unit,1,no
+156,Sabotage,spell,7,yes
+160,Dazzling Aurora,gear,2,yes
+162,"Miss Fortune, Captain",unit,1,yes
+163,Seal of Strength,gear,2,no
+164,"Sett, Brawler",unit,3,yes
+166,Chaos Rune,rune,14,yes
+169,Gust,spell,9,yes
+172,Rebuke,spell,4,no
+173,Ride the Wind,spell,7,no
+176,Sneaky Deckhand,unit,3,yes
+180,Fading Memories,spell,1,yes
+181,Pack of Wonders,gear,2,no
+185,Traveling Merchant,unit,2,no
+186,Treasure Trove,gear,1,no
+192,Mindsplitter,unit,6,yes
+194,"Nocturne, Horrifying",unit,1,yes
+197,"Teemo, Scout",unit,1,no
+199,Tideturner,unit,6,no
+204,Seal of Discord,gear,1,no
+207,Call to Glory,spell,2,no
+209,Cull the Weak,spell,6,yes
+211,Faithful Manufactor,unit,1,no
+213,Hidden Blade,spell,9,yes
+214,Order Rune,rune,13,yes
+216,Soaring Scout,unit,2,yes
+218,Vanguard Captain,unit,1,no
+220,Facebreaker,spell,1,yes
+221,Imperial Decree,spell,3,no
+224,Salvage,spell,5,yes
+226,Spectral Matron,unit,2,no
+232,"Fiora, Victorious",unit,4,no
+236,"Karthus, Eternal",unit,1,yes
+241,"Shen, Kinkou",unit,1,no
+245,Seal of Unity,gear,2,no
+246,"Viktor, Leader",unit,2,no
+248,Stormbringer,spell,1,no
+252,Nine-Tailed Fox,legend,1,no
+258,Zenith Blade,spell,1,no
+259,Swift Scout,legend,1,no
+260,Guerilla Warfare,spell,1,no
+262,Bounty Hunter,legend,1,yes
+263,Bullet Time,spell,1,yes
+264,The Boss,legend,1,yes
+265,Showstopper,spell,1,no
+275,Grove of the God-Willow,battlefield,4,no
+277,Monastery of Hirana,battlefield,4,yes
+282,Sigil of the Storm,battlefield,4,no
+283,Startipped Peak,battlefield,5,no
+284,Targon's Peak,battlefield,7,yes
+286,The Candlelit Sanctum,battlefield,1,no
+289,Trifarian War Camp,battlefield,2,no
+290,Vilemaw's Lair,battlefield,5,yes
+291,Void Gate,battlefield,1,yes
+292,Windswept Hillock,battlefield,1,yes
+293,Zaun Warrens,battlefield,3,no
+295,Relentless Storm,legend,1,no
+297,Radiant Dawn,legend,1,no
+298,Herald of the Arcane,legend,2,no
+308,"Annie, Stubborn",unit,2,no
+309,Flash,spell,3,no
+311,"Garen, Commander",unit,1,yes
+312,"Lux, Crownguard",unit,1,no
+315,Dark Child - Starter,legend,2,no
+317,Wuju Bladesman - Starter,legend,2,no
+319,Lady of Luminosity - Starter,legend,1,no
+321,Might of Demacia - Starter,legend,1,yes
+329,Eager Drakehound,unit,1,yes
+330,Gem Jammer,unit,2,no
+334,Angle Shot,spell,1,no
+344,Ferrous Forerunner,unit,5,yes
+345,Long Sword,gear,3,yes
+346,Piercing Light,spell,1,yes
+348,"Rengar, Pouncing",unit,3,yes
+349,"Rumble, Hotheaded",unit,1,no
+352,"Rek'Sai, Breacher",unit,2,yes
+353,Skyfall of Areion,gear,1,yes
+354,Desert's Call,spell,1,no
+359,Lonely Poro,unit,5,no
+365,Brutalizer,gear,4,yes
+366,Emperor's Divide,spell,2,yes
+368,Not So Fast,spell,7,yes
+369,Poro Snax,gear,1,yes
+371,Stellacorn Herder,unit,5,no
+373,"Azir, Ascendant",unit,1,yes
+374,Guardian Angel,gear,4,yes
+375,Heart of Dark Ice,gear,3,yes
+377,"Jax, Unmatched",unit,2,no
+380,"Irelia, Fervent",unit,4,yes
+381,"Ornn, Blacksmith",unit,1,yes
+385,Bubble Bot,unit,1,yes
+388,Forecaster,unit,1,no
+389,Frigid Touch,spell,1,yes
+392,Plundering Poro,unit,7,no
+393,Wages of Pain,spell,4,no
+394,Breakneck Mech,unit,1,no
+395,Dropboarder,unit,1,yes
+396,Experimental Hexplate,gear,1,yes
+399,Production Surge,spell,2,yes
+400,Rocket Barrage,spell,1,yes
+402,Bellows Breath,spell,3,yes
+403,Card Sharp,unit,2,no
+405,Hextech Anomaly,gear,1,yes
+406,"Jayce, Man of Progress",unit,1,no
+407,"Ornn, Forge God",unit,1,yes
+410,"Renata Glasc, Mastermind",unit,1,yes
+416,Direwing,unit,1,yes
+417,Doran's Blade,gear,4,yes
+419,Punch First,spell,10,yes
+427,Ruin Runner,unit,6,yes
+428,Show of Strength,spell,1,no
+430,Warmog's Armor,gear,2,yes
+431,"Akshan, Mischievous",unit,2,yes
+435,"Lucian, Merciless",unit,4,yes
+437,Trinity Force,gear,4,yes
+449,Overzealous Fan,unit,7,yes
+451,Treasure Hunter,unit,2,yes
+454,Boots of Swiftness,gear,1,yes
+457,Hard Bargain,spell,3,yes
+459,Windsinger,unit,2,no
+461,"Fizz, Trickster",unit,4,yes
+464,"Sivir, Mercenary",unit,1,yes
+465,Spirit Wheel,gear,1,yes
+466,Switcheroo,spell,3,no
+467,"Vex, Cheerless",unit,2,yes
+469,"Draven, Audacious",unit,1,yes
+470,"Ezreal, Prodigy",unit,1,yes
+471,Last Rites,gear,3,yes
+474,Eye of the Herald,gear,2,yes
+475,Guards!,spell,1,no
+476,Honest Broker,unit,6,yes
+480,Trusty Ramhound,unit,1,yes
+482,B.F. Sword,gear,3,yes
+484,Deathgrip,spell,3,yes
+485,Drag Under,spell,1,no
+486,Glasc Mixologist,unit,1,yes
+488,Unsung Hero,unit,2,yes
+489,Vanguard Armory,gear,1,no
+496,"Xin Zhao, Vigilant",unit,3,yes
+499,Corina Veraza,unit,1,no
+500,"Fiora, Worthy",unit,1,yes
+501,Danger Zone,spell,1,no
+502,Purifier,legend,1,no
+503,Relentless Pursuit,spell,1,no
+504,Spinning Axe,gear,2,yes
+506,Fire Below the Mountain,legend,1,yes
+509,Shurelya's Requiem,gear,1,yes
+510,Counter Strike,spell,2,yes
+511,Defiant Dance,spell,1,no
+512,Emperor of the Sands,legend,1,yes
+514,Prodigal Explorer,legend,1,no
+515,Arcane Shift,spell,1,no
+516,Hostile Takeover,spell,1,yes
+517,Battle Mistress,legend,1,no
+519,Grand Duelist,legend,1,yes
+520,Riposte,spell,1,no
+521,Emperor's Dais,battlefield,2,no
+522,Forge of the Fluft,battlefield,3,yes
+523,Forgotten Monument,battlefield,2,yes
+524,Hall of Legends,battlefield,1,yes
+527,Ornn's Forge,battlefield,3,yes
+529,Ravenbloom Conservatory,battlefield,1,yes
+530,Rockfall Path,battlefield,9,yes
+531,Seat of Power,battlefield,4,yes
+532,Sunken Temple,battlefield,22,yes
+534,Treasure Hoard,battlefield,3,yes
+551,Mechanized Menace,legend,1,no
+552,Glorious Executioner,legend,2,yes
+554,Grandmaster at Arms,legend,2,yes
+555,Blade Dancer,legend,1,yes
+556,Chem-Baroness,legend,1,no
+560,Inferna,unit,3,no
+571,Upstage Comedy,spell,1,yes
+573,Fresh Beans,gear,1,yes
+575,Lotus Trap,spell,1,yes
+581,Blighted Battleaxe,gear,2,yes
+583,Grim Apothecary,unit,3,no
+584,"Jhin, Murderous Artist",unit,4,no
+586,"Rengar, Unseen",unit,2,no
+590,"Pyke, Dockside Butcher",unit,2,no
+593,Combat Experience,spell,1,no
+595,Frisky Hunter,unit,1,yes
+596,Herald of Spring,unit,1,yes
+597,Monch,unit,1,yes
+598,Mutated Mouser,unit,4,yes
+600,Skyward Strike,spell,1,no
+601,Soul Sword,gear,1,yes
+602,Wuju Apprentice,unit,1,yes
+603,"Allay, Eager Admirer",unit,1,yes
+604,Back Off,spell,8,yes
+605,Enthusiastic Promoter,unit,1,yes
+608,Friendship,spell,1,yes
+609,Mosstomper,unit,1,yes
+610,Trevor Snoozebottom,unit,1,yes
+611,Honeyfruit,gear,1,no
+612,Iascylla,unit,1,yes
+613,"Ivern, Nurturer",unit,1,yes
+614,"Nami, Headstrong",unit,3,yes
+615,Scuttle Crab,unit,10,yes
+617,"Vex, Mocking",unit,1,yes
+622,Vilemaw,unit,2,yes
+623,Downstage Dramatics,spell,1,yes
+625,Eclipse,spell,1,yes
+629,Ruined Rex,unit,1,yes
+631,Sprite Burst,spell,7,yes
+632,Turn to Dust,spell,2,no
+633,Chakram Dancer,unit,2,no
+634,Crescent Strike,spell,1,no
+635,Deadly Flourish,spell,5,yes
+640,Sprite Fountain,gear,6,yes
+641,"Diana, Lunari",unit,1,yes
+642,"Hwei, Brooding Painter",unit,1,yes
+644,"Lillia, Fae Fawn",unit,1,yes
+645,Smoke and Mirrors,spell,1,yes
+649,Blue Sentinel,unit,1,no
+651,"Jhin, Meticulous Killer",unit,1,yes
+655,Dragonsoul Sage,unit,2,no
+656,Gemhand Hunter,unit,2,yes
+657,Grim Resolve,spell,3,yes
+658,Hunter's Machete,gear,2,yes
+659,Kinkou Initiate,unit,3,no
+665,Disposal Order,spell,1,no
+666,Gentle Gemdragon,unit,1,no
+668,Repulse,spell,3,yes
+671,Blood Rose,gear,2,yes
+673,Determined Sentry,unit,1,no
+674,Irresistible Faefolk,unit,4,no
+675,"Master Yi, Tempered",unit,3,yes
+676,"Nidalee, Cat Form",unit,4,yes
+677,"Nilah, Joyful Ascetic",unit,1,no
+678,"Poppy, Paragon",unit,1,no
+680,Elder Dragon,unit,3,yes
+681,"Kha'Zix, Evolving Hunter",unit,1,no
+682,"Rengar, Trophy Hunter",unit,4,yes
+683,Bewitching Spirit,unit,2,no
+687,Lunar Boon,spell,2,yes
+688,Megatusk,unit,1,yes
+689,Mister Root,unit,1,yes
+690,Star-Crossed,spell,7,yes
+693,Abandon,spell,5,yes
+695,Blast Cone,gear,1,yes
+696,Existential Dread,spell,4,no
+698,Scryer's Bloom,gear,2,yes
+700,The List,gear,1,yes
+701,Bone Skewer,spell,2,no
+703,"Evelynn, Entrancing",unit,3,yes
+705,"Kha'Zix, Mutating Horror",unit,1,no
+707,"Pyke, Returned",unit,1,yes
+709,Baron Nashor,unit,3,yes
+712,"Vex, Apathetic",unit,6,yes
+714,Black Rose Dignitary,unit,2,yes
+715,Carrion Dredger,unit,1,no
+718,Loyal Poro,unit,1,yes
+720,Shepherd's Heirloom,gear,1,yes
+724,Enthralling Protector,unit,1,no
+727,Shadow's Call,spell,4,yes
+731,"Ashe, Focused",unit,3,no
+734,"LeBlanc, Fragmented",unit,1,yes
+735,Sacrifice,spell,3,yes
+737,Tactical Retreat,spell,3,yes
+738,"Vi, Peacekeeper",unit,4,yes
+739,"Ivern, Friend to All",unit,1,yes
+742,The Ruination,spell,2,no
+743,Curtain Call,spell,1,yes
+744,Pridestalker,legend,1,no
+745,Thrill of the Hunt,spell,1,yes
+746,Bloodharbor Ripper,legend,1,no
+747,Death from Below,spell,1,yes
+748,Hextech Gauntlets,gear,1,yes
+749,Bashful Bloom,legend,1,yes
+750,Lilting Lullaby,spell,1,yes
+751,Alpha Strike,spell,1,yes
+752,Shadow,unit,2,yes
+753,Green Father,legend,1,yes
+754,Daisy!,unit,1,yes
+755,Moonfall,spell,1,no
+756,Deceiver,legend,1,yes
+757,Mirror Image,spell,1,yes
+758,Void Assault,spell,1,yes
+759,Keeper of the Hammer,legend,1,no
+760,Keeper's Verdict,spell,1,yes
+761,Abandoned Hall,battlefield,3,yes
+763,Amateur Recital,battlefield,4,no
+764,Black Flame Altar,battlefield,1,yes
+765,Dusk Rose Lab,battlefield,4,yes
+766,Forbidding Waste,battlefield,5,yes
+767,Forgotten Library,battlefield,1,yes
+769,Gardens of Becoming,battlefield,2,yes
+770,Ripper's Bay,battlefield,2,yes
+771,Star Spring,battlefield,6,no
+774,Valley of Idols,battlefield,1,no
+775,Vaults of Helia,battlefield,1,yes
+782,Virtuoso,legend,1,no
+783,Piltover Enforcer,legend,1,no
+785,Gloomist,legend,2,yes
+786,Scorn of the Moon,legend,1,no
+787,Voidreaver,legend,1,yes
+868,Onslaught,spell,1,yes
+870,Rampage,spell,1,yes

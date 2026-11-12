@@ -1,0 +1,13 @@
+id,name,signal,value,verdict,note
+666,Gentle Gemdragon,max_triggers_turn,13,plausible,"Each Dragon played triggers every Gemdragon; each readies up to 2 runes, which funds more Dragons. Bounded by the hand. Runes readied are the first found, no choice (same class as Targon's Peak in cards.csv)"
+91,Pit Crew,max_triggers_turn,11,ok,"Gold tokens are gear that is played (CR 183); each readies Pit Crew"
+449,Overzealous Fan,max_triggers_turn,10,plausible,"One trigger per defending Fan per combat (trigger_manager.cpp:461); several Fans over several combats. Attacker choice bug is in cards.csv"
+380,"Irelia, Fervent",max_triggers_turn,8,bug,"Fires on other friendly units being chosen, not on her (cards.csv)"
+326,Gold,max_activations_turn,6,ok,Several Gold tokens
+410,"Renata Glasc, Mastermind",max_activations_turn,6,ok,"[1][B]: Draw 1 is repeatable while paid; gate per object fixed (fuzz-findings #9)"
+365,Brutalizer,max_activations_turn,5,ok,"[Equip] [G] may be activated again to move it, each time paid"
+747,Death from Below,max_plays_turn,5,ok,"Replayable from trash for [A] while it kills a 3-Might-or-less unit"
+709,Baron Nashor,win_rate_delta,+0.27,not a rules signal,"Win rate when played vs the deck's own rate; a strong late card is played mostly when ahead. Correlation only"
+680,Elder Dragon,win_rate_delta,+0.19,bug (separate),"No choice of enemy unit per location (cards.csv)"
+160,Dazzling Aurora,win_rate_delta,+0.17,not a rules signal,Same caveat
+4,Cleave,win_rate_delta,-0.15,not a rules signal,Same caveat
