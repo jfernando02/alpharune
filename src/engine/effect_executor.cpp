@@ -1773,7 +1773,8 @@ void EffectExecutor::playIgnoringCost(PlayerId player, GameObjectId card,
     obj.controller = player;
 
     if (obj.isUnit()) {
-        obj.is_exhausted = true;
+        // Units enter exhausted (CR 143.4) unless "units you play this turn enter ready" (Confront).
+        obj.is_exhausted = !state_.player(player).units_enter_ready_this_turn;
         // A unit (re-)entering play is a fresh presence — clear any marked
         // damage carried from a prior life (e.g. banished-then-replayed by
         // Thrill of the Hunt). New plays from hand are already at 0, so this

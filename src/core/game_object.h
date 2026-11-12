@@ -1,4 +1,6 @@
 #pragma once
+#include <utility>
+#include <algorithm>
 /// @file game_object.h
 /// Runtime representation of a card/token on the board or in a zone.
 ///
@@ -332,6 +334,24 @@ struct GameObject {
         // Shield applies only while defending
         if (combat_designation == CombatDesignation::Defender) {
             current_might += shield_value;
+        }
+        // [Assault] / [Shield] given by auras and Equipment count like printed ones. One
+        // source gives one instance (the text-pattern aura pass and the card's own aura can
+        // both record it); instances from different sources add up.
+        if (combat_designation == CombatDesignation::Attacker ||
+            combat_designation == CombatDesignation::Defender) {
+            const Keyword k = combat_designation == CombatDesignation::Attacker ? Keyword::Assault
+                                                                               : Keyword::Shield;
+            std::vector<std::pair<GameObjectId, int>> per_source;
+            for (const auto& ae : aura_effects) {
+                if (ae.keyword != k) continue;
+                const int v = ae.keyword_value > 0 ? ae.keyword_value : 1;
+                auto it = std::find_if(per_source.begin(), per_source.end(),
+                                       [&](const auto& p) { return p.first == ae.source; });
+                if (it == per_source.end()) per_source.emplace_back(ae.source, v);
+                else it->second = std::max(it->second, v);
+            }
+            for (const auto& p : per_source) current_might += p.second;
         }
         // Apply aura minimums (e.g., Leona: -8M to minimum 1)
         for (auto& ae : aura_effects) {

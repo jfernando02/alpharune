@@ -201,6 +201,7 @@ struct PlayerState {
     int xp_gained_this_turn = 0;     // XP gained this turn (Wily Newtfish)
     int hold_points_this_turn = 0;   // points scored via Hold this turn (Needlessly Large Yordle)
     int draws_this_turn = 0;         // cards drawn this turn (Frigid Jewel "2nd card")
+    bool units_enter_ready_this_turn = false;   // Confront: "Units you play this turn enter ready."
     // A friendly unit died during THIS player's Beginning Phase this turn (Shadow Watcher).
     bool unit_died_in_beginning_this_turn = false;
     // Continuous-effect values (reset + recomputed during aura recompute; set by
@@ -356,6 +357,7 @@ struct PlayerState {
     int first_gear_ability_discount = 0;  // Piltovan Forge: first friendly gear ability each turn costs [N] less
 
     void resetTurnTracking() {
+        units_enter_ready_this_turn = false;
         cards_burned_this_turn = 0;
         cards_banished_this_turn = 0;
         chose_enemy_unit_this_turn = false;

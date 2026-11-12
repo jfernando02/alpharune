@@ -1443,6 +1443,76 @@ TEST_F(RestrictedPoolTest, RunePoolClearEmptiesRestrictedPools) {
     EXPECT_EQ(p.restrictedEnergyTotal(), 0);
 }
 
+// CR 820.1.c.3: each Repeat cost can be paid only a single time. The engine offered it again
+// after every payment (up to 32 times), so a spell's effect could run many extra times.
+TEST_F(CostPaymentRulesTest, ARepeatCostIsOfferedOnlyOnce) {
+    constexpr CardDefId kDesertsCall = 354;   // [Repeat] [2]: play a 2 [M] Sand Soldier token
+    makeEngine();
+    setLegend(P1); setLegend(P2);
+    s().turn.turn_player = P1;
+    s().turn.phase = TurnPhase::MainPhase;
+    s().turn.ns_state = NeutralShowdownState::Neutral;
+    s().turn.oc_state = OpenClosedState::Open;
+    for (int i = 0; i < 12; ++i) rune(P1, Domain::Calm);
+    auto spell = cardInHand(P1, kDesertsCall);
+    int repeat_offers = 0;
+    PickByPredicateAgent agent([&](int, const std::vector<Intent>& l) {
+        if (l.size() == 2 && l[0].type == IntentType::MakeChoice && l[0].chosen_value == 0 &&
+            l[1].chosen_value == 1) {
+            ++repeat_offers;
+            return l[1];   // pay
+        }
+        for (const auto& i : l)
+            if (i.type == IntentType::PassPriority) return i;
+        return l.front();
+    });
+    engine_->testHook_setAgents(&agent, &agent);
+    Intent play;
+    play.type = IntentType::PlayCard;
+    play.player = P1;
+    play.card = spell;
+    engine_->testHook_executeIntent(play);
+    EXPECT_EQ(repeat_offers, 1);
+    int soldiers = 0;
+    for (const auto& [id, o] : s().objects)
+        if (o.name == "Sand Soldier" && o.location.has_value()) ++soldiers;
+    EXPECT_EQ(soldiers, 2) << "the effect once, then once more for the Repeat";
+}
+
+// Sacrifice: "As an additional cost to play this, kill a friendly [Mighty] unit." The unit was
+// killed when the spell resolved, so a countered Sacrifice kept it (card audit).
+TEST_F(CostPaymentRulesTest, SacrificeKillsItsUnitAsItIsPlayed) {
+    constexpr CardDefId kSacrifice = 735;   // [1], Order
+    makeEngine();
+    setLegend(P1); setLegend(P2);
+    s().turn.turn_player = P1;
+    s().turn.phase = TurnPhase::MainPhase;
+    s().turn.ns_state = NeutralShowdownState::Neutral;
+    s().turn.oc_state = OpenClosedState::Open;
+    rune(P1, Domain::Order);
+    auto mighty = engineUnit(P1, /*might=*/5);
+    auto spell = cardInHand(P1, kSacrifice);
+    int priority_seen = 0, dead_at_priority = 0;
+    PickByPredicateAgent agent([&](int, const std::vector<Intent>& l) {
+        for (const auto& i : l)
+            if (i.type == IntentType::PassPriority) {
+                ++priority_seen;
+                if (!s().getObject(mighty).location.has_value()) ++dead_at_priority;
+                return i;
+            }
+        return l.front();
+    });
+    engine_->testHook_setAgents(&agent, &agent);
+    Intent play;
+    play.type = IntentType::PlayCard;
+    play.player = P1;
+    play.card = spell;
+    engine_->testHook_executeIntent(play);
+    ASSERT_GE(priority_seen, 1);
+    EXPECT_EQ(dead_at_priority, priority_seen) << "the cost is paid before anyone can respond";
+    EXPECT_FALSE(s().getObject(mighty).location.has_value());
+}
+
 TEST_F(RestrictedPoolTest, RepeatCostRecyclesRunesToTheRuneDeck) {
     makeEngine();
     setLegend(P1); setLegend(P2);

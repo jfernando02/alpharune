@@ -17,13 +17,8 @@ public:
     // "I have [Assault] equal to the number of enemy units here. (+1 [M] while
     //  I'm an attacker for each instance of Assault.)" ([Accelerate] engine-handled.)
     //
-    // Aura-granted Assault keyword_value is NOT summed into might by the engine
-    // (recomputeMight only adds the dedicated assault_value field, and the aura
-    // aggregation sets keyword presence only). So we grant the Assault keyword
-    // for presence AND model the variable magnitude directly as a might_bonus,
-    // applied only while I'm designated the attacker — matching Assault's
-    // "while attacking" timing. Auras recalc each cleanup, so this tracks the
-    // live enemy count and clears when I'm no longer attacking.
+    // Assault N with N = the live enemy count (auras recalculate each cleanup); recomputeMight
+    // adds it while I'm an attacker.
     void applyPassiveAura(GameState& state, PlayerId controller) const override {
         for (auto& [sid, self] : state.objects) {
             if (self.card_def_id != cardDefId() || self.controller != controller) continue;
@@ -34,11 +29,11 @@ public:
                 if (!tgt.isUnit() || tgt.controller == controller) continue;
                 if (tgt.battlefieldId() == my_bf) ++enemies;
             }
+            if (enemies == 0) continue;   // [Assault] equal to 0: none
             GameObject::AuraEffect ae;
             ae.source = sid;
             ae.keyword = Keyword::Assault;
-            if (self.combat_designation == CombatDesignation::Attacker)
-                ae.might_bonus = enemies;  // +1 [M] per Assault while attacking
+            ae.keyword_value = enemies;   // +1 [M] per instance while attacking (recomputeMight)
             self.aura_effects.push_back(ae);
         }
     }
@@ -59,9 +54,7 @@ private:
         d.energy_cost = 5;
         d.might = 4;
         d.rarity = Rarity::Uncommon;
-        d.assault_value = 1;
         d.keywords.set(Keyword::Accelerate);
-        d.keywords.set(Keyword::Assault);
         d.ability_text = R"RB([Accelerate] (You may pay [1][P] as an additional cost to have me enter ready.)
 I have [Assault] equal to the number of enemy units here. (+1 [M] while I'm an attacker for each instance of Assault.))RB";
         d.image_url = R"RB(https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/8ba05afcfbe6901fb4bdb736d5e61656a551f668-744x1039.png?accountingTag=RB)RB";

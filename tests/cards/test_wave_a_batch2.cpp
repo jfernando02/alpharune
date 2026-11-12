@@ -134,9 +134,8 @@ TEST_F(RagingSoulTest, AssaultAddsMightWhileAttacking) {
 
     card_registry.get(kRagingSoul)->applyPassiveAura(state, P1);
 
-    int aura_might = 0;
-    for (const auto& ae : state.getObject(soul).aura_effects) aura_might += ae.might_bonus;
-    EXPECT_EQ(aura_might, 1) << "Assault confers +1 [M] while attacking";
+    state.getObject(soul).recomputeMight();
+    EXPECT_EQ(state.getObject(soul).current_might, 5) << "Assault confers +1 [M] while attacking";
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

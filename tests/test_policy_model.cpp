@@ -108,7 +108,7 @@ TEST_F(PolicyModelTest, EncodingIsSortedAndMarksTheAction) {
             ++checked;
         }
     }
-    EXPECT_GT(checked, 500);
+    EXPECT_GT(checked, 400);   // sample size of the 300 decisions; changes with the rules
     EXPECT_EQ(ml::policyFeatureNames(*db_).size(), static_cast<size_t>(ml::kPolicyFeatureDim));
 }
 

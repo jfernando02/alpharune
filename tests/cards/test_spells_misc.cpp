@@ -210,6 +210,51 @@ TEST_F(ShadowsCallTest, GivesTemporaryToTargetAndDrawsTwo) {
     EXPECT_EQ(handSize(P1), initial_hand + 2);
 }
 
+// "Give it [Temporary]" has no duration. It was a "this turn" grant that expired before the
+// controller's Beginning Phase, so the unit was never killed (card audit).
+TEST_F(ShadowsCallTest, TemporaryIsNotAThisTurnGrantAndSkipsTemporaryUnits) {
+    auto unit = addUnit(P1, kInvalidId, /*might=*/3, /*at_bf=*/0);
+    auto already = addUnit(P1, kInvalidId, /*might=*/3, /*at_bf=*/0);
+    state.getObject(already).keywords.set(Keyword::Temporary);
+    auto legal = card_registry.get(kShadowsCall)->enumerateLegalTargets(state, P1);
+    EXPECT_EQ(legal, std::vector<GameObjectId>{unit}) << "a friendly unit without [Temporary]";
+    auto src = state.createObject();
+    state.getObject(src).owner = state.getObject(src).controller = P1;
+    EffectExecutor exec(state, events, card_db);
+    invokeOnResolve(src, kShadowsCall, P1, {unit}, exec);
+    EXPECT_TRUE(state.getObject(unit).hasKeyword(Keyword::Temporary));
+    EXPECT_FALSE(state.getObject(unit).temp_keywords.has(Keyword::Temporary))
+        << "not removed at the end of the turn";
+}
+
+// Confront: "Units you play this turn enter ready. Draw 1." The first part was missing.
+TEST_F(ShadowsCallTest, ConfrontMakesUnitsPlayedThisTurnEnterReady) {
+    constexpr CardDefId kConfront = 129;
+    addToDeck(P1, kInvalidId);
+    auto src = state.createObject();
+    state.getObject(src).owner = state.getObject(src).controller = P1;
+    EffectExecutor exec(state, events, card_db);
+    invokeOnResolve(src, kConfront, P1, {}, exec);
+    auto unit = addToHand(P1, 132);   // First Mate
+    auto& hand = state.player(P1).hand;
+    hand.erase(std::find(hand.begin(), hand.end(), unit));
+    exec.playIgnoringCost(P1, unit);
+    EXPECT_FALSE(state.getObject(unit).is_exhausted) << "played this turn: enters ready";
+    state.player(P1).resetTurnTracking();
+    EXPECT_FALSE(state.player(P1).units_enter_ready_this_turn) << "only this turn";
+}
+
+// Deadly Flourish: "Deal 3 to an enemy unit." It could hit a friendly unit and was marked
+// [Reaction] (that word belongs to the Gold token's reminder text).
+TEST_F(ShadowsCallTest, DeadlyFlourishTargetsOnlyEnemiesAndIsNotAReaction) {
+    constexpr CardDefId kDeadlyFlourish = 635;
+    addUnit(P1, kInvalidId, 3, 0);
+    auto enemy = addUnit(P2, kInvalidId, 3, 0);
+    EXPECT_EQ(card_registry.get(kDeadlyFlourish)->enumerateLegalTargets(state, P1),
+              std::vector<GameObjectId>{enemy});
+    EXPECT_FALSE(card_db.get(kDeadlyFlourish).keywords.has(Keyword::Reaction));
+}
+
 TEST_F(ShadowsCallTest, DrawsTwoEvenWithoutTarget) {
     addToDeck(P1, kInvalidId);
     addToDeck(P1, kInvalidId);

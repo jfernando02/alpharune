@@ -69,13 +69,13 @@ TEST_F(CardTestFixture, CaptainFarron_AssaultMightOnlyWhileAttacking) {
     state.getObject(ally).combat_designation = CombatDesignation::Attacker;
 
     card_registry.get(kCaptainFarron)->applyPassiveAura(state, P1);
-    EXPECT_EQ(auraMight(state.getObject(ally)), 1) << "+1 [M] while attacking";
+    state.getObject(ally).recomputeMight();
+    EXPECT_EQ(state.getObject(ally).current_might, 4) << "+1 [M] while attacking";
 
-    // Re-run with the ally not attacking → keyword present, no might bump.
-    state.getObject(ally).aura_effects.clear();
+    // The ally not attacking: keyword present, no Might.
     state.getObject(ally).combat_designation = CombatDesignation::None;
-    card_registry.get(kCaptainFarron)->applyPassiveAura(state, P1);
-    EXPECT_EQ(auraMight(state.getObject(ally)), 0);
+    state.getObject(ally).recomputeMight();
+    EXPECT_EQ(state.getObject(ally).current_might, 3);
 }
 
 // ─── [55] Wielder of Water — "attacking or defending alone, +2 [M]." ────────

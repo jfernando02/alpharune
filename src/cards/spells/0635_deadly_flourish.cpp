@@ -16,7 +16,7 @@ class DeadlyFlourish : public SpellCard {
 public:
     const CardDef& def() const override { return def_; }
     TargetRequirements getTargetRequirements() const override {
-        return TargetRequirements{.count = 1, .must_be_unit = true};
+        return TargetRequirements{.count = 1, .must_be_unit = true, .must_be_enemy = true};   // "an enemy unit"
     }
     // Phase 6q — defer target selection so the policy head gets
     // distinct vocab slots per target choice.
@@ -78,7 +78,6 @@ private:
         d.domains = {Domain::Mind};
         d.energy_cost = 4;
         d.rarity = Rarity::Uncommon;
-        d.keywords.set(Keyword::Reaction);
         d.ability_text = R"RB(Deal 3 to an enemy unit. When it dies this turn, play a Gold gear token exhausted. (It has "[Reaction][>] Kill this, [E]: [Add] [A]."))RB";
         d.image_url = R"RB(https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/81195df7122beaba38ebc8b8212ceb0e7593afe9-744x1039.png?accountingTag=RB)RB";
         return d;

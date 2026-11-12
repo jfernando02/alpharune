@@ -112,8 +112,6 @@ private:
         d.energy_cost = 4;
         d.might = 4;
         d.rarity = Rarity::Rare;
-        d.assault_value = 1;
-        d.keywords.set(Keyword::Assault);
         d.ability_text = R"RB(Your Mechs each have [Assault]. (+1 [M] while we're attackers.)
 When I conquer, you may recycle another friendly unit to play a Mech from your trash. Reduce its Energy cost by the Might of the unit you recycled.)RB";
         d.image_url = R"RB(https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/e211311ecb1475e87d3d94eba4a6774b4e900091-744x1039.png)RB";

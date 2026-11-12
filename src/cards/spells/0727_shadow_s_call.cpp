@@ -19,6 +19,14 @@ public:
         return TargetRequirements{.count = 1, .must_be_unit = true,
                                    .must_be_friendly = true};
     }
+    // "Choose a friendly unit without [Temporary]."
+    std::vector<GameObjectId> enumerateLegalTargets(const GameState& state,
+                                                    PlayerId controller) const override {
+        std::vector<GameObjectId> out;
+        for (auto id : Card::enumerateLegalTargets(state, controller))
+            if (!state.getObject(id).hasKeyword(Keyword::Temporary)) out.push_back(id);
+        return out;
+    }
     // Phase 6q proof-of-concept (single friendly-unit target).
     bool needsPlayTimeTarget() const override { return true; }
     void onResolve(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
@@ -35,8 +43,11 @@ public:
             ctx.state.chain.resuming->resume_point == 7) {
             return;  // suspended for agent decision
         }
+        // "Give it [Temporary]" has no duration: it keeps it (a "this turn" grant expired
+        // before its controller's Beginning Phase, so the unit was never killed).
         if (picked != kInvalidId && ctx.state.objectExists(picked)) {
-            ctx.executor.giveTemporaryKeyword(picked, Keyword::Temporary, 0);
+            ctx.state.getObject(picked).keywords.set(Keyword::Temporary);
+            ctx.events.logTrace("EFFECT: give " + ctx.state.getObject(picked).name + " [Temporary]");
         }
         ctx.executor.drawCards(ctx.controller, 2);
     }
@@ -55,7 +66,6 @@ private:
         d.domains = {Domain::Order};
         d.energy_cost = 2;
         d.rarity = Rarity::Uncommon;
-        d.keywords.set(Keyword::Temporary);
         d.ability_text = R"RB(Choose a friendly unit without [Temporary]. Give it [Temporary]. Draw 2. (Kill it at the start of its controller's Beginning Phase, before scoring.))RB";
         d.image_url = R"RB(https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/5a9a81d353131fc275313e737d55ca6e2661dce6-744x1039.png)RB";
         return d;

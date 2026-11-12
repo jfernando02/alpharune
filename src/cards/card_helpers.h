@@ -255,14 +255,6 @@ inline void counterChainTop(CardContext& ctx) {
 }
 
 // ── Gold tokens ──
-inline void createGoldToken(CardContext& ctx) {
-    auto loc = BaseLocation{ctx.controller};
-    auto tid = ctx.executor.createToken(ctx.controller, CardType::Gear, "Gold",
-                                        0, {"Gold"}, KeywordSet{}, loc, false);
-    if (ctx.state.objectExists(tid))
-        ctx.state.getObject(tid).card_def_id = kGoldGearCardDefId;
-}
-
 // `player` (default: the effect's controller) plays the Gold token exhausted.
 inline GameObjectId createGoldExhausted(CardContext& ctx, PlayerId player = PlayerId::None) {
     if (player == PlayerId::None) player = ctx.controller;
@@ -277,6 +269,9 @@ inline GameObjectId createGoldExhausted(CardContext& ctx, PlayerId player = Play
     }
     return tok;
 }
+
+// "Play a Gold gear token exhausted." -- every card that plays Gold says exhausted.
+inline void createGoldToken(CardContext& ctx) { createGoldExhausted(ctx); }
 
 // ── Misc ──
 inline GameObjectId findMostRecentlyPlayedSpell(const GameState& state, PlayerId player) {

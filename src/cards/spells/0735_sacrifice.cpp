@@ -15,7 +15,6 @@ namespace {
 class Sacrifice : public SpellCard {
 public:
     const CardDef& def() const override { return def_; }
-    bool needsPlayTimeTarget() const override { return true; }
     TargetRequirements getTargetRequirements() const override {
         return TargetRequirements{.count = 1, .must_be_unit = true,
                                    .must_be_friendly = true};
@@ -34,15 +33,21 @@ public:
     bool hasLegalTargets(const GameState& state, PlayerId controller) const override {
         return !enumerateLegalTargets(state, controller).empty();
     }
+    // "As an additional cost to play this, kill a friendly [Mighty] unit": chosen and paid as
+    // the spell is played (its finalization), so a countered Sacrifice still cost the unit.
+    unsigned choicesAtFinalization() const override { return kFinalizeResolve; }
     void onResolve(CardContext& ctx, const std::vector<GameObjectId>&) override {
-        auto legal = enumerateLegalTargets(ctx.state, ctx.controller);
-        GameObjectId victim = pickTarget(ctx, "Sacrifice: kill a Mighty unit", legal);
-        if (victim == kInvalidId) return;  // no Mighty unit / suspended
-        if (!ctx.state.objectExists(victim)) return;
-        ctx.executor.killObject(victim);  // additional cost paid
+        if (!costAlreadyPaid(ctx)) {
+            GameObjectId victim = pickTarget(ctx, "Sacrifice: kill a friendly Mighty unit",
+                                             enumerateLegalTargets(ctx.state, ctx.controller));
+            if (ctx.executor.hasPendingChoice()) return;   // waiting for the choice
+            if (victim == kInvalidId || !ctx.state.objectExists(victim)) return;   // can't pay
+            if (costDueNow(ctx)) ctx.executor.killObject(victim);
+        }
+        if (finalizingChoices(ctx)) return;   // choices and costs end here (CR 383.3)
         ctx.executor.drawCards(ctx.controller, 2);
         ctx.executor.channelRunes(ctx.controller, 1, /*enter_exhausted=*/true);
-        ctx.events.logTrace("SACRIFICE: killed a Mighty unit -> draw 2 + channel 1");
+        ctx.events.logTrace("SACRIFICE: draw 2 + channel 1 exhausted");
     }
 private:
     const CardDef def_ = [] {

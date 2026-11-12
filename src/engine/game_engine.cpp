@@ -2197,8 +2197,9 @@ void GameEngine::executePlaySpell(const Intent& intent) {
         repeat_cost.energy = std::max(0, repeat_cost.energy - ps.repeat_cost_reduction);
     }
     if (repeat_cost.valid) {
-        constexpr int kRepeatSafetyCap = 32;
-        while (repeats < kRepeatSafetyCap &&
+        // CR 820.1.c.3: each Repeat cost can be paid only a single time (the spell has one).
+        constexpr int kRepeatInstances = 1;
+        while (repeats < kRepeatInstances &&
                canPayAdditionalCost(intent.player,
                                      repeat_cost.energy,
                                      repeat_cost.power,
@@ -2534,6 +2535,8 @@ void GameEngine::resolvePermanent(const ChainItem& item) {
                 if (cdef->entersReadyOnPlay(state_, card.controller, card)) enters_ready = true;
             }
         }
+        // "Units you play this turn enter ready." (Confront)
+        if (state_.player(card.controller).units_enter_ready_this_turn) enters_ready = true;
         // Another card of the controller's (on the board or in the Legend Zone)
         // makes it enter ready (Card::grantsEnterReadyTo).
         if (!enters_ready) {

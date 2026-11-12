@@ -451,6 +451,32 @@ TEST_F(AuditFix2Test, LastRites_TriggerNoOpWithNoTrashUnit) {
     EXPECT_EQ(trashSize(P1), 1) << "no playable unit -> nothing happens";
 }
 
+// "(You still pay its costs.)" The unit was played free. First Mate costs [3]: with no runes it
+// stays in the trash; with three ready runes it is played and the runes pay for it.
+TEST_F(AuditFix2Test, LastRites_TriggerChargesTheUnitsCost) {
+    constexpr CardDefId kFirstMate = 132;   // [3], Body
+    auto bearer = addUnit(P1, kInvalidId, /*might=*/3, /*at_bf=*/0);
+    auto gear = addGear(P1, kLastRites);
+    auto mate = addToDeck(P1, kFirstMate);
+    auto& ps = state.player(P1);
+    ps.main_deck.erase(std::find(ps.main_deck.begin(), ps.main_deck.end(), mate));
+    ps.trash.push_back(mate);
+    state.getObject(mate).zone = ZoneType::Trash;
+
+    EffectExecutor exec(state, events, card_db);
+    Card* c = card_registry.get(kLastRites);
+    CardContext ctx{state, events, exec, P1, gear};
+    c->onEquippedTrigger(ctx, bearer, {});
+    EXPECT_TRUE(inTrash(P1, mate)) << "no runes: it can't be paid, so it is not played";
+
+    std::vector<GameObjectId> runes;
+    for (int i = 0; i < 3; ++i) runes.push_back(addRune(P1, Domain::Body));
+    c->onEquippedTrigger(ctx, bearer, {});
+    EXPECT_FALSE(inTrash(P1, mate));
+    EXPECT_TRUE(state.getObject(mate).location.has_value());
+    for (auto r : runes) EXPECT_TRUE(state.getObject(r).is_exhausted) << "the runes paid [3]";
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // [531] Seat of Power — draw 1 per OTHER battlefield you control.
 // ═══════════════════════════════════════════════════════════════════════════
