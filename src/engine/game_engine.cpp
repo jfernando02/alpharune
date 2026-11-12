@@ -1563,8 +1563,7 @@ void GameEngine::chooseTargetsAtFinalize(ChainItem& item) {
     if (item.hidden_at.has_value() && card->hiddenPlayRestrictsTargets()) {
         std::vector<GameObjectId> here;
         for (auto t : legal)
-            if (state_.objectExists(t) && state_.getObject(t).battlefieldId() == item.hidden_at)
-                here.push_back(t);
+            if (state_.choosableFromHiddenAt(t, *item.hidden_at)) here.push_back(t);
         legal = std::move(here);
         if (legal.empty()) return;
     }
@@ -3515,11 +3514,8 @@ void GameEngine::appendHiddenPlays(PlayerId player, std::vector<Intent>& actions
                 ? card_registry_.get(card.card_def_id) : nullptr;
             if (card_obj && card_obj->getTargetRequirements().count > 0) {
                 std::vector<GameObjectId> bf_targets;
-                for (auto t : card_obj->enumerateLegalTargets(state_, player)) {
-                    if (!state_.objectExists(t)) continue;
-                    if (state_.getObject(t).battlefieldId() == std::optional<BattlefieldId>(bf.id))
-                        bf_targets.push_back(t);
-                }
+                for (auto t : card_obj->enumerateLegalTargets(state_, player))
+                    if (state_.choosableFromHiddenAt(t, bf.id)) bf_targets.push_back(t);
                 if (bf_targets.empty() && card_obj->hiddenPlayRestrictsTargets()) continue;
                 if (card_obj->needsPlayTimeTarget() || card_obj->needsPlayTimeTargetPair()) {
                     actions.push_back(play);

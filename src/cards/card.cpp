@@ -351,8 +351,7 @@ std::vector<GameObjectId> restrictToHiddenBattlefield(const CardContext& ctx, co
         return legal;
     std::vector<GameObjectId> out;
     for (auto id : legal)
-        if (ctx.state.objectExists(id) && ctx.state.getObject(id).battlefieldId() == ri->hidden_at)
-            out.push_back(id);
+        if (ctx.state.choosableFromHiddenAt(id, *ri->hidden_at)) out.push_back(id);
     return out;
 }
 }  // namespace

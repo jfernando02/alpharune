@@ -407,7 +407,7 @@ private:
         const auto name = [&] { return s.objectExists(it.source) ? s.getObject(it.source).name : "?"; };
         auto atHidden = [&](GameObjectId id) {
             return !it.hidden_at || !card->hiddenPlayRestrictsTargets() ||
-                   (s.objectExists(id) && s.getObject(id).battlefieldId() == it.hidden_at);
+                   s.choosableFromHiddenAt(id, *it.hidden_at);
         };
         if (it.is_ability && !it.is_activated_ability && it.targets.empty() &&
             !(card->choicesAtFinalization() & Card::kFinalizeTrigger) &&

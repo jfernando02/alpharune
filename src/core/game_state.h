@@ -834,6 +834,18 @@ struct GameState {
         return objects.find(id) != objects.end();
     }
 
+    /// CR 811.1.d: a card played from facedown at `bf` chooses objects on the board at that
+    /// battlefield, and that battlefield itself (its card object). Objects off the board (a
+    /// card in a hand: Bone Skewer, 811.1.d.5) are not restricted.
+    bool choosableFromHiddenAt(GameObjectId id, BattlefieldId bf) const {
+        auto it = objects.find(id);
+        if (it == objects.end()) return false;
+        for (const auto& b : battlefields)
+            if (b.card_object_id == id) return b.id == bf;
+        if (!it->second.location.has_value()) return true;
+        return it->second.battlefieldId() == std::optional<BattlefieldId>(bf);
+    }
+
     // ── Player access ──
 
     PlayerState& player(PlayerId id) {

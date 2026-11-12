@@ -2320,5 +2320,26 @@ TEST_F(HiddenPlayTest, BlastconeFaesPlayEffectChoosesAtItsBattlefield) {
     EXPECT_EQ(s().getObject(fae).card_counters["__played_from_facedown"], 1);
 }
 
+// Bone Skewer chooses a battlefield and a unit in the opponent's hand, which is played there.
+// From facedown the battlefield is the one it was hidden at; the card in hand is not "at" a
+// battlefield and is not restricted (811.1.d.5). The first version of the restriction removed
+// both choices, so the spell did nothing (card audit, batch 5).
+TEST_F(HiddenPlayTest, BoneSkewerFromFacedownPlaysTheHandUnitAtItsBattlefield) {
+    mainPhase();
+    s().turn.turn_number = 5;
+    for (auto& bf : s().battlefields) {
+        auto id = s().createObject();
+        s().getObject(id).name = "Battlefield";
+        bf.card_object_id = id;
+    }
+    auto skewer = hide(P1, 701, 0);
+    auto unit = cardInHand(P2, 132);   // a unit in the opponent's hand
+    auto plays = hiddenPlaysOf(skewer);
+    ASSERT_EQ(plays.size(), 1u);
+    playHidden(plays[0], {s().battlefields[1].card_object_id, unit});
+    EXPECT_FALSE(wasOffered(s().battlefields[1].card_object_id));
+    EXPECT_EQ(s().getObject(unit).battlefieldId(), std::optional<BattlefieldId>(0));
+}
+
 }  // namespace
 }  // namespace riftbound::test
