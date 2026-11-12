@@ -16,6 +16,12 @@ class ViPeacekeeper : public UnitCard {
 public:
     const CardDef& def() const override { return def_; }
     TriggerType triggerType() const override { return TriggerType::WhenIAttack; }
+    // The target of my triggered ability: "an enemy unit here" (CR 383.3).
+    using Card::enumerateLegalTargets;
+    std::vector<GameObjectId> enumerateLegalTargets(const GameState& state, PlayerId controller,
+                                                    int ability_index, GameObjectId source) const override {
+        return keepHere(state, source, Card::enumerateLegalTargets(state, controller, ability_index, source));
+    }
     TargetRequirements getTargetRequirements() const override {
         return TargetRequirements{.count = 1, .must_be_unit = true,
                                    .must_be_enemy = true,

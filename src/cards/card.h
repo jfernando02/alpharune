@@ -48,6 +48,10 @@ struct CardContext {
     const CardRegistry* registry = nullptr;
 };
 
+/// The ability index the engine passes to the 4-argument enumerateLegalTargets
+/// when it chooses the target of a card's triggered ability (CR 383.3).
+inline constexpr int kTriggerAbilityIndex = -1;
+
 // ─── Card base class ────────────────────────────────────────────────────────
 
 class Card {

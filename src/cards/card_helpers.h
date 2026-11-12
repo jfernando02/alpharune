@@ -91,6 +91,30 @@ inline std::optional<BattlefieldId> battlefieldOfCard(const GameState& state,
         if (bf.card_object_id == card_object) return bf.id;
     return std::nullopt;
 }
+/// "Here" for an ability of `source`: the battlefield it is at, or for a
+/// battlefield card, that battlefield. nullopt when it is not at one.
+inline std::optional<BattlefieldId> battlefieldHere(const GameState& state,
+                                                    GameObjectId source) {
+    if (!state.objectExists(source)) return std::nullopt;
+    if (auto bf = battlefieldOfCard(state, source)) return bf;
+    return state.getObject(source).battlefieldId();
+}
+/// Keeps the objects at `source`'s battlefield ("an enemy unit here").
+inline std::vector<GameObjectId> keepHere(const GameState& state, GameObjectId source,
+                                          std::vector<GameObjectId> ids) {
+    const auto here = battlefieldHere(state, source);
+    std::vector<GameObjectId> out;
+    if (!here) return out;
+    for (auto id : ids)
+        if (state.objectExists(id) && state.getObject(id).battlefieldId() == here)
+            out.push_back(id);
+    return out;
+}
+/// Drops `source` itself ("another unit").
+inline std::vector<GameObjectId> dropSource(GameObjectId source, std::vector<GameObjectId> ids) {
+    ids.erase(std::remove(ids.begin(), ids.end(), source), ids.end());
+    return ids;
+}
 /// Combat damage `player` assigned beyond lethal in their combat at `bf` this
 /// turn — 0 if their most recent combat was somewhere else (or there was none).
 inline int excessCombatDamageAt(const GameState& state, PlayerId player, BattlefieldId bf) {

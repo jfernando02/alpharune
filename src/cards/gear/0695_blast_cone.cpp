@@ -22,33 +22,11 @@ public:
     }
     void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& targets) override {
         if (!ctx.state.objectExists(ctx.source)) return;
-        auto find_enemy = [&]() -> GameObjectId {
-            for (auto& [id, obj] : ctx.state.objects) {
-                if (!obj.isUnit() || obj.controller == ctx.controller) continue;
-                if (!obj.location.has_value()) continue;
-                if (obj.untargetable_by_enemy) continue;
-                return id;
-            }
-            return kInvalidId;
-        };
-        auto move_legal = [&]() {
-            if (!targets.empty())
-                return ctx.state.objectExists(targets[0]) &&
-                       ctx.state.getObject(targets[0]).location.has_value();
-            return find_enemy() != kInvalidId;
-        };
-        if (!move_legal()) return;
-        int conf = confirmOptional(ctx, "Blast Cone: move an enemy unit?", move_legal);
-        if (conf != 1) return;
-
-        GameObjectId moved = kInvalidId;
-        if (!targets.empty() && ctx.state.objectExists(targets[0]) &&
-            ctx.state.getObject(targets[0]).controller != ctx.controller) {
-            moved = targets[0];
-        } else {
-            moved = find_enemy();
-        }
-        if (moved == kInvalidId) return;
+        // "You may move an enemy unit": the engine offered the enemy units, and
+        // declining, as this ability was played (an optional target).
+        if (targets.empty() || !ctx.state.objectExists(targets[0])) return;
+        const GameObjectId moved = targets[0];
+        if (!ctx.state.getObject(moved).location.has_value()) return;
         ctx.executor.moveToBase(moved);
         ctx.events.logTrace("BLAST CONE: moved enemy on play");
 

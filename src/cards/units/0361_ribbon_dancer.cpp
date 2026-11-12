@@ -1,4 +1,5 @@
 #include "cards/card.h"
+#include "cards/card_helpers.h"
 #include "cards/card_registry.h"
 #include "core/game_state.h"
 #include "core/events.h"
@@ -19,6 +20,12 @@ public:
             ctx.executor.giveTemporaryMight(targets[0], 1);
     }
     TriggerType triggerType() const override { return TriggerType::WhenIMoveToFB; }
+    // The target of my triggered ability: "another friendly unit" (CR 383.3).
+    using Card::enumerateLegalTargets;
+    std::vector<GameObjectId> enumerateLegalTargets(const GameState& state, PlayerId controller,
+                                                    int ability_index, GameObjectId source) const override {
+        return dropSource(source, Card::enumerateLegalTargets(state, controller, ability_index, source));
+    }
     TargetRequirements getTargetRequirements() const override {
         return TargetRequirements{.count = 1, .must_be_unit = true, .must_be_friendly = true};
     }

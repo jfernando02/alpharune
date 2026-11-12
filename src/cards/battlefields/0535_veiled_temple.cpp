@@ -37,7 +37,7 @@ public:
     }
     TriggerType triggerType() const override { return TriggerType::WhenYouConquerHere; }
     TargetRequirements getTargetRequirements() const override {
-        return TargetRequirements{.count = 1, .must_be_gear = true, .must_be_friendly = true};
+        return TargetRequirements{.count = 1, .must_be_gear = true, .must_be_friendly = true, .optional = true};
     }
 private:
     const CardDef def_ = [] {

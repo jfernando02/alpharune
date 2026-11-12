@@ -1,4 +1,5 @@
 #include "cards/card.h"
+#include "cards/card_helpers.h"
 #include "cards/card_registry.h"
 #include "core/game_state.h"
 #include "core/events.h"
@@ -15,10 +16,17 @@ class YuumiMagicalCat : public UnitCard {
 public:
     const CardDef& def() const override { return def_; }
     void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& targets) override {
-        if (!targets.empty())
-            ctx.executor.giveTemporaryMight(targets[0], 3);
+        if (targets.empty()) return;
+        ctx.executor.giveTemporaryMight(targets[0], 3);
+        ctx.executor.giveTemporaryKeyword(targets[0], Keyword::Tank, 0);
     }
     TriggerType triggerType() const override { return TriggerType::WhenIAttackOrDefend; }
+    // The target of my triggered ability: "one of your other units here" (CR 383.3).
+    using Card::enumerateLegalTargets;
+    std::vector<GameObjectId> enumerateLegalTargets(const GameState& state, PlayerId controller,
+                                                    int ability_index, GameObjectId source) const override {
+        return dropSource(source, keepHere(state, source, Card::enumerateLegalTargets(state, controller, ability_index, source)));
+    }
     TargetRequirements getTargetRequirements() const override {
         return TargetRequirements{.count = 1, .must_be_unit = true, .must_be_friendly = true, .must_be_at_battlefield = true};
     }

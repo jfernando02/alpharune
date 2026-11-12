@@ -28,7 +28,7 @@ class VoidBurrower : public LegendCard {
 public:
     const CardDef& def() const override { return def_; }
     TargetRequirements getTargetRequirements() const override {
-        return TargetRequirements{.count = 1, .must_be_unit = true};
+        return {};   // no target: it reveals cards
     }
     TriggerType triggerType() const override { return TriggerType::WhenIConquer; }
 

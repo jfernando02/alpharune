@@ -1,4 +1,5 @@
 #include "cards/card.h"
+#include "cards/card_helpers.h"
 #include "cards/card_registry.h"
 #include "core/game_state.h"
 #include "core/events.h"
@@ -24,6 +25,12 @@ public:
         }
     }
     TriggerType triggerType() const override { return TriggerType::WhenIAttack; }
+    // The target of my triggered ability: "an enemy unit here" (CR 383.3).
+    using Card::enumerateLegalTargets;
+    std::vector<GameObjectId> enumerateLegalTargets(const GameState& state, PlayerId controller,
+                                                    int ability_index, GameObjectId source) const override {
+        return keepHere(state, source, Card::enumerateLegalTargets(state, controller, ability_index, source));
+    }
     TargetRequirements getTargetRequirements() const override {
         return TargetRequirements{.count = 1, .must_be_unit = true, .must_be_enemy = true, .must_be_at_battlefield = true};
     }

@@ -20,7 +20,7 @@ public:
     }
     TriggerType triggerType() const override { return TriggerType::WhenYouHoldHere; }
     TargetRequirements getTargetRequirements() const override {
-        return TargetRequirements{.count = 1, .must_be_unit = true, .must_be_at_battlefield = true};
+        return TargetRequirements{.count = 1, .must_be_unit = true, .must_be_at_battlefield = true, .optional = true};
     }
 private:
     const CardDef def_ = [] {

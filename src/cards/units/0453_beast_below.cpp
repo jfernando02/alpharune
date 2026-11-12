@@ -14,14 +14,40 @@ namespace {
 class BeastBelow : public UnitCard {
 public:
     const CardDef& def() const override { return def_; }
-    void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& targets) override {
-        if (!targets.empty())
-            ctx.executor.bounceToHand(targets[0]);
+    // "When you play me, return another friendly unit and an enemy unit to their
+    // owners' hands." Both are chosen as the ability is played (CR 383.3); the
+    // engine used to give it no targets, and before that only one was returned.
+    unsigned choicesAtFinalization() const override { return kFinalizeTrigger; }
+    void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
+        auto units = [&](bool friendly) {
+            std::vector<GameObjectId> out;
+            for (const auto& [id, obj] : ctx.state.objects) {
+                if (!obj.isUnit() || !obj.location.has_value() || id == ctx.source) continue;
+                if ((obj.controller == ctx.controller) != friendly) continue;
+                if (!friendly && obj.untargetable_by_enemy) continue;
+                out.push_back(id);
+            }
+            return out;
+        };
+        GameObjectId mine = kInvalidId, theirs = kInvalidId;
+        const auto friends = units(true);
+        if (!friends.empty()) {
+            auto picked = pickTargetPair(ctx, "Beast Below: return which friendly unit, then which enemy unit",
+                                         friends, [&](GameObjectId) { return units(false); });
+            if (ctx.executor.hasPendingChoice()) return;
+            mine = picked.first;
+            theirs = picked.second;
+        } else {
+            theirs = pickTarget(ctx, "Beast Below: return which enemy unit", units(false));
+            if (ctx.executor.hasPendingChoice()) return;
+        }
+        if (finalizingChoices(ctx)) return;   // choices end here (CR 383.3)
+        for (GameObjectId u : {mine, theirs})
+            if (u != kInvalidId && ctx.state.objectExists(u) &&
+                ctx.state.getObject(u).location.has_value())
+                ctx.executor.bounceToHand(u);
     }
     TriggerType triggerType() const override { return TriggerType::WhenYouPlayMe; }
-    TargetRequirements getTargetRequirements() const override {
-        return TargetRequirements{.count = 1, .must_be_unit = true, .must_be_enemy = true, .must_be_friendly = true};
-    }
 private:
     const CardDef def_ = [] {
         CardDef d;

@@ -15,38 +15,33 @@ namespace {
 class Tideturner : public UnitCard {
 public:
     const CardDef& def() const override { return def_; }
-    unsigned choicesAtFinalization() const override { return kFinalizeTrigger; }
     TriggerType triggerType() const override { return TriggerType::WhenYouPlayMe; }
+    // "You may choose a unit you control at another location": an optional
+    // target, chosen as the ability is played (CR 383.3); declining = no target.
     TargetRequirements getTargetRequirements() const override {
         return TargetRequirements{.count = 1, .must_be_unit = true,
-                                   .must_be_friendly = true};
+                                   .must_be_friendly = true, .optional = true};
     }
-    std::vector<GameObjectId> enumerateLegalTargets(
-        const GameState& state, PlayerId controller) const override {
+    using Card::enumerateLegalTargets;
+    std::vector<GameObjectId> enumerateLegalTargets(const GameState& state, PlayerId controller,
+                                                    int /*ability_index*/,
+                                                    GameObjectId source) const override {
         std::vector<GameObjectId> out;
+        if (!state.objectExists(source) || !state.getObject(source).location.has_value())
+            return out;
+        const auto here = state.getObject(source).battlefieldId();   // nullopt = base
         for (auto& [id, obj] : state.objects) {
-            if (!obj.isUnit() || obj.controller != controller) continue;
-            if (!obj.location.has_value()) continue;
+            if (id == source || !obj.isUnit() || obj.controller != controller) continue;
+            if (!obj.location.has_value() || obj.battlefieldId() == here) continue;
             out.push_back(id);
         }
         return out;
     }
     void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& targets) override {
         if (targets.empty()) return;
-        if (!ctx.state.objectExists(ctx.source)) return;
-        if (!ctx.state.objectExists(targets[0])) return;
-        // "you may" — wrap in confirmOptional.
-        auto still_legal = [&ctx, &targets]() {
-            return ctx.state.objectExists(ctx.source) &&
-                   ctx.state.objectExists(targets[0]) &&
-                   ctx.state.getObject(ctx.source).location.has_value() &&
-                   ctx.state.getObject(targets[0]).location.has_value();
-        };
-        if (!still_legal()) return;
-        auto conf = confirmOptional(ctx,
-            "Tideturner: swap locations with target?", still_legal);
-        if (finalizingChoices(ctx)) return;   // choices end here (CR 383.3)
-        if (conf < 1) return;
+        if (!ctx.state.objectExists(ctx.source) || !ctx.state.objectExists(targets[0])) return;
+        if (!ctx.state.getObject(ctx.source).location.has_value() ||
+            !ctx.state.getObject(targets[0]).location.has_value()) return;
         auto my_loc  = ctx.state.getObject(ctx.source).location;
         auto tgt_loc = ctx.state.getObject(targets[0]).location;
         moveToLocation(ctx.executor, ctx.source,   tgt_loc);

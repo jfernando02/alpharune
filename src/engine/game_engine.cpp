@@ -1501,38 +1501,59 @@ int GameEngine::activationEnergyReduction(const Card& card, PlayerId player,
 // longer legal (a mistarget: the instruction is ignored).
 void GameEngine::chooseTargetsAtFinalize(ChainItem& item) {
     if (item.card_def_id == kInvalidId) return;
-    if (item.is_ability && !item.is_activated_ability) {
-        // A triggered ability: its "you may", costs and targets (CR 383.3).
-        // (`targets` carries the triggering event's subject, not a choice.)
-        const Card* tcard = card_registry_.get(item.card_def_id);
-        if (tcard && (tcard->choicesAtFinalization() & Card::kFinalizeTrigger))
-            runFinalizePass(item);
-        return;
-    }
-    if (!item.targets.empty()) return;
-    const Card* card = (item.is_ability && item.granted_ability_def != 0)
-        ? card_registry_.get(item.granted_ability_def)
-        : card_registry_.get(item.card_def_id);
-    if (!card) return;
-
+    const bool is_trigger = item.is_ability && !item.is_activated_ability;
+    bool optional_target = false;
+    const Card* card = nullptr;
     std::vector<GameObjectId> legal;
-    if (item.is_spell) {
-        if (!card->needsPlayTimeTarget()) {
-            if (card->choicesAtFinalization() & Card::kFinalizeResolve) runFinalizePass(item);
+    if (is_trigger) {
+        // A triggered ability: its "you may", costs and targets (CR 383.3).
+        // A card that opts into kFinalizeTrigger makes all of these choices
+        // itself (pickTarget in its finalize pass). Otherwise a non-spell card
+        // that declares target requirements gets its one target chosen here,
+        // like a spell's, and reads it from onTrigger's `targets`. (`targets`
+        // can also carry the triggering event's subject: then nothing is
+        // chosen.) The card's 4-argument enumerateLegalTargets (ability index
+        // -1, the source object) defines "here" / "another".
+        const Card* tcard = card_registry_.get(item.card_def_id);
+        if (!tcard) return;
+        if (tcard->choicesAtFinalization() & Card::kFinalizeTrigger) {
+            runFinalizePass(item);
             return;
         }
-        legal = card->enumerateLegalTargets(state_, item.controller);
+        const auto reqs = tcard->getTargetRequirements();
+        if (!item.targets.empty() || reqs.count == 0 ||
+            tcard->def().card_type == CardType::Spell)
+            return;
+        legal = tcard->enumerateLegalTargets(state_, item.controller,
+                                             kTriggerAbilityIndex, item.source);
+        if (legal.empty()) return;   // no target: the ability does nothing
+        card = tcard;
+        optional_target = reqs.optional;
     } else {
-        auto abs = card->activatedAbilities();
-        if (item.ability_index < 0 || item.ability_index >= static_cast<int>(abs.size())) return;
-        if (abs[item.ability_index].is_empower) return;
-        if (!abs[item.ability_index].needs_activation_time_target) {
-            if (card->choicesAtFinalization() & Card::kFinalizeActivate) runFinalizePass(item);
-            return;
+        if (!item.targets.empty()) return;
+        card = (item.is_ability && item.granted_ability_def != 0)
+            ? card_registry_.get(item.granted_ability_def)
+            : card_registry_.get(item.card_def_id);
+        if (!card) return;
+
+        if (item.is_spell) {
+            if (!card->needsPlayTimeTarget()) {
+                if (card->choicesAtFinalization() & Card::kFinalizeResolve) runFinalizePass(item);
+                return;
+            }
+            legal = card->enumerateLegalTargets(state_, item.controller);
+        } else {
+            auto abs = card->activatedAbilities();
+            if (item.ability_index < 0 || item.ability_index >= static_cast<int>(abs.size())) return;
+            if (abs[item.ability_index].is_empower) return;
+            if (!abs[item.ability_index].needs_activation_time_target) {
+                if (card->choicesAtFinalization() & Card::kFinalizeActivate) runFinalizePass(item);
+                return;
+            }
+            legal = card->enumerateLegalTargets(state_, item.controller, item.ability_index, item.source);
         }
-        legal = card->enumerateLegalTargets(state_, item.controller, item.ability_index, item.source);
+        if (legal.empty()) return;   // nothing to choose now: the card handles it as it resolves
     }
-    if (legal.empty()) return;   // nothing to choose now: the card handles it as it resolves
 
     std::vector<Intent> options;
     options.reserve(legal.size());
@@ -1542,6 +1563,12 @@ void GameEngine::chooseTargetsAtFinalize(ChainItem& item) {
         i.player = item.controller;
         i.chosen_objects = {t};
         options.push_back(std::move(i));
+    }
+    if (optional_target) {   // "you may": choosing nothing declines
+        Intent none;
+        none.type = IntentType::MakeChoice;
+        none.player = item.controller;
+        options.push_back(std::move(none));
     }
     const std::string source_name = state_.objectExists(item.source)
         ? state_.getObject(item.source).name : std::string("?");
@@ -1554,6 +1581,10 @@ void GameEngine::chooseTargetsAtFinalize(ChainItem& item) {
     auto chosen = getAgent(chooser).selectAction(state_, options);
     recordAppliedIntent(chosen);
     if (on_decision) on_decision(state_, options, chosen);
+    if (optional_target && chosen.chosen_objects.empty()) {
+        events_.logTrace("TARGET (finalize): " + source_name + " -> none (declined)");
+        return;
+    }
     GameObjectId t = legal.front();
     if (!chosen.chosen_objects.empty() &&
         std::find(legal.begin(), legal.end(), chosen.chosen_objects.front()) != legal.end())
@@ -2356,7 +2387,10 @@ void GameEngine::resolveSpell(const ChainItem& item) {
         // An activated ability is re-validated against ITS OWN requirements
         // and legal set (multi-ability cards differ per ability).
         auto reqs = card->getTargetRequirements();
-        auto legal = card->enumerateLegalTargets(state_, item.controller);
+        auto legal = (item.is_ability && !item.is_activated_ability)
+            ? card->enumerateLegalTargets(state_, item.controller,
+                                          kTriggerAbilityIndex, item.source)
+            : card->enumerateLegalTargets(state_, item.controller);
         if (item.is_ability && item.is_activated_ability) {
             const Card* acard = (item.granted_ability_def != 0)
                 ? card_registry_.get(item.granted_ability_def) : card;

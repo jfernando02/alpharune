@@ -2018,5 +2018,140 @@ TEST_F(TriggerFinalizationTest, AUnitThatCantMoveThisTurnIsOfferedNoMove) {
     EXPECT_GT(moves_of(held), 0);
 }
 
+// ─── Targets of triggered abilities (CR 383.3) ──────────────────────────────
+// A triggered ability's target is chosen as it is put on the chain. The engine chose targets
+// only for spells and activated abilities, so "When you play me, kill an enemy unit" and 24
+// other such abilities did nothing (card audit, docs/rules-audit/cards.csv).
+
+class TriggerTargetTest : public CostPaymentRulesTest {
+protected:
+    // Plays `card` for P1 and answers every target choice with the first of `picks` offered
+    // (or "none" when `decline` is set), passing priority otherwise.
+    void playAndPick(GameObjectId card, std::vector<GameObjectId> picks, bool decline = false) {
+        PickByPredicateAgent agent([&, picks, decline](int, const std::vector<Intent>& l) {
+            bool target_choice = false;
+            for (const auto& i : l)
+                if (i.type == IntentType::MakeChoice && !i.chosen_objects.empty()) target_choice = true;
+            if (target_choice) {
+                for (const auto& i : l) offered.insert(offered.end(), i.chosen_objects.begin(), i.chosen_objects.end());
+                if (decline)
+                    for (const auto& i : l)
+                        if (i.type == IntentType::MakeChoice && i.chosen_objects.empty()) return i;
+                for (GameObjectId want : picks)
+                    for (const auto& i : l)
+                        if (!i.chosen_objects.empty() && i.chosen_objects[0] == want) return i;
+            }
+            for (const auto& i : l)
+                if (i.type == IntentType::PassPriority) return i;
+            return l.front();
+        });
+        engine_->testHook_setAgents(&agent, &agent);
+        Intent play;
+        play.type = IntentType::PlayCard;
+        play.player = P1;
+        play.card = card;
+        engine_->testHook_executeIntent(play);
+    }
+    void mainPhase() {
+        makeEngine();
+        setLegend(P1); setLegend(P2);
+        s().turn.turn_player = P1;
+        s().turn.phase = TurnPhase::MainPhase;
+        s().turn.ns_state = NeutralShowdownState::Neutral;
+        s().turn.oc_state = OpenClosedState::Open;
+    }
+    bool gone(GameObjectId id) { return !s().objectExists(id) || !onBoard(id); }
+    bool wasOffered(GameObjectId id) {
+        return std::find(offered.begin(), offered.end(), id) != offered.end();
+    }
+    std::vector<GameObjectId> offered;
+};
+
+// First Mate: "When you play me, ready another unit."
+TEST_F(TriggerTargetTest, FirstMateReadiesTheChosenOtherUnit) {
+    mainPhase();
+    for (int i = 0; i < 3; ++i) rune(P1, Domain::Body);
+    auto a = engineUnit(P1, 2);
+    auto b = engineUnit(P1, 2);
+    s().getObject(a).is_exhausted = s().getObject(b).is_exhausted = true;
+    auto mate = cardInHand(P1, 132);
+    playAndPick(mate, {b});
+    EXPECT_FALSE(s().getObject(b).is_exhausted) << "the chosen unit is readied";
+    EXPECT_TRUE(s().getObject(a).is_exhausted);
+    EXPECT_TRUE(wasOffered(a));
+    EXPECT_FALSE(wasOffered(mate)) << "\"another unit\"";
+}
+
+// Harnessed Dragon: "When you play me, kill an enemy unit."
+TEST_F(TriggerTargetTest, HarnessedDragonKillsTheChosenEnemyUnit) {
+    mainPhase();
+    for (int i = 0; i < 12; ++i) rune(P1, Domain::Order);
+    auto x = engineUnit(P2, 3, /*at_bf=*/0);
+    auto y = engineUnit(P2, 5, /*at_bf=*/1);
+    auto mine = engineUnit(P1, 2);
+    playAndPick(cardInHand(P1, 234), {y});
+    EXPECT_TRUE(gone(y));
+    EXPECT_FALSE(gone(x));
+    EXPECT_FALSE(wasOffered(mine)) << "enemy units only";
+}
+
+// Tideturner: "When you play me, you may choose a unit you control at another location. Move me
+// to its location and it to my original location." Declining leaves both where they are.
+TEST_F(TriggerTargetTest, TideturnerSwapsWithTheChosenUnitOrMayDecline) {
+    for (bool decline : {true, false}) {
+        SCOPED_TRACE(decline ? "decline" : "choose");
+        offered.clear();
+        mainPhase();
+        for (int i = 0; i < 2; ++i) rune(P1, Domain::Chaos);
+        auto far = engineUnit(P1, 2, /*at_bf=*/0);
+        auto home = engineUnit(P1, 2);   // at base, where Tideturner enters
+        auto tide = cardInHand(P1, 199);
+        playAndPick(tide, {far}, decline);
+        EXPECT_FALSE(wasOffered(home)) << "same location as Tideturner";
+        const auto bf = s().getObject(far).battlefieldId();
+        if (decline) {
+            EXPECT_EQ(bf, std::optional<BattlefieldId>(0));
+            EXPECT_FALSE(s().getObject(tide).battlefieldId().has_value());
+        } else {
+            EXPECT_FALSE(bf.has_value()) << "moved to Tideturner's base";
+            EXPECT_EQ(s().getObject(tide).battlefieldId(), std::optional<BattlefieldId>(0));
+        }
+    }
+}
+
+// Beast Below: "When you play me, return another friendly unit and an enemy unit to their
+// owners' hands." It returned one unit, and then none once triggers lost their targets.
+TEST_F(TriggerTargetTest, BeastBelowReturnsAFriendlyAndAnEnemyUnit) {
+    mainPhase();
+    for (int i = 0; i < 12; ++i) rune(P1, Domain::Chaos);
+    auto f1 = engineUnit(P1, 2);
+    auto f2 = engineUnit(P1, 2);
+    auto e1 = engineUnit(P2, 2, /*at_bf=*/0);
+    auto e2 = engineUnit(P2, 2, /*at_bf=*/1);
+    auto beast = cardInHand(P1, 453);
+    playAndPick(beast, {f2, e2});
+    EXPECT_TRUE(gone(f2));
+    EXPECT_TRUE(gone(e2));
+    EXPECT_FALSE(gone(f1));
+    EXPECT_FALSE(gone(e1));
+    EXPECT_FALSE(gone(beast));
+}
+
+// "An enemy unit here" (Yasuo, Remorseful; Leona; Crackshot Corsair; Ahri; Vi) means at the
+// source's battlefield.
+TEST_F(TriggerTargetTest, HereMeansTheSourcesBattlefield) {
+    mainPhase();
+    auto yasuo = engineUnit(P1, 4, /*at_bf=*/0, /*def_id=*/76);
+    auto near = engineUnit(P2, 2, /*at_bf=*/0);
+    auto far = engineUnit(P2, 2, /*at_bf=*/1);
+    for (CardDefId id : {76, 130, 238, 539, 738}) {
+        const Card* c = card_registry.get(id);
+        ASSERT_NE(c, nullptr);
+        auto legal = c->enumerateLegalTargets(s(), P1, kTriggerAbilityIndex, yasuo);
+        EXPECT_EQ(legal, std::vector<GameObjectId>{near}) << card_db.get(id).name;
+    }
+    (void)far;
+}
+
 }  // namespace
 }  // namespace riftbound::test
