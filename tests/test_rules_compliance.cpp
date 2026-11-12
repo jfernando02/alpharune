@@ -2153,5 +2153,72 @@ TEST_F(TriggerTargetTest, HereMeansTheSourcesBattlefield) {
     (void)far;
 }
 
+// The game ends as the winning point is scored (CR 467), before anything that point triggers.
+// Last Rites ("When I hold, you may play a unit from your trash ... pay its costs") ran inline
+// on the score event, before the win check, and asked for a rune payment after the game was won
+// (fuzzer, score check).
+TEST_F(CostPaymentRulesTest, NothingIsAskedAfterTheWinningHold) {
+    constexpr CardDefId kLastRites = 471;
+    makeEngine();
+    setLegend(P1); setLegend(P2);
+    s().turn.turn_player = P1;
+    s().player(P1).score = s().mode.victory_score - 1;
+    for (int i = 0; i < 3; ++i) rune(P1, Domain::Body);
+    auto bearer = engineUnit(P1, 3, /*at_bf=*/0);
+    auto gear = cardInHand(P1, kLastRites);
+    auto& ps = s().player(P1);
+    ps.hand.erase(std::find(ps.hand.begin(), ps.hand.end(), gear));
+    auto& g = s().getObject(gear);
+    g.zone = ZoneType::BattlefieldZone;
+    g.location = BattlefieldLocation{0};
+    g.attached_to = bearer;
+    s().getObject(bearer).attachments.push_back(gear);
+    auto mate = cardInHand(P1, 132);   // First Mate, [3] Body
+    ps.hand.erase(std::find(ps.hand.begin(), ps.hand.end(), mate));
+    ps.trash.push_back(mate);
+    s().getObject(mate).zone = ZoneType::Trash;
+    s().battlefields[0].controller = P1;
+    int asked = 0;
+    PickByPredicateAgent agent([&](int, const std::vector<Intent>& l) { ++asked; return l.back(); });
+    engine_->testHook_setAgents(&agent, &agent);
+    engine_->testHook_scoreHold(P1, 0);
+    EXPECT_TRUE(s().game_over);
+    EXPECT_EQ(asked, 0);
+    EXPECT_FALSE(s().getObject(mate).location.has_value()) << "not played after the game ended";
+}
+
+// Rengar, Pouncing ([Reaction]) is offered in a combat showdown as a PlayReaction to the
+// battlefield where its controller attacks, but executeIntent had no case for PlayReaction:
+// the play did nothing and could be chosen again and again (fuzzer, 100+ decisions in a turn).
+TEST_F(CostPaymentRulesTest, APounceInAShowdownPlaysTheUnit) {
+    constexpr CardDefId kRengar = 348;   // [3], 1 Fury power
+    makeEngine();
+    setLegend(P1); setLegend(P2);
+    s().turn.turn_player = P1;
+    s().turn.phase = TurnPhase::MainPhase;
+    for (int i = 0; i < 5; ++i) rune(P1, Domain::Fury);
+    engineUnit(P1, 3, /*at_bf=*/0);
+    engineUnit(P2, 3, /*at_bf=*/0);
+    auto& bf = s().battlefields[0];
+    bf.combat_in_progress = true;
+    bf.attacker = P1;
+    auto rengar = cardInHand(P1, kRengar);
+    PickByPredicateAgent agent([&](int, const std::vector<Intent>& l) {
+        for (const auto& i : l)
+            if (i.type == IntentType::PassPriority) return i;
+        return l.front();
+    });
+    engine_->testHook_setAgents(&agent, &agent);
+    Intent pounce;
+    pounce.type = IntentType::PlayReaction;
+    pounce.player = P1;
+    pounce.card = rengar;
+    pounce.play_location = BattlefieldLocation{0};
+    int actions = 0;
+    engine_->testHook_resolveShowdownDecision(0, pounce, P1, actions);
+    EXPECT_EQ(s().getObject(rengar).battlefieldId(), std::optional<BattlefieldId>(0));
+    EXPECT_EQ(std::count(s().player(P1).hand.begin(), s().player(P1).hand.end(), rengar), 0);
+}
+
 }  // namespace
 }  // namespace riftbound::test

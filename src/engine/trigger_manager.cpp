@@ -122,7 +122,7 @@ void TriggerManager::checkDelayedAbilities(TriggerType trigger,
 
 void TriggerManager::fireEquippedTriggers(GameObjectId unit_id, PlayerId controller,
                                            TriggerType trigger) {
-    if (!state_.objectExists(unit_id)) return;
+    if (state_.game_over || !state_.objectExists(unit_id)) return;
     auto& unit = state_.getObject(unit_id);
 
     for (auto gear_id : unit.attachments) {

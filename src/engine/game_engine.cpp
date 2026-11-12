@@ -1900,9 +1900,12 @@ void GameEngine::executeIntent(const Intent& intent) {
 
     switch (intent.type) {
         case IntentType::PlayCard:
-        case IntentType::PlayActionCard: {
+        case IntentType::PlayActionCard:
+        case IntentType::PlayReaction: {   // e.g. a pounce in a showdown (Rengar, Pouncing)
             auto& card = state_.getObject(intent.card);
-            if (card.isSpell()) {
+            if (card.is_hidden) {
+                executePlayFromHidden(intent);
+            } else if (card.isSpell()) {
                 executePlaySpell(intent);
             } else {
                 executePlayCard(intent);
@@ -4802,6 +4805,7 @@ void GameEngine::scoreConquer(PlayerId player, BattlefieldId bf) {
             ps.score++;
             events_.logTrace(std::string("SCORE: ") + toString(player) + " +1 via Conquer -> " +
                              std::to_string(ps.score));
+            checkWinCondition();   // the game ends as the point is scored, before its triggers
             events_.emit(ScoreEvent{player, bf, ScoreMethod::Conquer, ps.score});
         } else {
             events_.logTrace(std::string("SCORE_BLOCKED: ") + toString(player) +
@@ -4813,6 +4817,7 @@ void GameEngine::scoreConquer(PlayerId player, BattlefieldId bf) {
         ps.score++;
         events_.logTrace(std::string("SCORE: ") + toString(player) + " +1 via Conquer -> " +
                          std::to_string(ps.score));
+        checkWinCondition();   // the game ends as the point is scored, before its triggers
         events_.emit(ScoreEvent{player, bf, ScoreMethod::Conquer, ps.score});
     }
 
@@ -4858,6 +4863,7 @@ void GameEngine::scoreHold(PlayerId player, BattlefieldId bf) {
     ps.hold_points_this_turn++;
     events_.logTrace(std::string("SCORE: ") + toString(player) + " +1 via Hold BF#" +
                      std::to_string(bf) + " -> " + std::to_string(ps.score));
+    checkWinCondition();   // the game ends as the point is scored, before its triggers
     events_.emit(ScoreEvent{player, bf, ScoreMethod::Hold, ps.score});
 
     checkWinCondition();
@@ -5524,6 +5530,7 @@ void GameEngine::advanceCleanup() {
 }
 
 bool GameEngine::checkWinCondition() {
+    if (state_.game_over) return true;
     // The points needed to win, including battlefields that change it.
     const int effective_victory = effect_executor_->effectiveVictoryScore();
 
