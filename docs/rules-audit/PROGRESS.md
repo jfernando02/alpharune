@@ -27,12 +27,24 @@ remaining 238 cards (subagents read; a mismatch counts once a test fails on it).
   "played from face down" (Katarina, Evelynn, Tornado Warrior never saw it); fuzzer screens
   `choice [trigger target]` and `choice [hidden target]`.
 
-## Next
-- Bundle: `bash /mnt/c/GitHub/riftbound-trainer/cloud/make_bundle.sh --engine /mnt/c/GitHub/alpharune --engine-ref claude/objective-jennings-a461e6`
-- Rest of the 60 mismatches (moves always to base, counters see only the chain top, recall
-  counts as a move, "first found" instead of a choice, single cards).
-- Equipment triggers run inline instead of on the chain (fuzz-findings.md, Open).
+- 45c7c38 the facedown restriction left cards in hand / battlefield cards alone (Bone Skewer).
 
-## Audit agents
-Batches in the scratchpad (batch1..9.txt). 1-3 done (verdicts1-3.tsv → cards.csv). 4-6 were
-cut off by the usage limit (partial verdicts4-6.tsv may exist); 7-9 not started.
+## Bundle
+`/mnt/c/GitHub/riftbound-trainer/dist/riftbound-cloud-20261112.tar.gz` (22M), engine 6d480a0,
+trainer 6a6f292. Fuzz after the last engine change: seed 2 (1,521 games) and usage seed 9
+(3,042 policy games) at 0 violations, including the two new choice checks.
+
+## Card audit (step D) — all 349 non-rune cards in scope
+182 ok, 165 mismatch, 2 unsure. 16 mismatches fixed so far. Open ones by kind:
+printed keywords 13, unfiltered cost reductions 3, "first found" instead of a choice 37,
+always to base 20, forced "may" 7, counters see only the chain top 4, missing clauses 23,
+other 42.
+
+## Next
+- Free value among the new mismatches: printed keywords (Gem Jammer, Megatusk, Chakram
+  Dancer, Frisky Hunter, Breakneck Mech; Temporary on Sprite Mother / Trevor / Lillia),
+  unfiltered cost reductions (Eager Apprentice, Herald of Scales, Vaults of Helia),
+  Chem-Baroness, Glasc Mixologist, Eye of the Herald, Viktor, Keeper of the Hammer, Leona
+  Zealot; plus a test that every printed keyword is printed in the text.
+- Then shared causes: "first found" -> choice, moves to base, chain-top counters, two-target
+  generation, [Reaction] units, Equipment triggers inline, gear deaths.
