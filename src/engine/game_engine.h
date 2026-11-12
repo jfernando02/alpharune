@@ -554,6 +554,9 @@ private:
     void executePassFocus(const Intent& intent);
     void executeHideCard(const Intent& intent);
     void executePlayFromHidden(const Intent& intent);
+    /// Plays `card` from facedown (CR 811) and adds its chain item, without running the chain.
+    void playFromFacedown(PlayerId player, GameObjectId card,
+                          const std::vector<GameObjectId>& targets);
 
     // ── Chain ──
     /// `resume`: re-enter at the pending priority decision of a snapshot
@@ -576,6 +579,7 @@ private:
     std::vector<Intent> generateMainPhaseActions(PlayerId player) const;
     std::vector<Intent> generateMulliganActions(PlayerId player) const;
     std::vector<Intent> generateShowdownActions(PlayerId player) const;
+    void appendHiddenPlays(PlayerId player, std::vector<Intent>& actions) const;
     std::vector<Intent> generateClosedStateActions(PlayerId player) const;
     std::vector<Intent> generateCombatDamageActions(PlayerId player) const;
     void generateSpellActions(PlayerId player, bool action_ok, bool reaction_ok,

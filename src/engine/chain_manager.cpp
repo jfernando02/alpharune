@@ -11,6 +11,18 @@ ChainManager::ChainManager(GameState& state, EventBus& events,
                            const CardDB& card_db)
     : state_(state), events_(events), card_db_(card_db) {}
 
+namespace {
+// Set on a card while it is being played from facedown (GameEngine::playFromFacedown):
+// its spell and the play effects it triggers choose from that battlefield (CR 811.1.d).
+std::optional<BattlefieldId> hiddenPlayBattlefield(const GameState& state, GameObjectId source) {
+    if (!state.objectExists(source)) return std::nullopt;
+    const auto& counters = state.getObject(source).card_counters;
+    auto it = counters.find("__hidden_play_bf");
+    if (it == counters.end() || it->second <= 0) return std::nullopt;
+    return static_cast<BattlefieldId>(it->second - 1);
+}
+}  // namespace
+
 ChainItemId ChainManager::addSpell(GameObjectId spell_obj, PlayerId controller,
                                     const std::vector<GameObjectId>& targets) {
     auto& chain = state_.chain;
@@ -23,6 +35,7 @@ ChainItemId ChainManager::addSpell(GameObjectId spell_obj, PlayerId controller,
     item.card_def_id = state_.getObject(spell_obj).card_def_id;
     item.controller = controller;
     item.targets = targets;
+    item.hidden_at = hiddenPlayBattlefield(state_, item.source);
     // Objects chosen as this item is played. CR 809: choosing an opponent's
     // [Deflect] object costs its Deflect Value in [A], a mandatory additional
     // cost (resolve-time choices pay in Card::pickTarget instead).
@@ -109,6 +122,7 @@ ChainItemId ChainManager::addAbility(GameObjectId source, PlayerId controller,
     item.card_def_id = def_id;
     item.controller = controller;
     item.targets = targets;
+    item.hidden_at = hiddenPlayBattlefield(state_, item.source);
     // Objects chosen as this item is played. CR 809: choosing an opponent's
     // [Deflect] object costs its Deflect Value in [A], a mandatory additional
     // cost (resolve-time choices pay in Card::pickTarget instead).
@@ -320,6 +334,10 @@ bool ChainManager::stepExecuteAndPass(AgentQuery query_agent,
         } else if (chosen.type == IntentType::PlayReaction) {
             auto& card = state_.getObject(chosen.card);
             auto& ps = state_.player(current);
+            if (card.is_hidden && play_from_facedown_) {
+                play_from_facedown_(current, chosen.card, chosen.targets);
+                return true;   // item added → restart FEPR from Finalize
+            }
 
             // Where a permanent played here will land: the facedown card's own
             // battlefield, or the location the intent names ([Ambush]).

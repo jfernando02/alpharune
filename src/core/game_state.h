@@ -595,6 +595,9 @@ struct ChainItem {
 
     // Targeting
     std::vector<GameObjectId> targets;
+    // A spell played from facedown, or a play effect of a permanent played from
+    // facedown: its choices are restricted to this battlefield (CR 811.1.d.2-3).
+    std::optional<BattlefieldId> hidden_at;
     // Everything this item has chosen so far: play-time targets plus objects
     // picked at resolution (Card::pickTarget / pickTargetPair). Lets other
     // effects ask "what does this chain item choose" (Deflect, Irelia,

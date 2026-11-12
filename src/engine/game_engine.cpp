@@ -68,6 +68,10 @@ void GameEngine::initSubsystems() {
         [this](PlayerId p, GameObjectId card) { return payCardCost(p, card); });
     chain_manager_->setEffectExecutor(effect_executor_.get());
     chain_manager_->setFinalizeChoices([this](ChainItem& item) { chooseTargetsAtFinalize(item); });
+    chain_manager_->setPlayFromFacedown(
+        [this](PlayerId p, GameObjectId c, const std::vector<GameObjectId>& t) {
+            playFromFacedown(p, c, t);
+        });
     chain_manager_->setActivateAbility(
         [this](const Intent& i) { return payAndQueueAbility(i); });
     chain_manager_->setCleanup([this]() { cleanup(); });
@@ -1555,6 +1559,16 @@ void GameEngine::chooseTargetsAtFinalize(ChainItem& item) {
         if (legal.empty()) return;   // nothing to choose now: the card handles it as it resolves
     }
 
+    // CR 811.1.d.2-3: played from facedown, choose among options at that battlefield.
+    if (item.hidden_at.has_value() && card->hiddenPlayRestrictsTargets()) {
+        std::vector<GameObjectId> here;
+        for (auto t : legal)
+            if (state_.objectExists(t) && state_.getObject(t).battlefieldId() == item.hidden_at)
+                here.push_back(t);
+        legal = std::move(here);
+        if (legal.empty()) return;
+    }
+
     std::vector<Intent> options;
     options.reserve(legal.size());
     for (auto t : legal) {
@@ -2941,45 +2955,47 @@ void GameEngine::executeHideCard(const Intent& intent) {
 }
 
 void GameEngine::executePlayFromHidden(const Intent& intent) {
-    auto& card = state_.getObject(intent.card);
-    auto bf_id = card.hidden_at;
-    auto& bf = getBattlefield(bf_id);
+    playFromFacedown(intent.player, intent.card, intent.targets);
+    runChain();
+}
 
-    // Remove from facedown zone
-    auto it = std::find(bf.facedown.begin(), bf.facedown.end(), intent.card);
-    if (it != bf.facedown.end()) bf.facedown.erase(it);
-
+// CR 811: a card played from facedown is played ignoring its base cost; a permanent goes to
+// the battlefield it was hidden at (811.1.d.1), and the choices of a spell, or of a play
+// effect of a permanent, are made among options at that battlefield (811.1.d.2-3). The card
+// carries "__hidden_play_bf" while its chain items are created, so they record it
+// (ChainItem::hidden_at).
+void GameEngine::playFromFacedown(PlayerId player, GameObjectId card_id,
+                                  const std::vector<GameObjectId>& targets) {
+    auto& card = state_.getObject(card_id);
+    const BattlefieldId bf_id = card.hidden_at;
+    for (auto& bf : state_.battlefields) {
+        auto it = std::find(bf.facedown.begin(), bf.facedown.end(), card_id);
+        if (it != bf.facedown.end()) bf.facedown.erase(it);
+    }
     card.is_hidden = false;
     card.hidden_at = kInvalidId;
     // Lets the card's own "When you play me from face down" tell this play
     // apart from a play from hand. Cleared when it next enters a hand/trash.
     card.card_counters["__played_from_facedown"] = 1;
+    card.card_counters["__hidden_play_bf"] = static_cast<int>(bf_id) + 1;
+    events_.logTrace("PLAY (from facedown): " + card.name + " at BF#" + std::to_string(bf_id));
 
     // "When you play a card from face down" (Katarina, Reckless).
-    events_.emit(PlayedFromFacedownEvent{intent.card, intent.player});
+    events_.emit(PlayedFromFacedownEvent{card_id, player});
 
-    // Play ignoring base cost — permanents go to the BF they were hidden at
-    if (card.isPermanent()) {
-        card.location = BattlefieldLocation{bf_id};
-        // Route through chain like normal plays
-        auto& ps = state_.player(intent.player);
-        ps.cards_played_this_turn++;
-        // Hidden play is "ignoring its base cost" (CR 811) — energy_spent = 0.
-        events_.emit(CardPlayedEvent{intent.card, intent.player,
-            card.card_type, ps.cards_played_this_turn, /*energy_spent=*/0});
-        // Played from face down = from somewhere other than hand.
-        events_.emit(ObjectStateChangedEvent{intent.card, "played_not_from_hand"});
-        chain_manager_->addPermanent(intent.card, intent.player);
-        runChain();
-    } else if (card.isSpell()) {
-        auto& ps = state_.player(intent.player);
-        ps.cards_played_this_turn++;
-        events_.emit(CardPlayedEvent{intent.card, intent.player,
-            card.card_type, ps.cards_played_this_turn, /*energy_spent=*/0});
-        // Played from face down = from somewhere other than hand.
-        events_.emit(ObjectStateChangedEvent{intent.card, "played_not_from_hand"});
-        chain_manager_->addSpell(intent.card, intent.player, intent.targets);
-        runChain();
+    auto& ps = state_.player(player);
+    ps.cards_played_this_turn++;
+    if (card.isPermanent()) card.location = BattlefieldLocation{bf_id};
+    // Hidden play is "ignoring its base cost" (CR 811) — energy_spent = 0.
+    events_.emit(CardPlayedEvent{card_id, player, card.card_type,
+                                 ps.cards_played_this_turn, /*energy_spent=*/0});
+    // Played from face down = from somewhere other than hand.
+    events_.emit(ObjectStateChangedEvent{card_id, "played_not_from_hand"});
+    if (state_.objectExists(card_id)) {
+        auto& c = state_.getObject(card_id);
+        if (c.isSpell()) chain_manager_->addSpell(card_id, player, targets);
+        else chain_manager_->addPermanent(card_id, player);
+        state_.getObject(card_id).card_counters.erase("__hidden_play_bf");
     }
 }
 
@@ -3221,6 +3237,7 @@ std::vector<Intent> GameEngine::generateMainPhaseActions(PlayerId player) const 
                               actions);
         generateTrashReplayActions(player, /*action_ok=*/true, /*reaction_ok=*/true,
                                     actions);
+        appendHiddenPlays(player, actions);   // CR 811.6
     }
 
     // Activate abilities on gear/legends/units ([E]: abilities)
@@ -3366,6 +3383,7 @@ std::vector<Intent> GameEngine::generateShowdownActions(PlayerId player) const {
                               actions);
         generateTrashReplayActions(player, /*action_ok=*/true, /*reaction_ok=*/true,
                                     actions);
+        appendHiddenPlays(player, actions);   // CR 811.6
     }
 
     // Ambush: play units with [Ambush] during showdowns
@@ -3474,6 +3492,52 @@ std::vector<Intent> GameEngine::generateShowdownActions(PlayerId player) const {
     return actions;
 }
 
+// CR 811.6: a card hidden on an earlier turn has [Reaction] while facedown, so it can be
+// played whenever a [Reaction] card can (Open State on its controller's turn, showdowns, all
+// Closed States). CR 811.1.d: a spell's targets must be at the battlefield it was hidden at,
+// and a spell with no such target can't be played. A card that chooses its target as it is
+// played (needsPlayTimeTarget / Pair) gets one intent and chooses at finalization, restricted
+// to that battlefield (ChainItem::hidden_at); other spells get one intent per target there.
+void GameEngine::appendHiddenPlays(PlayerId player, std::vector<Intent>& actions) const {
+    for (auto& bf : state_.battlefields) {
+        for (auto card_id : bf.facedown) {
+            if (!state_.objectExists(card_id)) continue;
+            auto& card = state_.getObject(card_id);
+            if (card.controller != player) continue;
+            // Must be hidden on a previous turn to gain Reaction
+            if (card.hidden_on_turn >= state_.turn.turn_number) continue;
+            Intent play;
+            play.type = IntentType::PlayReaction;
+            play.player = player;
+            play.card = card_id;
+
+            const Card* card_obj = (card.card_def_id != kInvalidId && card.isSpell())
+                ? card_registry_.get(card.card_def_id) : nullptr;
+            if (card_obj && card_obj->getTargetRequirements().count > 0) {
+                std::vector<GameObjectId> bf_targets;
+                for (auto t : card_obj->enumerateLegalTargets(state_, player)) {
+                    if (!state_.objectExists(t)) continue;
+                    if (state_.getObject(t).battlefieldId() == std::optional<BattlefieldId>(bf.id))
+                        bf_targets.push_back(t);
+                }
+                if (bf_targets.empty() && card_obj->hiddenPlayRestrictsTargets()) continue;
+                if (card_obj->needsPlayTimeTarget() || card_obj->needsPlayTimeTargetPair()) {
+                    actions.push_back(play);
+                    continue;
+                }
+                for (auto t : bf_targets) {
+                    Intent targeted = play;
+                    targeted.targets = {t};
+                    actions.push_back(targeted);
+                }
+                continue;
+            }
+            // No-target spell, or a permanent (it goes to the battlefield it was hidden at).
+            actions.push_back(play);
+        }
+    }
+}
+
 std::vector<Intent> GameEngine::generateClosedStateActions(
     PlayerId player) const {
     std::vector<Intent> actions;
@@ -3560,62 +3624,7 @@ std::vector<Intent> GameEngine::generateClosedStateActions(
     }
 
     // Can play hidden cards (they gain Reaction on next turn after hiding)
-    // CR 811.1.d.2 — hidden spell targets must come from the SAME BF where
-    // the card was hidden. Phase 6q+ fix: enumerate targets per-BF and emit
-    // one intent per (hidden card × valid target).
-    for (auto& bf : state_.battlefields) {
-        for (auto card_id : bf.facedown) {
-            if (!state_.objectExists(card_id)) continue;
-            auto& card = state_.getObject(card_id);
-            if (card.controller != player) continue;
-            // Must be hidden on a previous turn to gain Reaction
-            if (card.hidden_on_turn >= state_.turn.turn_number) continue;
-
-            // For spells with target requirements: filter legal targets
-            // to objects at the hidden-at BF only (CR 811.1.d.2).
-            if (card.card_def_id != kInvalidId && card.isSpell()) {
-                Card* card_obj = card_registry_.get(card.card_def_id);
-                if (card_obj) {
-                    auto req = card_obj->getTargetRequirements();
-                    if (req.count > 0) {
-                        auto all_targets = card_obj->enumerateLegalTargets(
-                            state_, player);
-                        std::vector<GameObjectId> bf_targets;
-                        for (auto t : all_targets) {
-                            if (!state_.objectExists(t)) continue;
-                            const auto& tgt = state_.getObject(t);
-                            auto tgt_bf = tgt.battlefieldId();
-                            if (tgt_bf && *tgt_bf == bf.id) {
-                                bf_targets.push_back(t);
-                            }
-                        }
-                        // If no BF-restricted targets exist, CR 811.1.d:
-                        // "A card cannot be played from Hidden if it is a
-                        // spell with no valid targets under these
-                        // restrictions." Skip this hidden play entirely.
-                        if (bf_targets.empty()) continue;
-                        for (auto t : bf_targets) {
-                            Intent play;
-                            play.type = IntentType::PlayReaction;
-                            play.player = player;
-                            play.card = card_id;
-                            play.targets = {t};
-                            actions.push_back(play);
-                        }
-                        continue;
-                    }
-                }
-            }
-
-            // No-target hidden play (or permanent — its location is set
-            // to the hidden-at BF by executePlayFromHidden).
-            Intent play;
-            play.type = IntentType::PlayReaction;
-            play.player = player;
-            play.card = card_id;
-            actions.push_back(play);
-        }
-    }
+    if (!locked_out) appendHiddenPlays(player, actions);
 
     // CR 376 / 398-406 — activated abilities with [Reaction] timing
     // (e.g. Shadow [752]: "[Action] [1][A], [E]: stun attacker") can be

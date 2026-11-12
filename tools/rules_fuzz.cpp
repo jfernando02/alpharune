@@ -382,7 +382,9 @@ private:
         bus.on_chain_item_finalized.connect([this](const ChainItemFinalizedEvent& e) {
             const auto& s = engine_->state();
             for (const auto& it : s.chain.items) {
-                if (it.id != e.item || !it.is_ability || it.is_activated_ability) continue;
+                if (it.id != e.item) continue;
+                checkFinalizedChoices(s, it);
+                if (!it.is_ability || it.is_activated_ability) continue;
                 if (!s.objectExists(e.source)) return;
                 ++turn_triggers_[s.getObject(e.source).card_def_id];
             }
@@ -393,6 +395,40 @@ private:
             const std::string m = lower(e.message);
             if (m.find("shuffl") != std::string::npos || m.find("random") != std::string::npos) ++random_events_;
         });
+    }
+
+    // Choices made as a chain item is finalized (CR 355, 383.3, 811.1.d).
+    //  - A triggered ability whose card declares a target gets one when a legal target exists
+    //    (it used to get none, so 25 such abilities did nothing).
+    //  - A spell or play effect of a card played from facedown chooses at that battlefield.
+    void checkFinalizedChoices(const GameState& s, const ChainItem& it) {
+        const Card* card = sh_.reg.get(it.card_def_id);
+        if (!card) return;
+        const auto name = [&] { return s.objectExists(it.source) ? s.getObject(it.source).name : "?"; };
+        auto atHidden = [&](GameObjectId id) {
+            return !it.hidden_at || !card->hiddenPlayRestrictsTargets() ||
+                   (s.objectExists(id) && s.getObject(id).battlefieldId() == it.hidden_at);
+        };
+        if (it.is_ability && !it.is_activated_ability && it.targets.empty() &&
+            !(card->choicesAtFinalization() & Card::kFinalizeTrigger) &&
+            card->def().card_type != CardType::Spell) {
+            const auto reqs = card->getTargetRequirements();
+            if (reqs.count > 0 && !reqs.optional) {
+                for (auto t : card->enumerateLegalTargets(s, it.controller, kTriggerAbilityIndex, it.source))
+                    if (atHidden(t)) {
+                        sh_.sink.report("choice", "trigger target", where(s),
+                                        name() + "'s triggered ability was finalized without its target");
+                        break;
+                    }
+            }
+        }
+        if (it.hidden_at) {
+            for (auto t : it.chosen_objects)
+                if (s.objectExists(t) && s.getObject(t).location.has_value() && !atHidden(t))
+                    sh_.sink.report("choice", "hidden target", where(s),
+                                    name() + " played from facedown chose " + s.getObject(t).name +
+                                    " away from its battlefield");
+        }
     }
 
     void checkState(const GameState& s) {

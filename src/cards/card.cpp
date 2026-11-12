@@ -341,10 +341,26 @@ void commitChoice(CardContext& ctx, const Card& card, GameObjectId t) {
     if (tobj.isUnit() && tobj.location.has_value() && tobj.controller == ctx.controller)
         ctx.events.emit(ObjectStateChangedEvent{t, "chosen_by_controller"});
 }
+
+// CR 811.1.d.2-4: a spell played from facedown, or a play effect of a permanent played from
+// facedown, chooses each target among options at that battlefield (ChainItem::hidden_at).
+std::vector<GameObjectId> restrictToHiddenBattlefield(const CardContext& ctx, const Card& card,
+                                                      const std::vector<GameObjectId>& legal) {
+    const auto& ri = ctx.state.chain.resuming;
+    if (!ri.has_value() || !ri->hidden_at.has_value() || !card.hiddenPlayRestrictsTargets())
+        return legal;
+    std::vector<GameObjectId> out;
+    for (auto id : legal)
+        if (ctx.state.objectExists(id) && ctx.state.getObject(id).battlefieldId() == ri->hidden_at)
+            out.push_back(id);
+    return out;
+}
 }  // namespace
 
 GameObjectId Card::pickTarget(CardContext& ctx, const std::string& label,
-                                const std::vector<GameObjectId>& legal_targets_in) {
+                                const std::vector<GameObjectId>& legal_targets_raw) {
+    const std::vector<GameObjectId> legal_targets_in =
+        restrictToHiddenBattlefield(ctx, *this, legal_targets_raw);
     auto& ri_opt = ctx.state.chain.resuming;
     // Once a choice is locked in (resume_point 8) the list is not consulted
     // again, so filtering here can't un-offer an already-paid-for target.
@@ -471,8 +487,12 @@ GameObjectId Card::pickTarget(CardContext& ctx, const std::string& label,
 
 std::pair<GameObjectId, GameObjectId> Card::pickTargetPair(
     CardContext& ctx, const std::string& label,
-    const std::vector<GameObjectId>& legal_a_in,
-    const std::function<std::vector<GameObjectId>(GameObjectId)>& legal_b_in_fn) {
+    const std::vector<GameObjectId>& legal_a_raw,
+    const std::function<std::vector<GameObjectId>(GameObjectId)>& legal_b_raw_fn) {
+    const std::vector<GameObjectId> legal_a_in = restrictToHiddenBattlefield(ctx, *this, legal_a_raw);
+    auto legal_b_in_fn = [&](GameObjectId a) {
+        return restrictToHiddenBattlefield(ctx, *this, legal_b_raw_fn(a));
+    };
 
     auto& ri_opt = ctx.state.chain.resuming;
     // Deflect (CR 809): see affordableWithDeflect / commitChoice above.

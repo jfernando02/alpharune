@@ -90,6 +90,11 @@ public:
     using FinalizeChoices = std::function<void(ChainItem&)>;
     void setFinalizeChoices(FinalizeChoices fn) { finalize_choices_ = std::move(fn); }
     using ActivateAbility = std::function<bool(const Intent&)>;
+    /// Plays a card from facedown (CR 811): the engine moves it out of the
+    /// facedown zone, announces the play and adds its chain item.
+    using PlayFromFacedown =
+        std::function<void(PlayerId, GameObjectId, const std::vector<GameObjectId>& targets)>;
+    void setPlayFromFacedown(PlayFromFacedown fn) { play_from_facedown_ = std::move(fn); }
     void setActivateAbility(ActivateAbility fn) { activate_ability_ = std::move(fn); }
     /// The Cleanup run after each chain item resolves (CR 319.5); its first task is the win
     /// check (CR 323.1), and the loop stops once the game is over.
@@ -111,6 +116,7 @@ private:
     PayCost pay_cost_;
     ActivateAbility activate_ability_;
     std::function<void()> cleanup_;
+    PlayFromFacedown play_from_facedown_;
     FinalizeChoices finalize_choices_;
     EffectExecutor* executor_ = nullptr;
 

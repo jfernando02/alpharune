@@ -2220,5 +2220,105 @@ TEST_F(CostPaymentRulesTest, APounceInAShowdownPlaysTheUnit) {
     EXPECT_EQ(std::count(s().player(P1).hand.begin(), s().player(P1).hand.end(), rengar), 0);
 }
 
+// ─── Cards played from facedown (CR 811) ────────────────────────────────────
+// A spell played from facedown, and a play effect of a permanent played from facedown,
+// choose their targets at the battlefield it was hidden at (811.1.d.2-3). The target chosen
+// in the play intent was dropped and the card asked again at resolution from every
+// battlefield (Hidden Blade, Back Off, Switcheroo, Blastcone Fae: card audit). Hidden cards
+// were also playable only in Closed States, though they have [Reaction] (811.6).
+
+class HiddenPlayTest : public TriggerTargetTest {
+protected:
+    GameObjectId hide(PlayerId p, CardDefId def_id, BattlefieldId bf) {
+        auto id = cardInHand(p, def_id);
+        auto& ps = s().player(p);
+        ps.hand.erase(std::find(ps.hand.begin(), ps.hand.end(), id));
+        auto& c = s().getObject(id);
+        c.zone = ZoneType::FacedownZone;
+        c.location = std::nullopt;
+        c.is_hidden = true;
+        c.hidden_at = bf;
+        c.hidden_on_turn = s().turn.turn_number - 1;
+        s().battlefields[bf].facedown.push_back(id);
+        s().battlefields[bf].controller = p;
+        return id;
+    }
+    std::vector<Intent> hiddenPlaysOf(GameObjectId card) {
+        std::vector<Intent> out;
+        for (const auto& i : engine_->generateLegalActions())
+            if (i.type == IntentType::PlayReaction && i.card == card) out.push_back(i);
+        return out;
+    }
+    void playHidden(const Intent& play, std::vector<GameObjectId> picks) {
+        PickByPredicateAgent agent([&, picks](int, const std::vector<Intent>& l) {
+            for (const auto& i : l)
+                offered.insert(offered.end(), i.chosen_objects.begin(), i.chosen_objects.end());
+            for (GameObjectId want : picks)
+                for (const auto& i : l)
+                    if (!i.chosen_objects.empty() && i.chosen_objects[0] == want) return i;
+            for (const auto& i : l)
+                if (i.type == IntentType::PassPriority) return i;
+            return l.front();
+        });
+        engine_->testHook_setAgents(&agent, &agent);
+        engine_->testHook_executeIntent(play);
+    }
+};
+
+// Hidden Blade: "Kill a unit at a battlefield." Played from facedown on its controller's own
+// turn (Neutral Open): it is offered, and only units at its battlefield can be chosen.
+TEST_F(HiddenPlayTest, HiddenBladeChoosesAtItsBattlefieldOnItsOwnTurn) {
+    mainPhase();
+    s().turn.turn_number = 5;
+    auto blade = hide(P1, 213, 0);
+    auto near = engineUnit(P2, 3, /*at_bf=*/0);
+    auto far = engineUnit(P2, 3, /*at_bf=*/1);
+    engineUnit(P1, 3, /*at_bf=*/0);
+    auto plays = hiddenPlaysOf(blade);
+    ASSERT_EQ(plays.size(), 1u) << "one play; the target is chosen as it is played";
+    playHidden(plays[0], {far, near});
+    EXPECT_TRUE(gone(near));
+    EXPECT_FALSE(gone(far));
+    EXPECT_FALSE(wasOffered(far)) << "a unit at another battlefield";
+    EXPECT_FALSE(s().getObject(blade).is_hidden);
+}
+
+// Switcheroo: "Swap the Might of two units at the same battlefield this turn." From facedown,
+// each unit is chosen at its battlefield (811.1.d.4).
+TEST_F(HiddenPlayTest, SwitcherooChoosesBothUnitsAtItsBattlefield) {
+    mainPhase();
+    s().turn.turn_number = 5;
+    auto sw = hide(P1, 466, 0);
+    auto a = engineUnit(P1, 2, /*at_bf=*/0);
+    auto b = engineUnit(P2, 5, /*at_bf=*/0);
+    auto c = engineUnit(P2, 7, /*at_bf=*/1);
+    auto d = engineUnit(P2, 1, /*at_bf=*/1);
+    auto plays = hiddenPlaysOf(sw);
+    ASSERT_EQ(plays.size(), 1u);
+    playHidden(plays[0], {c, d, a, b});
+    EXPECT_FALSE(wasOffered(c));
+    EXPECT_FALSE(wasOffered(d));
+    EXPECT_EQ(s().getObject(c).current_might, 7);
+}
+
+// Blastcone Fae: "When you play me, give a unit -2 [M] this turn, to a minimum of 1 [M]."
+// From facedown, its play effect chooses a unit at the battlefield it was played to
+// (811.1.d.3 example), and it is played there (811.1.d.1).
+TEST_F(HiddenPlayTest, BlastconeFaesPlayEffectChoosesAtItsBattlefield) {
+    mainPhase();
+    s().turn.turn_number = 5;
+    auto fae = hide(P1, 97, 0);
+    auto near = engineUnit(P2, 4, /*at_bf=*/0);
+    auto far = engineUnit(P2, 4, /*at_bf=*/1);
+    auto plays = hiddenPlaysOf(fae);
+    ASSERT_EQ(plays.size(), 1u);
+    playHidden(plays[0], {far, near});
+    EXPECT_EQ(s().getObject(fae).battlefieldId(), std::optional<BattlefieldId>(0));
+    EXPECT_FALSE(wasOffered(far));
+    s().getObject(near).recomputeMight();
+    EXPECT_EQ(s().getObject(near).current_might, 2);
+    EXPECT_EQ(s().getObject(fae).card_counters["__played_from_facedown"], 1);
+}
+
 }  // namespace
 }  // namespace riftbound::test

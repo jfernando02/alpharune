@@ -425,6 +425,11 @@ public:
     /// Target requirements for legal action generation.
     virtual TargetRequirements getTargetRequirements() const { return {}; }
 
+    /// CR 811.1.d.2-3: played from facedown, the card (or its play effect) chooses its
+    /// targets at that battlefield — "unless it explicitly restricts targeting in such a
+    /// way that makes this impossible" (Tideturner): such a card returns false.
+    virtual bool hiddenPlayRestrictsTargets() const { return true; }
+
     /// Enumerate legal targets given current game state.
     /// Default implementation uses getTargetRequirements() with standard filtering.
     /// Override for cards with unusual targeting.

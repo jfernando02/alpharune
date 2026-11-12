@@ -22,6 +22,8 @@ public:
         return TargetRequirements{.count = 1, .must_be_unit = true,
                                    .must_be_friendly = true, .optional = true};
     }
+    // Its target is at another location, never at the battlefield it was played to.
+    bool hiddenPlayRestrictsTargets() const override { return false; }
     using Card::enumerateLegalTargets;
     std::vector<GameObjectId> enumerateLegalTargets(const GameState& state, PlayerId controller,
                                                     int /*ability_index*/,
