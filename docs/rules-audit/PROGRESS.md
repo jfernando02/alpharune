@@ -31,6 +31,14 @@ remaining 238 cards (subagents read; a mismatch counts once a test fails on it).
 - 7f3382c the user's rulings on the 3 open questions: "alone" is read as a unit died, and
   friends dying at the same time count (Loyal Poro, Lonely Poro x2); Death from Below's replay
   is made right away; Akshan unchanged (both happen). Fuzz seed 2 + usage seed 9: 0 violations.
+- 5f5c0b8 group 3, free value: keyword bits only where printed (113 bits on 103 cards came
+  from text granting the keyword to something else: Sprite Mother / Trevor / Lillia / Sprite
+  Queen / LeBlanc died to their own [Temporary], Gem Jammer / Megatusk always had [Ganking],
+  units and Guerilla Warfare could be hidden, ...), screened by two tests in test_card_data;
+  cost filters (Eager Apprentice, Herald of Scales, Vaults of Helia); Chem-Baroness; Keeper of
+  the Hammer; Eye of the Herald; Viktor; Glasc Mixologist (power); Leona, Zealot (the aura text
+  matcher shrank every unit at her battlefield); Direwing / Breakneck Mech "another";
+  Mosstomper / Soul Sword applied once per copy per copy. Fuzz seed 2 + usage seed 9: 0.
 
 ## Bundle
 `/mnt/c/GitHub/riftbound-trainer/dist/riftbound-cloud-20261112.tar.gz` (22M), engine 6d480a0,
@@ -38,16 +46,13 @@ trainer 6a6f292. Fuzz after the last engine change: seed 2 (1,521 games) and usa
 (3,042 policy games) at 0 violations, including the two new choice checks.
 
 ## Card audit (step D) — all 349 non-rune cards in scope
-182 ok, 167 mismatch, 0 unsure. 19 mismatches fixed so far. Open ones by kind:
+182 ok, 167 mismatch, 0 unsure. 38 mismatches fixed so far, 5 partly. Open ones by kind:
 printed keywords 13, unfiltered cost reductions 3, "first found" instead of a choice 37,
 always to base 20, forced "may" 7, counters see only the chain top 4, missing clauses 23,
 other 42.
 
 ## Next
-- Free value among the new mismatches: printed keywords (Gem Jammer, Megatusk, Chakram
-  Dancer, Frisky Hunter, Breakneck Mech; Temporary on Sprite Mother / Trevor / Lillia),
-  unfiltered cost reductions (Eager Apprentice, Herald of Scales, Vaults of Helia),
-  Chem-Baroness, Glasc Mixologist, Eye of the Herald, Viktor, Keeper of the Hammer, Leona
-  Zealot; plus a test that every printed keyword is printed in the text.
-- Then shared causes: "first found" -> choice, moves to base, chain-top counters, two-target
-  generation, [Reaction] units, Equipment triggers inline, gear deaths.
+- Shared causes: "first found" -> choice (37), moves always to base (20), forced "may" (7),
+  chain-top counters (4), two-target generation, [Reaction] units outside the own main phase,
+  Equipment triggers inline, gear deaths, granted keywords not seen by play triggers (Vision).
+- Then missing clauses (23) and the rest; steps E (rulings.csv), F (core-rule coverage), REPORT.md.
