@@ -28,6 +28,9 @@ remaining 238 cards (subagents read; a mismatch counts once a test fails on it).
   `choice [trigger target]` and `choice [hidden target]`.
 
 - 45c7c38 the facedown restriction left cards in hand / battlefield cards alone (Bone Skewer).
+- 7f3382c the user's rulings on the 3 open questions: "alone" is read as a unit died, and
+  friends dying at the same time count (Loyal Poro, Lonely Poro x2); Death from Below's replay
+  is made right away; Akshan unchanged (both happen). Fuzz seed 2 + usage seed 9: 0 violations.
 
 ## Bundle
 `/mnt/c/GitHub/riftbound-trainer/dist/riftbound-cloud-20261112.tar.gz` (22M), engine 6d480a0,
@@ -35,7 +38,7 @@ trainer 6a6f292. Fuzz after the last engine change: seed 2 (1,521 games) and usa
 (3,042 policy games) at 0 violations, including the two new choice checks.
 
 ## Card audit (step D) — all 349 non-rune cards in scope
-182 ok, 165 mismatch, 2 unsure. 16 mismatches fixed so far. Open ones by kind:
+183 ok, 167 mismatch, 0 unsure. 19 mismatches fixed so far. Open ones by kind:
 printed keywords 13, unfiltered cost reductions 3, "first found" instead of a choice 37,
 always to base 20, forced "may" 7, counters see only the chain top 4, missing clauses 23,
 other 42.
