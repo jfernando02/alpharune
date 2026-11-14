@@ -38,7 +38,7 @@ trainer 6a6f292. Fuzz after the last engine change: seed 2 (1,521 games) and usa
 (3,042 policy games) at 0 violations, including the two new choice checks.
 
 ## Card audit (step D) — all 349 non-rune cards in scope
-183 ok, 167 mismatch, 0 unsure. 19 mismatches fixed so far. Open ones by kind:
+182 ok, 167 mismatch, 0 unsure. 19 mismatches fixed so far. Open ones by kind:
 printed keywords 13, unfiltered cost reductions 3, "first found" instead of a choice 37,
 always to base 20, forced "may" 7, counters see only the chain top 4, missing clauses 23,
 other 42.
