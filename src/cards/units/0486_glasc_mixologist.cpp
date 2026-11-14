@@ -27,8 +27,9 @@ public:
             auto& obj = ctx.state.getObject(cid);
             if (!obj.isUnit()) continue;
             if (obj.card_def_id == kInvalidId) continue;
-            int cost = ctx.executor.cardDB().get(obj.card_def_id).energy_cost;
-            if (cost > 3) continue;
+            const auto& def = ctx.executor.cardDB().get(obj.card_def_id);
+            if (def.energy_cost > 3) continue;
+            if (def.power_cost > 1) continue;   // "no more than [A]"
             out.push_back(cid);
         }
         return out;

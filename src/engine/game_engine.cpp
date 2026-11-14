@@ -4933,6 +4933,7 @@ void GameEngine::recalculateAuras() {
         ps.may_play_from_trash = false;
         ps.trash_goes_to_banish = false;
         ps.flow_cost_reduction = 0;              // Stargazer
+        ps.gold_adds_extra_near_victory = false; // Chem-Baroness
         ps.spell_tax_energy = 0;                 // Helm of Suppression
         ps.spell_tax_power = 0;
         ps.spell_discount_energy = 0;            // Applied Researchers
@@ -5047,7 +5048,15 @@ void GameEngine::recalculateAuras() {
 
         // "Other friendly units here have [Assault]"
         auto findAura = [&](const std::string& pattern, AuraDef base) -> bool {
+            // The pattern must start its clause: "units here have" is not the
+            // tail of "stunned enemy units here have" (Leona, Zealot) or of
+            // "other friendly units here have".
+            auto startsClause = [&](size_t p) {
+                while (p > 0 && clean[p - 1] == ' ') --p;
+                return p == 0 || !std::isalpha(static_cast<unsigned char>(clean[p - 1]));
+            };
             auto pos = clean.find(pattern);
+            while (pos != std::string::npos && !startsClause(pos)) pos = clean.find(pattern, pos + 1);
             if (pos == std::string::npos) return false;
             auto clause = clean.substr(pos, 80);
 
@@ -6067,7 +6076,7 @@ static int powerCostDelta(const GameState& state, PlayerId player, const GameObj
         if (mod.power_reduction == 0 || mod.affects_enemy_only) continue;
         if (mod.next_spell_only && !card.isSpell()) continue;
         if (mod.next_unit_only && !card.isUnit()) continue;
-        if (mod.gear_only && !card.isGear()) continue;
+        if (!mod.appliesToCard(card)) continue;
         delta -= mod.power_reduction;
     }
     if (card_class) delta -= card_class->selfPowerCostReduction(state, player);
@@ -6113,7 +6122,7 @@ bool GameEngine::canAfford(PlayerId player, GameObjectId card_obj, int extra_any
     for (auto& mod : ps_const.cost_modifiers) {
         if (mod.next_spell_only && !card.isSpell()) continue;
         if (mod.next_unit_only && !card.isUnit()) continue;
-        if (mod.gear_only && !card.isGear()) continue;
+        if (!mod.appliesToCard(card)) continue;
         if (mod.first_gear_per_turn && ps_const.gears_played_this_turn > 0) continue;
         if (mod.affects_non_token_only && card.super_type == SuperType::Token) continue;
         if (mod.combat_active_only && !combat_active) continue;
@@ -6128,6 +6137,7 @@ bool GameEngine::canAfford(PlayerId player, GameObjectId card_obj, int extra_any
     for (auto& mod : state_.player(opponent(player)).cost_modifiers) {
         if (!mod.affects_enemy_only) continue;
         if (mod.next_spell_only && !card.isSpell()) continue;
+        if (!mod.appliesToCard(card)) continue;
         if (mod.next_unit_only && !card.isUnit()) continue;
         if (mod.affects_non_token_only && card.super_type == SuperType::Token) continue;
         if (mod.combat_active_only && !combat_active) continue;
@@ -6293,7 +6303,7 @@ GameEngine::CostPaymentAdvance GameEngine::beginCostPayment(
     for (auto& mod : ps.cost_modifiers) {
         if (mod.next_spell_only && !card.isSpell()) continue;
         if (mod.next_unit_only && !card.isUnit()) continue;
-        if (mod.gear_only && !card.isGear()) continue;
+        if (!mod.appliesToCard(card)) continue;
         if (mod.first_gear_per_turn && ps.gears_played_this_turn > 0) continue;
         if (mod.affects_non_token_only && card.super_type == SuperType::Token) continue;
         if (mod.combat_active_only && !combat_active) continue;
@@ -6306,6 +6316,7 @@ GameEngine::CostPaymentAdvance GameEngine::beginCostPayment(
     for (auto& mod : state_.player(opponent(player)).cost_modifiers) {
         if (!mod.affects_enemy_only) continue;
         if (mod.next_spell_only && !card.isSpell()) continue;
+        if (!mod.appliesToCard(card)) continue;
         if (mod.next_unit_only && !card.isUnit()) continue;
         if (mod.affects_non_token_only && card.super_type == SuperType::Token) continue;
         if (mod.combat_active_only && !combat_active) continue;

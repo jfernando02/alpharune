@@ -38,11 +38,13 @@ public:
         }
     }
 
-    bool entersReadyOnPlay(const GameState& state, PlayerId controller) const override {
+    using Card::entersReadyOnPlay;
+    bool entersReadyOnPlay(const GameState& state, PlayerId controller,
+                           const GameObject& self) const override {
         for (auto& [id, obj] : state.objects) {
             if (!obj.isUnit() || obj.controller != controller || !obj.location.has_value())
                 continue;
-            if (obj.card_def_id == cardDefId()) continue;   // "another Mech" (skip self def)
+            if (&obj == &self) continue;   // "another": a second copy of me counts
             if (hasTag(obj, "Mech")) return true;
         }
         return false;
@@ -65,9 +67,6 @@ private:
         d.power_cost = 2;
         d.might = 7;
         d.rarity = Rarity::Uncommon;
-        d.deflect_value = 1;
-        d.keywords.set(Keyword::Deflect);
-        d.keywords.set(Keyword::Ganking);
         d.ability_text = R"RB(Your Mechs have [Deflect] and [Ganking]. (Opponents must pay [A] to choose us with a spell or ability. We can move from battlefield to battlefield.)
 I enter ready if you control another Mech.)RB";
         d.image_url = R"RB(https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/8564fc233cfcb4fc774ac4bc4ee72085d7586163-744x1039.png?accountingTag=RB)RB";

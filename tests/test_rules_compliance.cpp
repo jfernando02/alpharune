@@ -2399,5 +2399,151 @@ TEST_F(DeathFromBelowTest, DeclinedReplayIsNotOfferedLater) {
         EXPECT_FALSE(i.card == dfb) << "no play from the trash later in the turn";
 }
 
+// ─── Cost changes apply only to the cards they name ─────────────────────────
+class CostFilterTest : public CostPaymentRulesTest {
+protected:
+    void setUpBoard() {
+        makeEngine();
+        setLegend(P1); setLegend(P2);
+    }
+    GameObjectId handCard(CardDefId def_id) {
+        auto id = cardInHand(P1, def_id);
+        s().getObject(id).tags = card_db.get(def_id).tags;
+        return id;
+    }
+};
+
+// Eager Apprentice: "the Energy costs for spells you play is reduced by [1], to a minimum of [1]."
+TEST_F(CostFilterTest, EagerApprenticeReducesOnlySpells) {
+    setUpBoard();
+    engineUnit(P1, 2, /*at_bf=*/0, 84);
+    rune(P1, Domain::Calm);
+    auto spell = handCard(48);    // Meditation, [2]
+    auto unit = handCard(13);     // Pouty Poro, [2]
+    engine_->testHook_cleanup();
+    EXPECT_TRUE(engine_->testHook_canAfford(P1, spell));
+    EXPECT_FALSE(engine_->testHook_canAfford(P1, unit)) << "units cost what they cost";
+}
+
+// Herald of Scales: "Your Dragons' Energy costs are reduced by [2], to a minimum of [1]."
+TEST_F(CostFilterTest, HeraldOfScalesReducesOnlyDragons) {
+    setUpBoard();
+    engineUnit(P1, 2, /*at_bf=*/-1, 140);
+    for (int i = 0; i < 3; ++i) rune(P1, Domain::Fury);
+    auto dragon = handCard(1);    // Blazing Scorcher, Dragon, [5]
+    auto other = handCard(12);    // Noxus Hopeful, [4]
+    engine_->testHook_cleanup();
+    EXPECT_TRUE(engine_->testHook_canAfford(P1, dragon));
+    EXPECT_FALSE(engine_->testHook_canAfford(P1, other));
+}
+
+// Vaults of Helia: "When you hold here, your non-token units cost [1] more to play this turn."
+TEST_F(CostFilterTest, VaultsOfHeliaTaxesOnlyUnits) {
+    setUpBoard();
+    for (int i = 0; i < 2; ++i) rune(P1, Domain::Calm);
+    auto spell = handCard(48);    // Meditation, [2]
+    auto unit = handCard(13);     // Pouty Poro, [2]
+    CardContext ctx{s(), events, engine_->testHook_executor(), P1, kInvalidId};
+    card_registry.get(775)->onTrigger(ctx, {});
+    EXPECT_TRUE(engine_->testHook_canAfford(P1, spell)) << "a spell costs what it costs";
+    EXPECT_FALSE(engine_->testHook_canAfford(P1, unit)) << "a unit costs [1] more";
+}
+
+// Chem-Baroness: "When you or an ally hold, you may exhaust me to play a Gold gear token
+// exhausted. While your score is within 3 points of the Victory Score, your Gold [ADD] an
+// additional [1]."
+TEST_F(CostFilterTest, ChemBaronessCannotExhaustWhileExhausted) {
+    setUpBoard();
+    auto baroness = setLegend(P1, 556);
+    s().getObject(baroness).is_exhausted = true;
+    CardContext ctx{s(), events, engine_->testHook_executor(), P1, baroness};
+    card_registry.get(556)->onTrigger(ctx, {});
+    for (const auto& [id, o] : s().objects) EXPECT_NE(o.card_def_id, CardDefId{326}) << "no Gold";
+}
+
+TEST_F(CostFilterTest, ChemBaronessGoldAddsOneMoreNearVictory) {
+    for (int score : {4, 5}) {
+        setUpBoard();
+        setLegend(P1, 556);
+        s().player(P1).score = score;
+        auto gold = engineUnit(P1, 0, -1, 326);
+        s().getObject(gold).card_type = CardType::Gear;
+        engine_->testHook_cleanup();
+        CardContext ctx{s(), events, engine_->testHook_executor(), P1, gold};
+        card_registry.get(326)->onActivate(ctx, {});
+        EXPECT_EQ(s().player(P1).rune_pool.universal_power, 1);
+        EXPECT_EQ(s().player(P1).rune_pool.energy, score >= 5 ? 1 : 0) << "score " << score;
+    }
+}
+
+// Leona, Zealot: "Stunned enemy units here have -8 [M], to a minimum of 1 [M]." Her own and
+// friendly units, and enemy units that aren't stunned, are unaffected.
+TEST_F(CostFilterTest, LeonaZealotShrinksOnlyStunnedEnemies) {
+    setUpBoard();
+    auto leona = engineUnit(P1, 4, 0, 79);
+    auto friendly = engineUnit(P1, 3, 0);
+    auto enemy = engineUnit(P2, 5, 0);
+    auto stunned = engineUnit(P2, 6, 0);
+    s().getObject(stunned).is_stunned = true;
+    engine_->testHook_cleanup();
+    EXPECT_EQ(s().getObject(leona).current_might, 4);
+    EXPECT_EQ(s().getObject(friendly).current_might, 3);
+    EXPECT_EQ(s().getObject(enemy).current_might, 5);
+    EXPECT_EQ(s().getObject(stunned).current_might, 1);
+}
+
+// Viktor, Leader: "When another non-Recruit unit you control dies, play a 1 [M] Recruit unit
+// token into your base."
+TEST_F(CostFilterTest, ViktorIgnoresRecruitDeaths) {
+    setUpBoard();
+    auto viktor = engineUnit(P1, 3, 0, 246);
+    auto recruit = engineUnit(P1, 1, 0);
+    s().getObject(recruit).tags = {"Recruit"};
+    auto other = engineUnit(P1, 2, 0);
+    auto recruits = [&] {
+        int n = 0;
+        for (const auto& [id, o] : s().objects)
+            if (o.location.has_value() && std::count(o.tags.begin(), o.tags.end(), "Recruit")) ++n;
+        return n;
+    };
+    for (auto dead : {recruit, other}) {
+        engine_->testHook_executor().killObject(dead);
+        ChainItem item;
+        item.source = viktor;
+        item.controller = P1;
+        item.triggering_subject = dead;
+        s().chain.resuming = item;
+        const int before = recruits();
+        CardContext ctx{s(), events, engine_->testHook_executor(), P1, viktor};
+        card_registry.get(246)->onTrigger(ctx, {});
+        s().chain.resuming.reset();
+        EXPECT_EQ(recruits(), before + (dead == other ? 1 : 0));
+    }
+}
+
+// Direwing: "I enter ready if you control another Dragon." A second Direwing is another Dragon.
+TEST_F(TriggerTargetTest, DirewingEntersReadyWithAnotherDirewing) {
+    mainPhase();
+    for (int i = 0; i < 7; ++i) rune(P1, Domain::Body);
+    auto first = engineUnit(P1, 7, -1, 416);
+    s().getObject(first).tags = card_db.get(416).tags;
+    auto second = cardInHand(P1, 416);
+    s().getObject(second).tags = card_db.get(416).tags;
+    playAndPick(second, {});
+    ASSERT_TRUE(onBoard(second));
+    EXPECT_FALSE(s().getObject(second).is_exhausted);
+}
+
+// Mosstomper: "[Level 3][>] I have +1 [M] and [Deflect]." Each copy gets +1 once.
+TEST_F(CostFilterTest, TwoMosstompersEachGetPlusOne) {
+    setUpBoard();
+    s().player(P1).xp = 3;
+    auto a = engineUnit(P1, 3, 0, 609);
+    auto b = engineUnit(P1, 3, 0, 609);
+    engine_->testHook_cleanup();
+    EXPECT_EQ(s().getObject(a).current_might, 4);
+    EXPECT_EQ(s().getObject(b).current_might, 4);
+}
+
 }  // namespace
 }  // namespace riftbound::test

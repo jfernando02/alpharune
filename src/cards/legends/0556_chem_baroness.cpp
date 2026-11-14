@@ -16,12 +16,23 @@ class ChemBaroness : public LegendCard {
 public:
     const CardDef& def() const override { return def_; }
     unsigned choicesAtFinalization() const override { return kFinalizeTrigger; }
-    TriggerType triggerType() const override { return TriggerType::WhenIConquerOrHold; }
+    // "When you or an ally hold" (a legend's WhenIHold fires on its controller's hold).
+    TriggerType triggerType() const override { return TriggerType::WhenIHold; }
+    void applyPassiveAura(GameState& state, PlayerId controller) const override {
+        for (const auto& [id, o] : state.objects)
+            if (o.card_def_id == cardDefId() && o.controller == controller &&
+                o.zone == ZoneType::LegendZone) {
+                state.player(controller).gold_adds_extra_near_victory = true;
+                return;
+            }
+    }
     void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
-        // Optional: exhaust me to play a Gold gear token exhausted.
+        // Optional: exhaust me (a cost: only while I'm ready) to play a Gold gear token exhausted.
         if (!ctx.state.objectExists(ctx.source)) return;
         int yes = confirmOptional(ctx, "Chem-Baroness: exhaust to play a Gold token?",
-                                  [&]() { return true; });
+                                  [&]() {
+            return costAlreadyPaid(ctx) || !ctx.state.getObject(ctx.source).is_exhausted;
+        });
         if (yes != 1) return;
         auto& self = ctx.state.getObject(ctx.source);
         if (costDueNow(ctx)) self.is_exhausted = true;
@@ -35,8 +46,7 @@ public:
             // [Add] [A]" — carried by the registered Gold card.
             ctx.state.getObject(tok).card_def_id = kGoldGearCardDefId;
         }
-        ctx.events.logTrace("CHEM-BARONESS: played a Gold token (Gold-add bonus "
-                            "passive not modeled)");
+        ctx.events.logTrace("CHEM-BARONESS: played a Gold token");
     }
 private:
     const CardDef def_ = [] {

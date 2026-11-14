@@ -62,7 +62,6 @@ private:
         d.energy_cost = 3;
         d.might = 3;
         d.rarity = Rarity::Rare;
-        d.keywords.set(Keyword::Equip);
         d.keywords.set(Keyword::Weaponmaster);
         d.ability_text = R"RB([Weaponmaster] (When you play me, you may [Equip] one of your Equipment to me for [A] less, even if it's already attached.)
 The first time I conquer each turn, ready me.)RB";

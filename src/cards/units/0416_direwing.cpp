@@ -15,11 +15,13 @@ namespace {
 class Direwing : public UnitCard {
 public:
     const CardDef& def() const override { return def_; }
-    bool entersReadyOnPlay(const GameState& state, PlayerId controller) const override {
+    using Card::entersReadyOnPlay;
+    bool entersReadyOnPlay(const GameState& state, PlayerId controller,
+                           const GameObject& self) const override {
         for (auto& [id, obj] : state.objects) {
             if (!obj.isUnit() || obj.controller != controller || !obj.location.has_value())
                 continue;
-            if (obj.card_def_id == cardDefId()) continue;   // "another Dragon"
+            if (&obj == &self) continue;   // "another": a second copy of me counts
             if (hasTag(obj, "Dragon")) return true;
         }
         return false;

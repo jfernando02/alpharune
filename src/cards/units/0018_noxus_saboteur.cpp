@@ -49,7 +49,6 @@ private:
         d.energy_cost = 3;
         d.might = 3;
         d.rarity = Rarity::Uncommon;
-        d.keywords.set(Keyword::Hidden);
         d.ability_text = R"RB(Your opponents' [Hidden] cards can't be revealed here.)RB";
         d.image_url = R"RB(https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/b78f0c822cb984db24ac3f1956cc8c10f8f88b22-744x1039.png)RB";
         return d;

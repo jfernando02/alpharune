@@ -41,7 +41,6 @@ private:
         d.artist = R"RB(Fish Art Studio)RB";
         d.card_type = CardType::Battlefield;
         d.rarity = Rarity::Uncommon;
-        d.keywords.set(Keyword::Predict);
         d.ability_text = R"RB(For each player, the first time they play a unit or gear here each turn, they [Predict]. (They look at the top card of their Main Deck. They may recycle it.))RB";
         d.image_url = R"RB(https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/53c096e4bc843a4cfe84fd16d922033b7fcfb330-1039x744.png)RB";
         return d;

@@ -61,7 +61,6 @@ private:
         d.rarity = Rarity::Rare;
         d.deflect_value = 2;
         d.keywords.set(Keyword::Deflect);
-        d.keywords.set(Keyword::Equip);
         d.keywords.set(Keyword::Weaponmaster);
         d.ability_text = R"RB([Deflect 2] (Opponents must pay [A][A] to choose me with a spell or ability.)
 [Weaponmaster] (When you play me, you may [Equip] one of your Equipment to me for [A] less, even if it's already attached.)

@@ -85,7 +85,6 @@ private:
         d.energy_cost = 5;
         d.might = 4;
         d.rarity = Rarity::Rare;
-        d.keywords.set(Keyword::Hidden);
         d.ability_text = R"RB(When I attack, you may pay [C] to play a card with [Hidden] from your hand, ignoring its cost. If it's a unit, play it here.)RB";
         d.image_url = R"RB(https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/93e91aa99eb09baa68dd95b0013a89d9ffde5240-744x1039.png?accountingTag=RB)RB";
         return d;

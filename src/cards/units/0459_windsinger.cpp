@@ -55,6 +55,7 @@ private:
         d.card_type = CardType::Unit;
         d.domains = {Domain::Chaos};
         d.tags = {R"RB(Ionia)RB"};
+        d.keywords.set(Keyword::Hidden);
         d.energy_cost = 2;
         d.might = 1;
         d.rarity = Rarity::Uncommon;

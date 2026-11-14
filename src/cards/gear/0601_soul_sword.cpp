@@ -37,6 +37,11 @@ public:
             auto unit_id = *obj.attached_to;
             auto uit = state.objects.find(unit_id);
             if (uit == state.objects.end()) continue;
+            // The engine asks every copy; each Soul Sword gives its +1 once.
+            const auto& fx = uit->second.aura_effects;
+            if (std::any_of(fx.begin(), fx.end(),
+                            [&](const GameObject::AuraEffect& a) { return a.source == id; }))
+                continue;
             uit->second.aura_effects.push_back(
                 GameObject::AuraEffect{.source = id, .might_bonus = 1});
         }

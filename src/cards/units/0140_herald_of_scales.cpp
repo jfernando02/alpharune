@@ -32,8 +32,7 @@ public:
         m.min_cost = 1;
         m.this_turn_only = false;
         m.affects_friendly_only = true;
-        // NOTE: no tag filter on CostModifier — this reduces ALL friendly plays
-        // by [2], a superset of the printed "Dragons" scope.
+        m.tag_only = "Dragon";
         state.player(controller).cost_modifiers.push_back(m);
     }
 private:

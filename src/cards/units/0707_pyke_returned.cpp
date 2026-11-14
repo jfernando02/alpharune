@@ -59,7 +59,6 @@ private:
         d.rarity = Rarity::Rare;
         d.keywords.set(Keyword::Backline);
         d.keywords.set(Keyword::Hidden);
-        d.keywords.set(Keyword::Reaction);
         d.ability_text = R"RB([Hidden] (Hide now for [A] to react with later for .)
 [Backline] (I must be assigned combat damage last.)
 Once each turn, when an enemy unit dies while I'm at a battlefield, play a Gold gear token exhausted. (It has "[Reaction][>] Kill this, [E]: [Add] [A]."))RB";

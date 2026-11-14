@@ -38,7 +38,6 @@ private:
         d.tags = {R"RB(Shadow Isles)RB", R"RB(Sentinel)RB"};
         d.energy_cost = 3;
         d.might = 3;
-        d.keywords.set(Keyword::Equip);
         d.keywords.set(Keyword::Weaponmaster);
         d.ability_text = R"RB([Weaponmaster] (When you play me, you may [Equip] one of your Equipment to me for [A] less, even if it's already attached.))RB";
         d.image_url = R"RB(https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/94e213b77131d9a67e51743a35fc5dff80fd79ec-744x1039.png)RB";

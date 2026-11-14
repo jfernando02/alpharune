@@ -33,8 +33,7 @@ public:
         m.min_cost = 1;
         m.this_turn_only = false;
         m.affects_friendly_only = true;
-        // NOTE: no spell-only filter exists on CostModifier; this reduces all
-        // friendly plays by [1], a superset of the printed "spells" scope.
+        m.spells_only = true;
         state.player(controller).cost_modifiers.push_back(m);
     }
 private:

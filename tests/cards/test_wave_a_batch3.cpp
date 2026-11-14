@@ -196,15 +196,18 @@ TEST_F(WaveABatch3Test, YiHonedEntersReady) {
 
 TEST_F(WaveABatch3Test, DirewingReadyWithAnotherDragon) {
     Card* card = card_registry.get(kDirewing);
+    GameObject played;   // the Direwing being played (not on the board yet)
     // No other dragon -> not ready.
-    EXPECT_FALSE(card->entersReadyOnPlay(state, P1));
-    // A second Direwing (same def) does NOT count ("another Dragon").
-    addUnit(P1, kDirewing, 7, 0);
-    EXPECT_FALSE(card->entersReadyOnPlay(state, P1));
-    // A different Dragon-tagged unit DOES count.
+    EXPECT_FALSE(card->entersReadyOnPlay(state, P1, played));
+    // Another Direwing is another Dragon; a Direwing is not "another" to itself.
+    auto first = addUnit(P1, kDirewing, 7, 0);
+    state.getObject(first).tags = {"Dragon"};
+    EXPECT_TRUE(card->entersReadyOnPlay(state, P1, played));
+    EXPECT_FALSE(card->entersReadyOnPlay(state, P1, state.getObject(first)));
+    // A different Dragon-tagged unit counts too.
     auto other = addUnit(P1, kInvalidId, 4, 0);
     state.getObject(other).tags = {"Dragon"};
-    EXPECT_TRUE(card->entersReadyOnPlay(state, P1));
+    EXPECT_TRUE(card->entersReadyOnPlay(state, P1, played));
 }
 
 // ── Xin Zhao, Vigilant (496): enter ready iff >=2 other base units ──────────

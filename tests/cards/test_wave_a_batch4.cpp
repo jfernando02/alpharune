@@ -267,7 +267,8 @@ TEST_F(CardTestFixture, ArenaKingpin_AbilityGivesPlus3ThisTurn) {
 TEST_F(CardTestFixture, LeBlanc_HasBacklineAndTemporary) {
     const auto& def = card_db.get(kLeBlanc);
     EXPECT_TRUE(def.keywords.has(Keyword::Backline));
-    EXPECT_TRUE(def.keywords.has(Keyword::Temporary));
+    // Her text names [Temporary] effects; she doesn't have [Temporary] herself.
+    EXPECT_FALSE(def.keywords.has(Keyword::Temporary));
 }
 
 }  // namespace

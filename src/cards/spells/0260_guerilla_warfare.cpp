@@ -61,7 +61,6 @@ private:
         d.energy_cost = 2;
         d.power_cost = 1;
         d.rarity = Rarity::Epic;
-        d.keywords.set(Keyword::Hidden);
         d.ability_text = R"RB(Return up to two cards with [Hidden] from your trash to your hand. You can hide cards ignoring costs this turn.)RB";
         d.image_url = R"RB(https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/3a1f70e49f1fdbac907a3395f517e96717e8afea-744x1039.png)RB";
         return d;

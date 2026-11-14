@@ -273,6 +273,19 @@ struct PlayerState {
         bool gear_only = false;             // applies only to gear plays (Ornn's Forge)
         bool first_gear_per_turn = false;   // applies only to the FIRST gear played this
                                             // turn (consult gears_played_this_turn == 0)
+        bool spells_only = false;           // "spells you play" (Eager Apprentice)
+        bool units_only = false;            // "your units" (Vaults of Helia)
+        std::string tag_only;               // "your Dragons" (Herald of Scales)
+        // The card-kind filters above (not the timing / once-only ones).
+        bool appliesToCard(const GameObject& card) const {
+            if (gear_only && !card.isGear()) return false;
+            if (spells_only && !card.isSpell()) return false;
+            if (units_only && !card.isUnit()) return false;
+            if (!tag_only.empty() &&
+                std::find(card.tags.begin(), card.tags.end(), tag_only) == card.tags.end())
+                return false;
+            return true;
+        }
     };
     std::vector<CostModifier> cost_modifiers;
 
@@ -347,6 +360,9 @@ struct PlayerState {
     bool may_play_from_trash = false;     // Endless Riches: "You may play cards from your trash."
     bool trash_goes_to_banish = false;    // Endless Riches: non-deck cards headed to trash are banished
     int flow_cost_reduction = 0;          // Stargazer: Flow plays cost [N] less (min [1])
+    // Chem-Baroness: "While your score is within 3 points of the Victory Score,
+    // your Gold [ADD] an additional [1]." Set by her aura; Gold checks the score.
+    bool gold_adds_extra_near_victory = false;
     int spell_tax_energy = 0;             // Helm of Suppression: THIS player's spells cost more
     int spell_tax_power = 0;
     int spell_discount_energy = 0;        // Applied Researchers: your spells cost less (min [1])

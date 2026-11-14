@@ -30,6 +30,10 @@ public:
         for (auto& [id, obj] : state.objects) {
             if (obj.card_def_id != cardDefId()) continue;
             if (obj.controller != controller) continue;
+            // The engine asks every copy; each copy buffs only itself, once.
+            if (std::any_of(obj.aura_effects.begin(), obj.aura_effects.end(),
+                            [&](const GameObject::AuraEffect& a) { return a.source == id; }))
+                continue;
             GameObject::AuraEffect might;
             might.source = id;
             might.might_bonus = 1;

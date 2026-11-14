@@ -43,7 +43,6 @@ private:
         d.might = 4;
         d.rarity = Rarity::Epic;
         d.keywords.set(Keyword::Backline);
-        d.keywords.set(Keyword::Temporary);
         d.ability_text = R"RB([Backline] (I must be assigned combat damage last.)
 Your [Temporary] effects at my battlefield don't trigger.)RB";
         d.image_url = R"RB(https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/a0389576206b1e750a0852c6ff46efd2646d47da-744x1039.png)RB";

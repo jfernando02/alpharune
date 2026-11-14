@@ -70,7 +70,6 @@ private:
         d.energy_cost = 2;
         d.power_cost = 1;
         d.rarity = Rarity::Uncommon;
-        d.keywords.set(Keyword::Legion);
         d.ability_text = R"RB([E]: [Legion] — The next unit you play this turn enters ready. (Get the effect if you've played another card this turn.))RB";
         d.image_url = R"RB(https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/146d7514f15e6674f471f3aa9c3fadf22c0b634b-744x1039.png)RB";
         return d;
