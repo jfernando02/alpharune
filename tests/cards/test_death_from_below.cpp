@@ -4,13 +4,12 @@
 /// "Kill a unit at a battlefield. Then, if it had 3 [M] or less, do this:
 ///  You may play this from your trash for [A]."
 ///
-/// Two layers are covered:
-///   1. onResolve pushes a PlayerState::TrashReplayGrant only when the killed
-///      unit had ≤3 might, with the [A] override cost (0 energy, 1 any-domain
-///      power).
-///   2. The action generator (GameEngine::generateTrashReplayActions) offers
-///      the spell from trash with play_source=Trash when a grant exists and the
-///      override cost is affordable — and does NOT offer it otherwise.
+/// The replay is made right away, as part of the resolution (user ruling
+/// 2026-11-14); engine-driven tests are in test_rules_compliance.cpp
+/// (DeathFromBelow*). This file covers the generic trash-replay grant
+/// machinery ([Flow] uses it): the action generator offers a granted spell
+/// from trash with play_source=Trash only when the override cost is
+/// affordable.
 
 #include "tests/cards/card_test_fixture.h"
 
@@ -28,38 +27,6 @@ namespace riftbound::test {
 namespace {
 
 constexpr CardDefId kDeathFromBelow = 747;
-
-// ── Layer 1: onResolve grants ─────────────────────────────────────────────
-
-TEST_F(CardTestFixture, DeathFromBelow_GrantsTrashReplayWhenMightLow) {
-    EffectExecutor exec(state, events, card_db, &card_registry);
-
-    // Spell object (its own id is what the grant references).
-    auto spell = addToHand(P1, kDeathFromBelow);
-    // A small enemy unit at a battlefield — the kill target.
-    auto victim = addUnit(P2, kInvalidId, /*might=*/3, /*at_bf=*/0);
-
-    invokeOnResolve(spell, kDeathFromBelow, P1, {victim}, exec);
-
-    auto& grants = state.player(P1).trash_replay_grants;
-    ASSERT_EQ(grants.size(), 1u) << "≤3 might victim must grant a trash-replay";
-    EXPECT_EQ(grants[0].card, spell);
-    EXPECT_EQ(grants[0].energy, 0);
-    EXPECT_EQ(grants[0].power, 1);
-    EXPECT_TRUE(grants[0].any_domain) << "[A] = one power of any domain";
-}
-
-TEST_F(CardTestFixture, DeathFromBelow_NoGrantWhenMightHigh) {
-    EffectExecutor exec(state, events, card_db, &card_registry);
-
-    auto spell  = addToHand(P1, kDeathFromBelow);
-    auto victim = addUnit(P2, kInvalidId, /*might=*/4, /*at_bf=*/0);
-
-    invokeOnResolve(spell, kDeathFromBelow, P1, {victim}, exec);
-
-    EXPECT_TRUE(state.player(P1).trash_replay_grants.empty())
-        << "4 might victim is above the '3 [M] or less' threshold";
-}
 
 // ── Layer 2: action generation ────────────────────────────────────────────
 

@@ -2341,5 +2341,63 @@ TEST_F(HiddenPlayTest, BoneSkewerFromFacedownPlaysTheHandUnitAtItsBattlefield) {
     EXPECT_EQ(s().getObject(unit).battlefieldId(), std::optional<BattlefieldId>(0));
 }
 
+// Death from Below: "Kill a unit at a battlefield. Then, if it had 3 [M] or less, do this:
+// You may play this from your trash for [A]." The replay is made right away (user ruling),
+// not left as a permission for later in the turn.
+class DeathFromBelowTest : public TriggerTargetTest {
+protected:
+    void play(GameObjectId card, std::vector<GameObjectId> picks, bool again) {
+        PickByPredicateAgent agent([&, picks, again](int, const std::vector<Intent>& l) {
+            for (const auto& i : l)
+                if (i.type == IntentType::MakeChoice && i.chosen_objects.empty() &&
+                    i.chosen_value == (again ? 1 : 0)) return i;
+            for (GameObjectId want : picks)
+                for (const auto& i : l)
+                    if (!i.chosen_objects.empty() && i.chosen_objects[0] == want) return i;
+            for (const auto& i : l)
+                if (i.type == IntentType::PassPriority) return i;
+            return l.front();
+        });
+        engine_->testHook_setAgents(&agent, &agent);
+        Intent p;
+        p.type = IntentType::PlayCard;
+        p.player = P1;
+        p.card = card;
+        engine_->testHook_executeIntent(p);
+    }
+    int inTrash(GameObjectId id) {
+        const auto& t = s().player(P1).trash;
+        return static_cast<int>(std::count(t.begin(), t.end(), id));
+    }
+};
+
+TEST_F(DeathFromBelowTest, IsPlayedAgainRightAwayAndChoosesANewTarget) {
+    mainPhase();
+    for (int i = 0; i < 7; ++i) rune(P1, Domain::Fury);
+    auto a = engineUnit(P2, 2, /*at_bf=*/0);
+    auto b = engineUnit(P2, 3, /*at_bf=*/1);
+    auto dfb = cardInHand(P1, 747);
+    play(dfb, {a, b}, /*again=*/true);
+    EXPECT_TRUE(gone(a));
+    EXPECT_TRUE(gone(b)) << "the copy played again kills a second unit";
+    EXPECT_EQ(inTrash(dfb), 1);
+    EXPECT_TRUE(s().chain.items.empty());
+    EXPECT_TRUE(s().player(P1).trash_replay_grants.empty());
+}
+
+TEST_F(DeathFromBelowTest, DeclinedReplayIsNotOfferedLater) {
+    mainPhase();
+    for (int i = 0; i < 7; ++i) rune(P1, Domain::Fury);
+    auto a = engineUnit(P2, 2, /*at_bf=*/0);
+    auto b = engineUnit(P2, 3, /*at_bf=*/1);
+    auto dfb = cardInHand(P1, 747);
+    play(dfb, {a, b}, /*again=*/false);
+    EXPECT_TRUE(gone(a));
+    EXPECT_FALSE(gone(b));
+    EXPECT_EQ(inTrash(dfb), 1);
+    for (const auto& i : engine_->generateLegalActions())
+        EXPECT_FALSE(i.card == dfb) << "no play from the trash later in the turn";
+}
+
 }  // namespace
 }  // namespace riftbound::test

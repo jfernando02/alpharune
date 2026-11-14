@@ -329,6 +329,50 @@ TEST_F(CardTestFixture, LoyalPoro_DoesNotDrawWhenDiedAlone) {
         << "Died alone — must NOT draw.";
 }
 
+// CR 740.2.a: units that die at the same time were there as it died (user ruling).
+TEST_F(CardTestFixture, LoyalPoro_DrawsWhenAFriendlyUnitThereDiesAtTheSameTime) {
+    auto poro_id = addUnit(P1, kLoyalPoro, /*might=*/3, /*at_bf=*/0);
+    auto pal = addUnit(P1, kInvalidId, /*might=*/2, /*at_bf=*/0);
+    addToDeck(P1, kInvalidId);
+    EffectExecutor exec(state, events, card_db);
+    exec.killObject(pal);       // same death batch: they die together
+    exec.killObject(poro_id);
+    int hand_before = handSize(P1);
+    CardContext ctx{state, events, exec, P1, poro_id};
+    card_registry.get(kLoyalPoro)->onTrigger(ctx, {});
+    EXPECT_EQ(handSize(P1), hand_before + 1) << "it didn't die alone";
+}
+
+TEST_F(CardTestFixture, LoyalPoro_AFriendlyUnitThatDiedEarlierDoesNotCount) {
+    auto poro_id = addUnit(P1, kLoyalPoro, /*might=*/3, /*at_bf=*/0);
+    auto pal = addUnit(P1, kInvalidId, /*might=*/2, /*at_bf=*/0);
+    addToDeck(P1, kInvalidId);
+    EffectExecutor exec(state, events, card_db);
+    exec.killObject(pal);
+    state.death_batch++;        // a later, separate death
+    exec.killObject(poro_id);
+    int hand_before = handSize(P1);
+    CardContext ctx{state, events, exec, P1, poro_id};
+    card_registry.get(kLoyalPoro)->onTrigger(ctx, {});
+    EXPECT_EQ(handSize(P1), hand_before);
+}
+
+TEST_F(CardTestFixture, LonelyPoro_DoesNotDrawWhenAFriendlyUnitThereDiesAtTheSameTime) {
+    for (CardDefId lonely : {CardDefId{359}, CardDefId{777}}) {
+        auto poro_id = addUnit(P1, lonely, /*might=*/2, /*at_bf=*/0);
+        auto pal = addUnit(P1, kInvalidId, /*might=*/2, /*at_bf=*/0);
+        addToDeck(P1, kInvalidId);
+        EffectExecutor exec(state, events, card_db);
+        exec.killObject(poro_id);
+        exec.killObject(pal);
+        int hand_before = handSize(P1);
+        CardContext ctx{state, events, exec, P1, poro_id};
+        card_registry.get(lonely)->onTrigger(ctx, {});
+        EXPECT_EQ(handSize(P1), hand_before) << lonely << ": it wasn't alone";
+        state.death_batch++;
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // [622] Vilemaw — hold trigger
 // ═══════════════════════════════════════════════════════════════════════════

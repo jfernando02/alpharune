@@ -467,6 +467,7 @@ void ChainManager::stepResolve(
             // case ≥1 branch and continues past resume_point.
         }
     };
+    state_.death_batch++;   // deaths inside one resolution are simultaneous
     resolveWithChoices();
 
     // Repeat (CR 820): if `repeats_paid > 0`, re-run resolve_spell that
@@ -494,7 +495,13 @@ void ChainManager::stepResolve(
     resolved = std::move(state_.chain.resuming.value());
     state_.chain.resuming.reset();
 
-    if (resolved.is_spell) {
+    // A spell its own effect played again (Death from Below) is on the chain as
+    // a new item: it has resolved, but it stays where it is now.
+    const bool played_again = resolved.is_spell &&
+        std::any_of(state_.chain.items.begin(), state_.chain.items.end(),
+                    [&](const ChainItem& ci) { return ci.is_spell && ci.source == resolved.source; });
+    if (played_again) events_.emit(SpellResolvedEvent{resolved.source, resolved.controller});
+    if (resolved.is_spell && !played_again) {
         // Spell goes to controller's trash after resolving (CR 359.3)
         // A spell its own effect already moved off the chain ("Banish this": Time Warp, Arcane
         // Shift) stays where it went; trashing it as well would put it in two zones.

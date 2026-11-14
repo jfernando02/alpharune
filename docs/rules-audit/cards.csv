@@ -137,7 +137,7 @@ id,name,decks,verdict,status,note
 399,Production Surge,2,ok,,
 403,Card Sharp,2,mismatch,,"Opponent's ""may"" is forced: the opponent always gets a Gold, so you always get the payoff Gold. Setup: play Card Sharp; expected: opponent chooses whether to take a Gold (declining denies you the 2nd Gold); actual: opponent never asked, both extra Golds always made (0403_card_sharp.cpp:22-36). Your own ""may"" is also forced (line 21)."
 430,Warmog's Armor,2,ok,,
-431,"Akshan, Mischievous",2,ok,,
+431,"Akshan, Mischievous",2,ok,,User ruling 2026-11-14: both the steal and Weaponmaster happen.
 451,Treasure Hunter,2,ok,,
 459,Windsinger,2,mismatch,,"CardDef lacks Keyword::Hidden (only the text says Hidden), and the hide action requires card.keywords.has(Hidden). Setup: Windsinger in hand, you control a battlefield, a rune ready; expected: may hide it for [A]; actual: no hide action (0459_windsinger.cpp def has no keywords.set(Hidden); game_engine.cpp:3317)."
 467,"Vex, Cheerless",2,mismatch,,"(a) Modifiers have no spell-only filter, so any card's cost changes: during a combat a friendly Ambush unit costs [1] less, an enemy one [1] more. (b) Gate is ""any combat in progress"", not ""Vex is in combat"": Vex in base while your units fight elsewhere still discounts. (c) Only the [1] part is applied; the [A] reduction/increase is missing (power_reduction unset, no power increase). Expected per text: only spells, only while Vex is an attacker/defender, [1][A] both ways (0467_vex_cheerless.cpp:19-32; game_engine.cpp:6291-6311)."
@@ -316,7 +316,7 @@ id,name,decks,verdict,status,note
 705,"Kha'Zix, Mutating Horror",1,ok,,
 707,"Pyke, Returned",1,ok,,
 715,Carrion Dredger,1,ok,,
-718,Loyal Poro,1,unsure,,"Company is checked when the Deathknell resolves (other friendly units still at its old location), so a friend that died at the same time does not count. If Loyal Poro and the only other friendly unit there die simultaneously (e.g. both in combat), does it draw 1? (code: no; 0718_loyal_poro.cpp:16-22)"
+718,Loyal Poro,1,mismatch,,"Company is checked when the Deathknell resolves (other friendly units still at its old location), so a friend that died at the same time does not count. If Loyal Poro and the only other friendly unit there die simultaneously (e.g. both in combat), does it draw 1? (code: no; 0718_loyal_poro.cpp:16-22)"
 720,Shepherd's Heirloom,1,ok,,
 724,Enthralling Protector,1,ok,,
 734,"LeBlanc, Fragmented",1,mismatch,,"Beginning Phase check is phase==BeginningStep only, with no 'your' check. (a) LeBlanc dies on the opponent's turn during their Beginning Step (e.g. an opponent's start-of-Beginning-Phase damage effect): expected draw 1, actual draw 2. (b) LeBlanc dies during your own Scoring Step (a hold trigger kills it): expected draw 2, actual draw 1. 0734_leblanc_fragmented.cpp:8"
@@ -325,7 +325,7 @@ id,name,decks,verdict,status,note
 744,Pridestalker,1,mismatch,,"No target choice: no getTargetRequirements, so targets are empty and the code gives +1 to the first friendly unit at a battlefield in map order (none if all friendly units are at base). Setup: friendly units only at base, play a unit to base. Expected: choose any unit (e.g. the played unit) for +1 this turn. Actual: nothing happens; with several friendly units at battlefields the player cannot pick which. 0744_pridestalker.cpp:10-20"
 745,Thrill of the Hunt,1,mismatch,,"A token target comes back: banishObject leaves the token object (CR 183.1 says it ceases to exist) and playIgnoringCost then plays it to a battlefield. Setup: target a friendly unit token at base. Expected: token is banished and ceases to exist, nothing is played. Actual: the token is played to the chosen battlefield. 0745_thrill_of_the_hunt.cpp:18-51"
 746,Bloodharbor Ripper,1,ok,,
-747,Death from Below,1,unsure,,"Code adds a trash-replay grant for [A] that lasts the rest of the turn at normal (non-Action) spell timing. Is 'you may play this from your trash for [A]' a play made right away as part of the resolution, rather than a permission usable any time later this turn? (0747_death_from_below.cpp:21-26)"
+747,Death from Below,1,mismatch,,"Code adds a trash-replay grant for [A] that lasts the rest of the turn at normal (non-Action) spell timing. Is 'you may play this from your trash for [A]' a play made right away as part of the resolution, rather than a permission usable any time later this turn? (0747_death_from_below.cpp:21-26)"
 748,Hextech Gauntlets,1,ok,,equipped conquer trigger runs inline (known gap)
 749,Bashful Bloom,1,ok,,
 750,Lilting Lullaby,1,ok,,counters chain top only (known gap)

@@ -18,22 +18,11 @@ public:
     TriggerType triggerType() const override { return TriggerType::WhenIDie; }
     void onTrigger(CardContext& ctx, const std::vector<GameObjectId>&) override {
         if (!ctx.state.objectExists(ctx.source)) return;
-        const auto& self = ctx.state.getObject(ctx.source);
-        // Read where I died from. last_location is set by killObject when
-        // a unit dies; current `location` will be empty (in trash now).
-        if (!self.last_location.has_value()) return;
-        const auto& death_loc = *self.last_location;
-        // "Didn't die alone" — any OTHER friendly unit still at the same
-        // location, not counting myself (already in trash).
-        bool has_company = false;
-        for (const auto& [oid, obj] : ctx.state.objects) {
-            if (oid == ctx.source) continue;
-            if (!obj.isUnit() || obj.controller != ctx.controller) continue;
-            if (!obj.location.has_value()) continue;
-            if (*obj.location == death_loc) { has_company = true; break; }
-        }
-        if (has_company) {
-            ctx.events.logTrace("LOYAL PORO: not alone at death — drawing 1");
+        // CR 740.2.a, read as I died (last-known information): friendly units that
+        // died at the same time were here too, so I didn't die alone.
+        const auto& lk = ctx.state.getObject(ctx.source).last_known;
+        if (lk.valid && !lk.alone) {
+            ctx.events.logTrace("LOYAL PORO: not alone at death -- drawing 1");
             ctx.executor.drawCards(ctx.controller, 1);
         }
     }

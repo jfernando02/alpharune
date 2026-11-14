@@ -19,23 +19,10 @@ public:
     TriggerType triggerType() const override { return TriggerType::WhenIDie; }
     void onTrigger(CardContext& ctx, const std::vector<GameObjectId>&) override {
         if (!ctx.state.objectExists(ctx.source)) return;
-        const auto& self = ctx.state.getObject(ctx.source);
-        std::optional<LocationId> died_at = self.last_location;
-        if (!died_at.has_value()) died_at = self.location;
-        if (!died_at.has_value()) {
-            ctx.executor.drawCards(ctx.controller, 1);
-            ctx.events.logTrace("LONELY PORO: death location unknown -> draw 1 (approx alone)");
-            return;
-        }
-        bool other_friendly_here = false;
-        for (auto& [id, obj] : ctx.state.objects) {
-            if (id == ctx.source) continue;
-            if (!obj.isUnit() || obj.controller != ctx.controller) continue;
-            if (!obj.location.has_value() || *obj.location != *died_at) continue;
-            other_friendly_here = true;
-            break;
-        }
-        if (!other_friendly_here) {
+        // CR 740.2.a, read as I died (last-known information): a friendly unit
+        // that died at the same time was here too, so I wasn't alone.
+        const auto& lk = ctx.state.getObject(ctx.source).last_known;
+        if (lk.valid && lk.alone) {
             ctx.executor.drawCards(ctx.controller, 1);
             ctx.events.logTrace("LONELY PORO: died alone -> draw 1");
         } else {

@@ -766,6 +766,11 @@ struct GameState {
     std::unordered_map<GameObjectId, GameObject> objects;
     GameObjectId next_object_id = 1;
 
+    // Deaths that happen at the same time share a number: it goes up as each
+    // chain item starts resolving, before cleanup kills lethally damaged
+    // units and before the Beginning Step kills [Temporary] permanents.
+    int death_batch = 0;
+
     // Turn
     TurnState turn;
 

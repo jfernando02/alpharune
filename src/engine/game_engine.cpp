@@ -914,6 +914,7 @@ void GameEngine::beginningStep() {
         if (obj.isUnit()) units_to_kill.push_back(id);
         else if (obj.isGear()) gear_to_kill.push_back(id);
     }
+    state_.death_batch++;
     for (auto id : units_to_kill) {
         killUnit(id);
     }
@@ -5583,6 +5584,7 @@ void GameEngine::processLethalDamage() {
 
         if (lethal) to_kill.push_back(id);
     }
+    state_.death_batch++;   // lethally damaged units die at the same time
     for (auto id : to_kill) {
         killUnit(id);
     }

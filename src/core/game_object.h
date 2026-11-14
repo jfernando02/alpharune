@@ -97,6 +97,11 @@ struct GameObject {
         bool in_combat = false;                 // at a battlefield with combat in progress
         std::vector<GameObjectId> attachments;  // gear attached at death
         KeywordSet keywords;                    // printed + aura + "this turn"
+        std::optional<LocationId> location;     // where it was as it died
+        int death_batch = -1;                   // GameState::death_batch at death
+        // CR 740.2.a: no other friendly unit at its location as it died. Units
+        // that die at the same time count as there ("I didn't die alone").
+        bool alone = true;
     };
     LastKnown last_known;
 

@@ -18,25 +18,34 @@ public:
         return TargetRequirements{.count = 1, .must_be_unit = true,
                                    .must_be_at_battlefield = true};
     }
+    // The target is chosen as the spell goes on the chain, so the copy played
+    // again from the trash chooses its own.
+    bool needsPlayTimeTarget() const override { return true; }
+
     void onResolve(CardContext& ctx, const std::vector<GameObjectId>& targets) override {
-        if (targets.empty() || !ctx.state.objectExists(targets[0])) return;
-        int might = ctx.state.getObject(targets[0]).current_might;
-        ctx.executor.killObject(targets[0]);
-        ctx.events.logTrace("DEATH FROM BELOW: killed unit (might=" +
-                             std::to_string(might) + ")");
-        if (might <= 3) {
-            // "You may play this from your trash for [A]." ctx.source is this
-            // spell's own object; it lands in trash right after onResolve
-            // returns. Grant the controller a this-turn replay for [A]
-            // (one power of any single domain).
-            PlayerState::TrashReplayGrant grant;
-            grant.card = ctx.source;
-            grant.energy = 0;
-            grant.power = 1;
-            grant.any_domain = true;   // [A]
-            ctx.state.player(ctx.controller).trash_replay_grants.push_back(grant);
-            ctx.events.logTrace("DEATH FROM BELOW: granted [A] trash-replay");
+        auto& ri = ctx.state.chain.resuming;
+        // First entry: kill. Re-entry after the "you may" answer skips straight to it.
+        if (!ri.has_value() || ri->resume_point == 0) {
+            if (targets.empty() || !ctx.state.objectExists(targets[0])) return;
+            const int might = ctx.state.getObject(targets[0]).current_might;
+            ctx.executor.killObject(targets[0]);
+            ctx.events.logTrace("DEATH FROM BELOW: killed unit (might=" +
+                                 std::to_string(might) + ")");
+            if (might > 3) return;
         }
+        // "You may play this from your trash for [A]": right away, as part of this
+        // resolution (user ruling 2026-11-14), not a permission for later. It goes
+        // on the chain again and chooses a new target.
+        const PlayerId me = ctx.controller;
+        const auto purpose = ctx.state.purposePlaying(CardType::Spell);
+        const int go = confirmOptional(ctx, "play Death from Below again for [A]", [&] {
+            return ctx.executor.payableAnyPower(me, purpose) >= 1 &&
+                   !enumerateLegalTargets(ctx.state, me).empty();
+        });
+        if (go <= 0) return;
+        if (!ctx.executor.payAnyPower(me, 1, purpose)) return;
+        ctx.events.logTrace("DEATH FROM BELOW: played again from the trash for [A]");
+        ctx.executor.playIgnoringCost(me, ctx.source);
     }
 private:
     const CardDef def_ = [] {

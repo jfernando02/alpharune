@@ -156,6 +156,19 @@ void EffectExecutor::snapshotLastKnown(GameObjectId id) {
     lk.combat_designation = obj.combat_designation;
     lk.attachments = obj.attachments;
     lk.keywords = obj.keywords | obj.aura_keywords;
+    lk.location = obj.location;
+    lk.death_batch = state_.death_batch;
+    lk.alone = true;
+    if (obj.isUnit() && obj.location.has_value()) {
+        for (const auto& [oid, other] : state_.objects) {
+            if (oid == id || !other.isUnit() || other.controller != obj.controller) continue;
+            const bool here_now = other.location.has_value() && *other.location == *obj.location;
+            const bool died_with_me = other.last_known.valid &&
+                other.last_known.death_batch == state_.death_batch &&
+                other.last_known.location == obj.location && !other.location.has_value();
+            if (here_now || died_with_me) { lk.alone = false; break; }
+        }
+    }
     lk.in_combat = false;
     if (auto bf = obj.battlefieldId())
         for (const auto& b : state_.battlefields)
