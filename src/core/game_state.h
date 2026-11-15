@@ -204,6 +204,8 @@ struct PlayerState {
     bool units_enter_ready_this_turn = false;   // Confront: "Units you play this turn enter ready."
     // A friendly unit died during THIS player's Beginning Phase this turn (Shadow Watcher).
     bool unit_died_in_beginning_this_turn = false;
+    // A unit or gear this player controlled died this turn (Lingering Animus).
+    bool unit_or_gear_died_this_turn = false;
     // Continuous-effect values (reset + recomputed during aura recompute; set by
     // cards' applyPassiveAura — default = no effect):
     bool cannot_gain_points = false; // Tianna Crownguard ("opponents can't gain points")
@@ -405,6 +407,7 @@ struct PlayerState {
         hold_points_this_turn = 0;
         draws_this_turn = 0;
         unit_died_in_beginning_this_turn = false;
+        unit_or_gear_died_this_turn = false;
         // (cannot_gain_points / extra_points_to_win are continuous-effect flags,
         //  recomputed during aura cleanup — not per-turn counters.)
         // Expire this-turn cost modifiers

@@ -978,6 +978,8 @@ void register_card_1041(CardRegistry&);
 void register_card_1043(CardRegistry&);
 void register_card_1045(CardRegistry&);
 void register_card_1064(CardRegistry&);
+void register_card_960(CardRegistry&);
+void register_card_1074(CardRegistry&);
 void register_card_1082(CardRegistry&);
 void register_card_1097(CardRegistry&);
 void register_card_1098(CardRegistry&);
@@ -1959,6 +1961,8 @@ void registerAllCards(CardRegistry& registry) {
     register_card_1043(registry);
     register_card_1045(registry);
     register_card_1064(registry);
+    register_card_960(registry);
+    register_card_1074(registry);
     register_card_1082(registry);
     register_card_1097(registry);
     register_card_1098(registry);

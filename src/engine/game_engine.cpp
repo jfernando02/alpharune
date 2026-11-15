@@ -6936,6 +6936,7 @@ void GameEngine::killUnit(GameObjectId unit_id) {
     }
 
     state_.turn.any_unit_died_this_turn = true;
+    state_.player(controller).unit_or_gear_died_this_turn = true;
     // Shadow Watcher: a friendly unit dying during its controller's Beginning
     // Phase (Awaken/Beginning/Scoring steps of that player's own turn).
     {

@@ -263,6 +263,7 @@ void EffectExecutor::killObject(GameObjectId target) {
         // "If a unit died this turn" bookkeeping — the same as a combat death
         // (GameEngine::killUnit): a kill is a kill.
         state_.turn.any_unit_died_this_turn = true;
+        state_.player(controller).unit_or_gear_died_this_turn = true;
         {
             const TurnPhase ph = state_.turn.phase;
             const bool in_beginning = ph == TurnPhase::AwakenPhase ||
@@ -297,6 +298,7 @@ void EffectExecutor::killObject(GameObjectId target) {
                              " (id=" + std::to_string(target) + ")");
         }
 
+        state_.player(controller).unit_or_gear_died_this_turn = true;
         events_.emit(LeftBoardEvent{target, controller, CardType::Gear,
             was_at.value_or(BaseLocation{controller}),
             is_token ? ZoneType::Banishment : ZoneType::Trash, true});
@@ -1787,7 +1789,25 @@ void EffectExecutor::playIgnoringCost(PlayerId player, GameObjectId card,
 
     if (obj.isUnit()) {
         // Units enter exhausted (CR 143.4) unless "units you play this turn enter ready" (Confront).
-        obj.is_exhausted = !state_.player(player).units_enter_ready_this_turn;
+        bool enters_ready = state_.player(player).units_enter_ready_this_turn;
+        // As GameEngine::resolvePermanent: the unit's own "I enter ready"
+        // (Card::entersReadyOnPlay) and another friendly card granting it
+        // (Card::grantsEnterReadyTo) apply to units an effect plays too.
+        if (card_registry_ && !enters_ready && obj.card_def_id != kInvalidId)
+            if (const Card* c = card_registry_->get(obj.card_def_id))
+                enters_ready = c->entersReadyOnPlay(state_, player, obj);
+        if (card_registry_ && !enters_ready) {
+            for (const auto& [oid, other] : state_.objects) {
+                if (other.controller != player || other.card_def_id == kInvalidId) continue;
+                if (!other.location.has_value() && other.zone != ZoneType::LegendZone) continue;
+                const Card* granter = card_registry_->get(other.card_def_id);
+                if (granter && granter->grantsEnterReadyTo(state_, oid, obj)) {
+                    enters_ready = true;
+                    break;
+                }
+            }
+        }
+        obj.is_exhausted = !enters_ready;
         // A unit (re-)entering play is a fresh presence — clear any marked
         // damage carried from a prior life (e.g. banished-then-replayed by
         // Thrill of the Hunt). New plays from hand are already at 0, so this
