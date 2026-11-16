@@ -15,14 +15,16 @@ namespace {
 class LegionQuartermaster : public UnitCard {
 public:
     const CardDef& def() const override { return def_; }
-    unsigned choicesAtFinalization() const override { return kFinalizeTrigger; }
-
     // "As an additional cost to play me, return a friendly gear to its
-    // owner's hand." Mandatory additional cost. The engine has no structured
-    // "return a gear" cost hook, so we (1) gate playability on the presence
-    // of a friendly on-board gear via hasLegalTargets, and (2) perform the
-    // bounce as a WhenYouPlayMe effect. NOTE: the bounce resolves just after
-    // I enter rather than strictly before (no true pre-cost hook).
+    // owner's hand." Required: the player picks the gear as I am played
+    // (executePlayCard), and I can't be played without one.
+    OptionalAdditionalCost optionalAdditionalCost() const override {
+        OptionalAdditionalCost c;
+        c.valid = true;
+        c.return_friendly_gear = true;
+        c.required = true;
+        return c;
+    }
     static bool hasFriendlyGear(const GameState& state, PlayerId controller) {
         for (auto& [id, obj] : state.objects) {
             if (!obj.isGear() || obj.controller != controller) continue;
@@ -33,23 +35,6 @@ public:
     }
     bool hasLegalTargets(const GameState& state, PlayerId controller) const override {
         return hasFriendlyGear(state, controller);
-    }
-
-    TriggerType triggerType() const override { return TriggerType::WhenYouPlayMe; }
-    void onTrigger(CardContext& ctx, const std::vector<GameObjectId>&) override {
-        std::vector<GameObjectId> gears;
-        for (auto& [id, obj] : ctx.state.objects) {
-            if (!obj.isGear() || obj.controller != ctx.controller) continue;
-            if (!obj.location.has_value()) continue;
-            gears.push_back(id);
-        }
-        GameObjectId gear = pickTarget(ctx,
-            "Legion Quartermaster: return a friendly gear to hand", gears);
-        if (finalizingChoices(ctx)) return;   // choices end here (CR 383.3)
-        if (gear == kInvalidId || !ctx.state.objectExists(gear)) return;
-        ctx.executor.bounceToHand(gear);
-        ctx.events.logTrace("LEGION QUARTERMASTER: returned a friendly gear to hand "
-                            "(additional cost)");
     }
 private:
     const CardDef def_ = [] {

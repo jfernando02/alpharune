@@ -15,13 +15,23 @@ class BlueSentinel : public UnitCard {
 public:
     const CardDef& def() const override { return def_; }
     TriggerType triggerType() const override { return TriggerType::WhenIHold; }
+    bool holdEffectsHereTriggerAgain() const override { return true; }
+    // "When I hold, [Add] [A] at the start of your next Main Phase": the hold
+    // schedules a one-shot delayed ability for the controller's next Main
+    // Phase (it fires even if I have left the board by then).
     void onTrigger(CardContext& ctx, const std::vector<GameObjectId>&) override {
-        // "When I hold, [Add] [A] ..." — approximated as immediate add (the
-        // "at the start of your next Main Phase" deferral has no scheduling
-        // primitive; see class comment).
-        ctx.executor.addFloatingUniversalPower(ctx.controller, 1);
-        ctx.events.logTrace("BLUE SENTINEL: hold -> [Add] [A] "
-                            "(deferral to next main phase approximated as now)");
+        if (ctx.firing_trigger == TriggerType::AtStartOfMain) {
+            ctx.executor.addFloatingUniversalPower(ctx.controller, 1);
+            ctx.events.logTrace("BLUE SENTINEL: start of Main Phase -> [Add] [A]");
+            return;
+        }
+        DelayedAbility da;
+        da.source = ctx.source;
+        da.card_def_id = cardDefId();
+        da.controller = ctx.controller;
+        da.trigger = TriggerType::AtStartOfMain;
+        ctx.state.delayed_abilities.push_back(da);
+        ctx.events.logTrace("BLUE SENTINEL: hold -> [Add] [A] at the start of the next Main Phase");
     }
 private:
     const CardDef def_ = [] {

@@ -641,8 +641,22 @@ public:
         bool kill_friendly_unit = false;
         bool kill_friendly_gear = false;
         bool return_friendly_gear = false;
+        // "As an additional cost to play me, kill a friendly unit" (Cruel
+        // Patron): not optional; the card can't be played without fodder.
+        bool required = false;
+        // "I cost [1] less for each Energy it costs and [domain] less for each
+        // Power it costs" (Atakhan): the killed unit's printed costs come off.
+        bool reduce_by_killed_cost = false;
+        // "You may spend N XP as an additional cost to play me. If you do, I
+        // cost [reduce_energy] less" (Poppy, Defender of the Meek).
+        int spend_xp = 0;
     };
     virtual OptionalAdditionalCost optionalAdditionalCost() const { return {}; }
+    /// Which friendly objects the kill / return additional cost may take
+    /// ("kill a Bird, Cat, Dog, or Poro you control": Stalking Wolf).
+    virtual bool additionalCostAccepts(const GameState& /*state*/, const GameObject& /*fodder*/) const {
+        return true;
+    }
 
     // ── Alternative play cost ──
     /// "You may play me for <alt cost> [instead of my printed cost]" when a
@@ -701,6 +715,11 @@ public:
     /// Consulted only for effects of a spell or ability that chose `self`.
     /// The card's applyReplacement may also replace its own death ("if I would
     /// die ... instead" â€” Mordekaiser).
+    /// "Your conquer effects for conquering here trigger an additional time"
+    /// (Red Brambleback): while this unit is at the battlefield conquered.
+    virtual bool conquerEffectsHereTriggerAgain() const { return false; }
+    // "Your hold effects for holding here trigger an additional time" (Blue Sentinel).
+    virtual bool holdEffectsHereTriggerAgain() const { return false; }
     virtual bool replacementCoversSelf() const { return false; }
 
     /// A battlefield ability any player may use, not only the controller
@@ -783,6 +802,21 @@ public:
     /// unit resolves, `played` already at its destination.
     virtual bool grantsEnterReadyTo(const GameState& /*state*/, GameObjectId /*self*/,
                                     const GameObject& /*played*/) const {
+        return false;
+    }
+
+    /// A continuous "your [units] have [keyword]" grant, asked of each card
+    /// on the board as a unit is played (before auras are recalculated with
+    /// it on the board): Gemcraft Seer / Forecaster granting [Vision].
+    /// "The next time it would die, you may pay ... to recall it instead"
+    /// (Unlicensed Armory): asked as `unit` would die; ctx.controller is the
+    /// unit's controller. True = the replacement applies.
+    virtual bool acceptDeathReplacement(CardContext& /*ctx*/, GameObjectId /*unit*/) const {
+        return true;
+    }
+
+    virtual bool grantsKeywordTo(const GameState& /*state*/, GameObjectId /*self*/,
+                                 const GameObject& /*unit*/, Keyword /*kw*/) const {
         return false;
     }
 

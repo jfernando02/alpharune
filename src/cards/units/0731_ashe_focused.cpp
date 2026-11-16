@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "cards/card_helpers.h"
 
 namespace riftbound {
 namespace {
@@ -16,6 +17,22 @@ public:
     const CardDef& def() const override { return def_; }
     TriggerType triggerType() const override { return TriggerType::WhenYouPlayMe; }
     void onTrigger(CardContext& ctx, const std::vector<GameObjectId>&) override {
+        // "When they hold, return it to their hand (even if I'm no longer on
+        // the board)": a delayed ability scheduled below, carrying the card.
+        if (ctx.firing_trigger == TriggerType::WhenAnOpponentHolds) {
+            const GameObjectId card = triggerSubject(ctx);
+            if (card == kInvalidId || !ctx.state.objectExists(card)) return;
+            auto& o = ctx.state.getObject(card);
+            auto& ban = ctx.state.player(o.owner).banishment;
+            auto it = std::find(ban.begin(), ban.end(), card);
+            if (o.zone != ZoneType::Banishment || it == ban.end()) return;   // it left banishment
+            ban.erase(it);
+            o.zone = ZoneType::Hand;
+            o.location = std::nullopt;
+            ctx.state.player(o.owner).hand.push_back(card);
+            ctx.events.logTrace("ASHE FOCUSED: they held -> " + o.name + " returns to their hand");
+            return;
+        }
         PlayerId opp = opponent(ctx.controller);
         auto& opp_ps = ctx.state.player(opp);
 
@@ -45,9 +62,14 @@ public:
         auto& h = ctx.state.player(opp).hand;
         h.erase(std::remove(h.begin(), h.end(), picked), h.end());
         ctx.executor.banishObject(picked);
-        ctx.events.logTrace("ASHE FOCUSED: banished a card from opponent's hand "
-                            "(hold-return rider not implemented — no deferred "
-                            "board-independent hold hook)");
+        DelayedAbility da;
+        da.source = ctx.source;
+        da.card_def_id = cardDefId();
+        da.controller = ctx.controller;
+        da.trigger = TriggerType::WhenAnOpponentHolds;
+        da.payload = picked;
+        ctx.state.delayed_abilities.push_back(da);
+        ctx.events.logTrace("ASHE FOCUSED: banished a card from the opponent's hand until they hold");
     }
 private:
     const CardDef def_ = [] {

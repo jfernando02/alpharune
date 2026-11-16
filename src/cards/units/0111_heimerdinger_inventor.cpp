@@ -12,6 +12,7 @@ namespace riftbound {
 namespace {
 
 class HeimerdingerInventor : public UnitCard {
+    static constexpr int kMaxGrantedIndex = 8;
 public:
     const CardDef& def() const override { return def_; }
     // "I have all [E] abilities of all friendly legends, units, and gear."
@@ -21,9 +22,10 @@ public:
     // ability at that index, so granting index 0 of every friendly card is safe;
     // activation routes to the granting card's onActivate with Heimer as the
     // bearer (ctx.source).
-    // APPROX: proxies ability index 0 of each friendly card (multi-ability cards'
-    // additional abilities are not copied); abilities that deeply reference their
-    // own source object act as Heimer's.
+    // Every ability index of each friendly card is granted, kept only where
+    // that ability's cost has [E] (GrantedAbilityRef::exhaust_cost_only);
+    // indexes past a card's last ability are skipped by the generator.
+    // Abilities that reference their own source object act as Heimer's.
     void applyPassiveAura(GameState& state, PlayerId controller) const override {
         std::vector<GameObjectId> heimers;
         for (auto& [id, obj] : state.objects)
@@ -39,7 +41,8 @@ public:
             const bool legend = obj.zone == ZoneType::LegendZone;
             if (!on_board && !legend) continue;
             if (!(obj.isUnit() || obj.isGear() || obj.isLegend())) continue;
-            refs.push_back({obj.card_def_id, 0});
+            for (int i = 0; i < kMaxGrantedIndex; ++i)
+                refs.push_back({obj.card_def_id, i, /*exhaust_cost_only=*/true});
         }
         for (auto hid : heimers) {
             auto& h = state.getObject(hid);

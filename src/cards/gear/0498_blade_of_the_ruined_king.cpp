@@ -1,5 +1,6 @@
 #include "cards/card.h"
 #include "cards/card_registry.h"
+#include "cards/card_helpers.h"
 #include "core/game_state.h"
 #include "core/events.h"
 #include "engine/effect_executor.h"
@@ -74,9 +75,7 @@ public:
         {
             auto& dr = state.getObject(order_rune);
             ctx.events.logTrace("  EQUIP_COST: recycled " + dr.name + " for [Y]");
-            dr.location = std::nullopt;
-            dr.zone = ZoneType::RuneDeck;
-            ps.rune_deck.insert(ps.rune_deck.begin(), order_rune);
+            recycleRuneForPower(ctx, ctx.controller, order_rune);
         }
 
         // Attach.

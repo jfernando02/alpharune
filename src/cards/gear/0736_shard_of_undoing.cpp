@@ -43,22 +43,15 @@ public:
             return;  // already fired this turn
         self.card_counters[key] = state.turn.turn_number;
 
-        // "each opponent must kill one of their units." In 1v1 the opponent
-        // selects which of their own units dies; their choice isn't surfaced
-        // through this controller's agent, so approximate the rational pick
-        // (lowest-Might unit they control) — same convention as King's Edict.
+        // "each opponent must kill one of their units": the opponent chooses,
+        // with their own agent.
         PlayerId opp = opponent(ctx.controller);
-        GameObjectId victim = kInvalidId;
-        int best_might = 0;
-        for (auto& [id, obj] : state.objects) {
-            if (!obj.isUnit() || obj.controller != opp) continue;
-            if (!obj.location.has_value()) continue;
-            if (victim == kInvalidId || obj.current_might < best_might) {
-                victim = id;
-                best_might = obj.current_might;
-            }
-        }
-        if (victim != kInvalidId) {
+        std::vector<GameObjectId> theirs;
+        for (auto& [id, obj] : state.objects)
+            if (obj.isUnit() && obj.controller == opp && obj.location.has_value()) theirs.push_back(id);
+        if (theirs.empty()) return;
+        const GameObjectId victim = ctx.executor.chooseObjectNow(opp, theirs);
+        if (victim != kInvalidId && state.objectExists(victim)) {
             ctx.executor.killObject(victim);
             ctx.events.logTrace("SHARD OF UNDOING: opponent kills a unit "
                                 "(first friendly death of their Beginning Phase)");

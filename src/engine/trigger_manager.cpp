@@ -17,6 +17,15 @@ void TriggerManager::subscribe() {
         [this](const CardPlayedEvent& e) { onCardPlayed(e); }));
     connections_.push_back(events_.on_entered_board.connect(
         [this](const EnteredBoardEvent& e) { onEnteredBoard(e); }));
+    connections_.push_back(events_.on_token_created.connect(
+        [this](const TokenCreatedEvent& e) { onTokenCreated(e); }));
+    // Delayed "the next time it takes damage" abilities, scoped to the unit.
+    connections_.push_back(events_.on_damage_dealt.connect(
+        [this](const DamageDealtEvent& e) {
+            if (e.amount <= 0) return;
+            checkDelayedAbilities(TriggerType::WhenItTakesDamage, PlayerId::Player1, e.target);
+            checkDelayedAbilities(TriggerType::WhenItTakesDamage, PlayerId::Player2, e.target);
+        }));
     connections_.push_back(events_.on_combat_started.connect(
         [this](const CombatStartedEvent& e) { onCombatStarted(e); }));
     connections_.push_back(events_.on_combat_ended.connect(
@@ -108,7 +117,8 @@ void TriggerManager::checkDelayedAbilities(TriggerType trigger,
         // Targon's Peak's AtEndOfTurn ready-runes).
         if (!state_.chain.items.empty()) {
             state_.chain.items.back().fired_trigger = trigger;
-            if (event_object != kInvalidId) state_.chain.items.back().triggering_subject = event_object;
+            const GameObjectId subject = event_object != kInvalidId ? event_object : da.payload;
+            if (subject != kInvalidId) state_.chain.items.back().triggering_subject = subject;
         }
     }
 
@@ -326,15 +336,17 @@ void TriggerManager::onCardPlayed(const CardPlayedEvent& e) {
     }
 
     // Vision keyword: "When you play me, look at top card, may recycle it"
-    // CR 817.1.b — the recycle decision is a "may" (optional). Phase 6q+:
-    // we surface the peek via CardRevealedEvent (so observation tracking
-    // works) and auto-recycle spells as a deterministic placeholder for
-    // the agent's "yes". Wiring as a true agent-choice would need a
-    // synthetic Card-less trigger (keyword has no Card subclass to
-    // attach confirmOptional to) — queued as a follow-up. Today's
-    // behavior is CR-correct in effect for spells (always recycled);
-    // non-spell top cards are left in place (auto-no).
-    if (obj.keywords.has(Keyword::Vision) && obj.isPermanent()) {
+    // (CR 817.1.b). The look is private (CardRevealedEvent to the player);
+    // the player answers "recycle it?" as the card is played. Vision may be
+    // printed or granted by a friendly card on the board (grantsKeywordTo).
+    bool has_vision = obj.hasKeyword(Keyword::Vision);
+    if (!has_vision && obj.isPermanent())
+        for (const auto& [gid, g] : state_.objects) {
+            if (gid == e.object || g.controller != e.player || !g.location.has_value()) continue;
+            if (const Card* gc = card_registry_.get(g.card_def_id);
+                gc && gc->grantsKeywordTo(state_, gid, obj, Keyword::Vision)) { has_vision = true; break; }
+        }
+    if (has_vision && obj.isPermanent()) {
         auto& ps = state_.player(e.player);
         if (!ps.main_deck.empty()) {
             auto top_card = ps.main_deck.back();
@@ -344,7 +356,10 @@ void TriggerManager::onCardPlayed(const CardPlayedEvent& e) {
                 top_card, top_obj.card_def_id, top_obj.owner,
                 /*revealed_to_all=*/false, /*revealed_to=*/e.player,
                 ZoneType::MainDeck});
-            if (top_obj.isSpell()) {
+            const bool recycle = effect_executor_
+                ? effect_executor_->chooseObjectOrNoneNow(e.player, {top_card}) == top_card
+                : top_obj.isSpell();
+            if (recycle) {
                 ps.main_deck.pop_back();
                 ps.main_deck.insert(ps.main_deck.begin(), top_card);
             }
@@ -469,6 +484,20 @@ void TriggerManager::onEnteredBoard(const EnteredBoardEvent& e) {
     if (cardFiresOn(card_registry_, obj.card_def_id, TriggerType::WhenYouPlayThis)) {
         fireTrigger(e.object, e.controller, 0, TriggerType::WhenYouPlayThis);
     }
+}
+
+// Token units are played by the effect that makes them ("play a 1 [M] Recruit
+// unit token"): "When you play a token unit" watchers of its controller.
+void TriggerManager::onTokenCreated(const TokenCreatedEvent& e) {
+    if (e.card_type != CardType::Unit) return;
+    std::vector<GameObjectId> watchers;
+    for (auto& [id, obj] : state_.objects) {
+        if (id == e.object || obj.controller != e.controller || !obj.location.has_value()) continue;
+        if (obj.card_def_id == kInvalidId) continue;
+        if (cardFiresOn(card_registry_, obj.card_def_id, TriggerType::WhenYouPlayATokenUnit))
+            watchers.push_back(id);
+    }
+    for (auto wid : watchers) fireTrigger(wid, e.controller, 0, TriggerType::WhenYouPlayATokenUnit, e.object);
 }
 
 void TriggerManager::onCombatStarted(const CombatStartedEvent& e) {
@@ -760,6 +789,28 @@ void TriggerManager::onUnitDied(const UnitDiedEvent& e) {
         }
     }
 
+    // "When you kill an enemy unit" (Solari Shrine). The killer is the
+    // controller of the chain item resolving, else the player whose damage
+    // was marked on it (combat, or lethal damage killed at cleanup).
+    {
+        PlayerId killer = PlayerId::None;
+        if (state_.chain.resuming.has_value()) {
+            killer = state_.chain.resuming->controller;
+        } else if (state_.objectExists(e.object)) {
+            const auto& lk = state_.getObject(e.object).last_known;
+            if (lk.valid && lk.damage_by[playerIndex(opp)] > 0) killer = opp;
+        }
+        if (killer == opp) {
+            std::vector<GameObjectId> watchers;
+            for (auto& [id, other] : state_.objects)
+                if (other.location.has_value() && other.controller == opp &&
+                    cardFiresOn(card_registry_, other.card_def_id, TriggerType::WhenYouKillAnEnemyUnit))
+                    watchers.push_back(id);
+            for (auto wid : watchers)
+                fireTrigger(wid, opp, 0, TriggerType::WhenYouKillAnEnemyUnit, /*subject=*/e.object);
+        }
+    }
+
     // "When you kill a unit with a spell" (Immortal Phoenix 037). Attributed to
     // the controller of the spell currently resolving on the chain. Fans to that
     // player's on-board cards AND cards in their TRASH (Phoenix triggers from
@@ -812,6 +863,19 @@ void TriggerManager::onLeftBoard(const LeftBoardEvent& e) {
         cardFiresOn(card_registry_, state_.getObject(e.object).card_def_id,
                     TriggerType::WhenILeaveTheBoard))
         fireTrigger(e.object, e.controller, 0, TriggerType::WhenILeaveTheBoard);
+    // "When you recycle a rune," — a rune going from the board to the rune deck.
+    if (e.card_type == CardType::Rune && e.destination == ZoneType::RuneDeck) {
+        std::vector<GameObjectId> watchers;
+        for (auto& [id, obj] : state_.objects) {
+            if (obj.controller != e.controller || !obj.location.has_value()) continue;
+            if (obj.card_def_id == kInvalidId) continue;
+            if (cardFiresOn(card_registry_, obj.card_def_id, TriggerType::WhenYouRecycleARune))
+                watchers.push_back(id);
+        }
+        for (auto wid : watchers) fireTrigger(wid, e.controller, 0, TriggerType::WhenYouRecycleARune);
+        fireLegendTrigger(TriggerType::WhenYouRecycleARune, e.controller);
+        return;
+    }
     if (e.card_type != CardType::Gear || !e.was_killed) return;
 
     if (!state_.objectExists(e.object)) return;
@@ -856,71 +920,84 @@ void TriggerManager::onScore(const ScoreEvent& e) {
     GameObjectId scored_bf_card = kInvalidId;
     for (const auto& bf : state_.battlefields)
         if (bf.id == e.battlefield) scored_bf_card = bf.card_object_id;
-    if (e.method == ScoreMethod::Conquer) {
-        fireLegendTrigger(TriggerType::WhenIConquer, e.player, 0, scored_bf_card);
-    }
-    if (e.method == ScoreMethod::Hold) {
-        fireLegendTrigger(TriggerType::WhenIHold, e.player, 0, scored_bf_card);
-    }
-    fireLegendTrigger(TriggerType::WhenIConquerOrHold, e.player, 0, scored_bf_card);
-
-    for (auto uid : units) {
-        if (!state_.objectExists(uid)) continue;
-        auto& obj = state_.getObject(uid);
-        CardDefId def = obj.card_def_id;
-
-        // Generic "this unit conquered this turn" marker. Stamped with the
-        // current turn number so a stale value from a prior turn never reads
-        // as a conquer (no reset needed). Cards like Blighted Battleaxe read
-        // it to ask "did the equipped unit conquer this turn?". Mirrors the
-        // __defend_attacker_id capture pattern.
+    // "Your conquer effects for conquering here trigger an additional time"
+    // (Red Brambleback): the scorer's conquer effects fire once more per such
+    // card of theirs at this battlefield.
+    // Blue Sentinel does the same for hold effects.
+    int times = 1;
+    for (auto uid : units)
+        if (state_.objectExists(uid))
+            if (const Card* c = card_registry_.get(state_.getObject(uid).card_def_id); c &&
+                ((e.method == ScoreMethod::Conquer && c->conquerEffectsHereTriggerAgain()) ||
+                 (e.method == ScoreMethod::Hold && c->holdEffectsHereTriggerAgain())))
+                ++times;
+    for (int rep = 0; rep < times; ++rep) {
         if (e.method == ScoreMethod::Conquer) {
-            obj.card_counters["__conquered_turn"] = state_.turn.turn_number;
-        }
-
-        if (e.method == ScoreMethod::Conquer &&
-            cardFiresOn(card_registry_, def, TriggerType::WhenIConquer)) {
-            fireTrigger(uid, e.player, 0, TriggerType::WhenIConquer);
-        }
-        if (e.method == ScoreMethod::Hold &&
-            cardFiresOn(card_registry_, def, TriggerType::WhenIHold)) {
-            fireTrigger(uid, e.player, 0, TriggerType::WhenIHold);
-        }
-        if (cardFiresOn(card_registry_, def, TriggerType::WhenIConquerOrHold)) {
-            fireTrigger(uid, e.player, 0, TriggerType::WhenIConquerOrHold);
-        }
-
-        // Check attached gear for score triggers
-        if (e.method == ScoreMethod::Conquer) {
-            fireEquippedTriggers(uid, e.player, TriggerType::WhenIConquer);
-            fireEquippedTriggers(uid, e.player, TriggerType::WhenIConquerOrHold);
+            fireLegendTrigger(TriggerType::WhenIConquer, e.player, 0, scored_bf_card);
         }
         if (e.method == ScoreMethod::Hold) {
-            fireEquippedTriggers(uid, e.player, TriggerType::WhenIHold);
-            fireEquippedTriggers(uid, e.player, TriggerType::WhenIConquerOrHold);
+            fireLegendTrigger(TriggerType::WhenIHold, e.player, 0, scored_bf_card);
         }
+        fireLegendTrigger(TriggerType::WhenIConquerOrHold, e.player, 0, scored_bf_card);
 
-        // Skyfall of Areion (CR): "My hold effects are also conquer effects,
-        // and vice versa." If an attached gear declares the cross-fire
-        // property, also fire the OPPOSITE score-type triggers on this unit
-        // and its equipped gear.
-        bool crossfire = false;
-        for (auto gid : obj.attachments) {
-            if (!state_.objectExists(gid)) continue;
-            Card* gc = card_registry_.get(state_.getObject(gid).card_def_id);
-            if (gc && gc->crossesHoldConquerTriggers()) { crossfire = true; break; }
-        }
-        if (crossfire) {
+        for (auto uid : units) {
+            if (!state_.objectExists(uid)) continue;
+            auto& obj = state_.getObject(uid);
+            CardDefId def = obj.card_def_id;
+
+            // Generic "this unit conquered this turn" marker. Stamped with the
+            // current turn number so a stale value from a prior turn never reads
+            // as a conquer (no reset needed). Cards like Blighted Battleaxe read
+            // it to ask "did the equipped unit conquer this turn?". Mirrors the
+            // __defend_attacker_id capture pattern.
             if (e.method == ScoreMethod::Conquer) {
-                // Conquer also counts as hold → fire hold effects.
-                if (cardFiresOn(card_registry_, def, TriggerType::WhenIHold))
-                    fireTrigger(uid, e.player, 0, TriggerType::WhenIHold);
-                fireEquippedTriggers(uid, e.player, TriggerType::WhenIHold);
-            } else if (e.method == ScoreMethod::Hold) {
-                // Hold also counts as conquer → fire conquer effects.
-                if (cardFiresOn(card_registry_, def, TriggerType::WhenIConquer))
-                    fireTrigger(uid, e.player, 0, TriggerType::WhenIConquer);
+                obj.card_counters["__conquered_turn"] = state_.turn.turn_number;
+            }
+
+            if (e.method == ScoreMethod::Conquer &&
+                cardFiresOn(card_registry_, def, TriggerType::WhenIConquer)) {
+                fireTrigger(uid, e.player, 0, TriggerType::WhenIConquer);
+            }
+            if (e.method == ScoreMethod::Hold &&
+                cardFiresOn(card_registry_, def, TriggerType::WhenIHold)) {
+                fireTrigger(uid, e.player, 0, TriggerType::WhenIHold);
+            }
+            if (cardFiresOn(card_registry_, def, TriggerType::WhenIConquerOrHold)) {
+                fireTrigger(uid, e.player, 0, TriggerType::WhenIConquerOrHold);
+            }
+
+            // Check attached gear for score triggers
+            if (e.method == ScoreMethod::Conquer) {
                 fireEquippedTriggers(uid, e.player, TriggerType::WhenIConquer);
+                fireEquippedTriggers(uid, e.player, TriggerType::WhenIConquerOrHold);
+            }
+            if (e.method == ScoreMethod::Hold) {
+                fireEquippedTriggers(uid, e.player, TriggerType::WhenIHold);
+                fireEquippedTriggers(uid, e.player, TriggerType::WhenIConquerOrHold);
+            }
+
+            // Skyfall of Areion (CR): "My hold effects are also conquer effects,
+            // and vice versa." If an attached gear declares the cross-fire
+            // property, also fire the OPPOSITE score-type triggers on this unit
+            // and its equipped gear.
+            bool crossfire = false;
+            for (auto gid : obj.attachments) {
+                if (!state_.objectExists(gid)) continue;
+                Card* gc = card_registry_.get(state_.getObject(gid).card_def_id);
+                if (gc && gc->crossesHoldConquerTriggers()) { crossfire = true; break; }
+            }
+            if (crossfire) {
+                if (e.method == ScoreMethod::Conquer) {
+                    // Conquer also counts as hold → fire hold effects.
+                    if (cardFiresOn(card_registry_, def, TriggerType::WhenIHold))
+                        fireTrigger(uid, e.player, 0, TriggerType::WhenIHold);
+                    fireEquippedTriggers(uid, e.player, TriggerType::WhenIHold);
+                } else if (e.method == ScoreMethod::Hold) {
+                    // Hold also counts as conquer → fire conquer effects.
+                    if (cardFiresOn(card_registry_, def, TriggerType::WhenIConquer))
+                        fireTrigger(uid, e.player, 0, TriggerType::WhenIConquer);
+                    fireEquippedTriggers(uid, e.player, TriggerType::WhenIConquer);
+                }
             }
         }
     }
@@ -959,8 +1036,13 @@ void TriggerManager::onScore(const ScoreEvent& e) {
                 cardFiresOn(card_registry_, obj.card_def_id, TriggerType::WhenYouHoldHere))
                 here.push_back({id, TriggerType::WhenYouHoldHere});
         }
-        for (auto& [id, t] : here) fireTrigger(id, e.player, 0, t);
+        for (int rep = 0; rep < times; ++rep)
+            for (auto& [id, t] : here) fireTrigger(id, e.player, 0, t);
     }
+
+    // Delayed "when they hold" abilities of the scorer's opponent (Ashe, Focused).
+    if (e.method == ScoreMethod::Hold)
+        checkDelayedAbilities(TriggerType::WhenAnOpponentHolds, opponent(e.player), kInvalidId);
 
     // "When an opponent scores" — fires on the non-scoring player's on-board cards.
     PlayerId opp = opponent(e.player);
@@ -1265,8 +1347,13 @@ void TriggerManager::onObjectStateChanged(const ObjectStateChangedEvent& e) {
         for (auto wid : watchers)
             fireTrigger(wid, controller, 0, TriggerType::WhenYouChooseAFriendlyUnit,
                         /*subject=*/e.object);
-        // Battlefield cards: "when a friendly unit is chosen here".
-        if (auto bf = state_.getObject(e.object).battlefieldId())
+        // Battlefield cards: "when a player chooses a friendly unit here with
+        // a spell". The chooser is the resolving item, else the item just
+        // put on the chain.
+        const bool by_spell = state_.chain.resuming.has_value()
+            ? state_.chain.resuming->is_spell
+            : (!state_.chain.items.empty() && state_.chain.items.back().is_spell);
+        if (auto bf = state_.getObject(e.object).battlefieldId(); bf && by_spell)
             fireBattlefieldTriggers(TriggerType::WhenAFriendlyUnitChosenHere, controller, *bf);
         return;
     }

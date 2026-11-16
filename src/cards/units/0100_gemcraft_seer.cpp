@@ -19,10 +19,13 @@ public:
     // peeks the top card on play for any unit with the Vision keyword).
     // Clause 2: "Other friendly units have [Vision]." Grant the Vision keyword
     // via aura to every other friendly unit. Mirrors Forecaster's grant.
-    // NOTE: the engine's play-time Vision peek reads obj.keywords.has(Vision),
-    // not the aura-granted set, so an aura-only Vision unit won't peek on play
-    // (documented engine gap shared with Forecaster); the keyword presence is
-    // still correctly reflected via hasKeyword() for any reader that uses it.
+    // The play-time Vision look asks grantsKeywordTo (the aura is not yet
+    // recalculated for a unit just played).
+    bool grantsKeywordTo(const GameState& state, GameObjectId self, const GameObject& unit,
+                         Keyword kw) const override {
+        return kw == Keyword::Vision && unit.isUnit() && state.objectExists(self) &&
+               unit.id != self && unit.controller == state.getObject(self).controller;
+    }
     void applyPassiveAura(GameState& state, PlayerId controller) const override {
         GameObjectId self_id = kInvalidId;
         for (auto& [id, obj] : state.objects) {

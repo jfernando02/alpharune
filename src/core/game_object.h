@@ -104,6 +104,8 @@ struct GameObject {
         // CR 740.2.a: no other friendly unit at its location as it died. Units
         // that die at the same time count as there ("I didn't die alone").
         bool alone = true;
+        bool stunned = false;                   // stunned as it died (Solari Shrine)
+        int damage_by[2] = {0, 0};              // damage_marked_by as it died
     };
     LastKnown last_known;
 
@@ -156,6 +158,7 @@ struct GameObject {
     struct GrantedAbilityRef {
         CardDefId source_def_id = 0;  // 0 = none; else the granting card
         int ability_index = 0;
+        bool exhaust_cost_only = false;   // only if that ability's cost has [E] (Heimerdinger)
     };
     std::vector<GrantedAbilityRef> granted_abilities;
     // Abilities granted "this turn" by a resolved effect (Dominus: `give it
@@ -213,6 +216,9 @@ struct GameObject {
     // path: when set it heals + exhausts + recalls the unit to base and clears
     // the flag (one-shot). Expires at end of turn if unused.
     bool death_replacement_recall_pending = false;
+    // The card whose replacement it is, when that card attaches a choice or
+    // cost (Unlicensed Armory: "you may pay [C]"): Card::acceptDeathReplacement.
+    CardDefId death_replacement_recall_by = kInvalidId;
 
     // ── One-shot damage prevention (Counter Strike 510) ──
     // "The next time that unit would be dealt damage this turn, prevent it."

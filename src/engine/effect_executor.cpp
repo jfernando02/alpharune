@@ -158,6 +158,9 @@ void EffectExecutor::snapshotLastKnown(GameObjectId id) {
     lk.keywords = obj.keywords | obj.aura_keywords;
     lk.location = obj.location;
     lk.death_batch = state_.death_batch;
+    lk.stunned = obj.is_stunned;
+    lk.damage_by[0] = obj.damage_marked_by[0];
+    lk.damage_by[1] = obj.damage_marked_by[1];
     lk.alone = true;
     if (obj.isUnit() && obj.location.has_value()) {
         for (const auto& [oid, other] : state_.objects) {
@@ -177,6 +180,20 @@ void EffectExecutor::snapshotLastKnown(GameObjectId id) {
     obj.card_counters["__died_empowered"] = obj.empowered;
 }
 
+bool EffectExecutor::takeDeathRecallReplacement(GameObjectId unit) {
+    auto& obj = state_.getObject(unit);
+    if (!obj.death_replacement_recall_pending) return false;
+    obj.death_replacement_recall_pending = false;
+    const CardDefId by = obj.death_replacement_recall_by;
+    obj.death_replacement_recall_by = kInvalidId;
+    if (by == kInvalidId || !card_registry_) return true;
+    const Card* card = card_registry_->get(by);
+    if (!card) return true;
+    CardContext ctx{state_, events_, *this, obj.controller, unit};
+    ctx.registry = card_registry_;
+    return card->acceptDeathReplacement(ctx, unit);
+}
+
 void EffectExecutor::killObject(GameObjectId target) {
     if (!state_.objectExists(target)) return;
     auto& obj = state_.getObject(target);
@@ -192,8 +209,7 @@ void EffectExecutor::killObject(GameObjectId target) {
         // Deferred one-shot death replacement on the unit itself (Tactical
         // Retreat 737) — applies to effect/ability kills too, not just combat
         // lethal (GameEngine::killUnit has the parallel check).
-        if (obj.death_replacement_recall_pending) {
-            obj.death_replacement_recall_pending = false;
+        if (takeDeathRecallReplacement(target)) {
             for (auto gear_id : obj.attachments) {
                 if (state_.objectExists(gear_id)) {
                     state_.getObject(gear_id).attached_to = std::nullopt;
@@ -267,6 +283,7 @@ void EffectExecutor::killObject(GameObjectId target) {
         // (GameEngine::killUnit): a kill is a kill.
         state_.turn.any_unit_died_this_turn = true;
         state_.player(controller).unit_or_gear_died_this_turn = true;
+        state_.player(controller).unit_died_this_turn = true;
         {
             const TurnPhase ph = state_.turn.phase;
             const bool in_beginning = ph == TurnPhase::AwakenPhase ||
@@ -946,6 +963,7 @@ void EffectExecutor::recycleCards(PlayerId /*effect_controller*/,
         for (auto& ps : state_.players)
             for (auto* list : {&ps.hand, &ps.main_deck, &ps.rune_deck, &ps.trash, &ps.banishment})
                 list->erase(std::remove(list->begin(), list->end(), cid), list->end());
+        const auto was_at = obj.location;
         obj.location = std::nullopt;
         obj.attached_to.reset();
         if (obj.is_token) {
@@ -959,6 +977,9 @@ void EffectExecutor::recycleCards(PlayerId /*effect_controller*/,
             obj.zone = ZoneType::RuneDeck;
             state_.player(obj.owner).rune_deck.insert(
                 state_.player(obj.owner).rune_deck.begin(), cid);
+            if (was_at)   // a rune recycled from the board
+                events_.emit(LeftBoardEvent{cid, obj.controller, CardType::Rune, *was_at,
+                                            ZoneType::RuneDeck, false});
         } else {
             state_.player(obj.owner).main_deck.insert(
                 state_.player(obj.owner).main_deck.begin(), cid);
@@ -1762,11 +1783,14 @@ bool plainPay(GameState& state, EventBus& events, PlayerId player, const PlainCo
         if (p_need <= 0) break;
         auto& r = state.getObject(rid);
         if (!runeMatches(r, cost.domains)) continue;
+        const auto was_at = r.location;
         r.location = std::nullopt;
         r.zone = ZoneType::RuneDeck;
         r.is_exhausted = false;
         ps.rune_deck.insert(ps.rune_deck.begin(), rid);
         ps.power_spent_this_turn++;
+        if (was_at) events.emit(LeftBoardEvent{rid, player, CardType::Rune, *was_at,
+                                               ZoneType::RuneDeck, false});
         --p_need;
     }
     return true;

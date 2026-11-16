@@ -59,18 +59,17 @@ public:
         ctx.events.logTrace("CALL TO BATTLE: moved a friendly unit to a controlled BF");
 
         // "Then, choose an opponent. They move a unit they control to the same
-        //  battlefield." Opponent's choice isn't surfaced through the caster's
-        //  agent; approximate their rational pick (highest-Might unit not
-        //  already there).
+        //  battlefield." The opponent chooses, with their own agent.
         PlayerId opp = opponent(ctx.controller);
-        GameObjectId opp_unit = kInvalidId;
-        int best_might = -1;
+        std::vector<GameObjectId> theirs;
         for (auto& [id, obj] : ctx.state.objects) {
             if (!obj.isUnit() || obj.controller != opp || !obj.location.has_value()) continue;
             auto obf = obj.battlefieldId();
             if (obf && *obf == *dest) continue;   // already there
-            if (obj.current_might > best_might) { opp_unit = id; best_might = obj.current_might; }
+            theirs.push_back(id);
         }
+        if (theirs.empty()) return;
+        const GameObjectId opp_unit = ctx.executor.chooseObjectNow(opp, theirs);
         if (opp_unit != kInvalidId && ctx.state.objectExists(opp_unit)) {
             ctx.executor.moveToBattlefield(opp_unit, *dest);
             ctx.events.logTrace("CALL TO BATTLE: opponent moved a unit to the same BF");

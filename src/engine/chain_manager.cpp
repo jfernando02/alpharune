@@ -513,7 +513,19 @@ void ChainManager::stepResolve(
             // "Then recycle it" (Fizz, Trickster; Kai'Sa, Evolutionary): the
             // same kind of leaving-the-chain replacement as "then banish it".
             auto rit = spell_obj.card_counters.find("__recycle_on_leave_chain");
-            if (rit != spell_obj.card_counters.end() && rit->second != 0 && executor_) {
+            // "<player> may play this spell again" (Dancing Grenade): the card
+            // set the player (index + 1) and paid the cost; the spell goes back
+            // on the chain under that player, its targets chosen as it is
+            // finalized.
+            auto again = spell_obj.card_counters.find("__replay_on_leave_chain_by");
+            if (again != spell_obj.card_counters.end() && again->second > 0) {
+                const PlayerId by = again->second == 1 ? PlayerId::Player1 : PlayerId::Player2;
+                again->second = 0;
+                events_.emit(SpellResolvedEvent{resolved.source, resolved.controller});
+                spell_obj.zone = ZoneType::Chain;
+                spell_obj.controller = by;
+                addSpell(resolved.source, by, {});
+            } else if (rit != spell_obj.card_counters.end() && rit->second != 0 && executor_) {
                 rit->second = 0;
                 spell_obj.location = std::nullopt;
                 spell_obj.zone = ZoneType::Trash;   // recycleCards moves it on from here

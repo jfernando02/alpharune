@@ -32,15 +32,19 @@ public:
         }
 
         if (mode == 0) {
-            // Recycle up to 3 cards from the opponent's trash. The owner (the
-            // opponent) recycles them. We take the first up-to-3 cards from
-            // their trash (the agent-choice of WHICH cards is not surfaced —
-            // documented approximation: take the most recent up to 3).
+            // Choose up to 3 cards from the opponent's trash, one at a time
+            // (declining stops); their owner recycles them.
             auto& opp_ps = ctx.state.player(opp);
             std::vector<GameObjectId> to_recycle;
-            for (auto it = opp_ps.trash.rbegin();
-                 it != opp_ps.trash.rend() && (int)to_recycle.size() < 3; ++it) {
-                to_recycle.push_back(*it);
+            while (to_recycle.size() < 3) {
+                std::vector<GameObjectId> left;
+                for (auto cid : opp_ps.trash)
+                    if (std::find(to_recycle.begin(), to_recycle.end(), cid) == to_recycle.end())
+                        left.push_back(cid);
+                if (left.empty()) break;
+                const GameObjectId pick = ctx.executor.chooseObjectOrNoneNow(ctx.controller, left);
+                if (pick == kInvalidId) break;
+                to_recycle.push_back(pick);
             }
             if (!to_recycle.empty()) {
                 ctx.executor.recycleCards(opp, to_recycle);

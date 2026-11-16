@@ -171,6 +171,11 @@ enum class TriggerType : uint8_t {
     //    (in .cpp) and the cards land as cheap per-file rebuilds, not full ones.
     WhenYouDrawACard,           // Frigid Jewel ("...your second card each turn")
     WhenYouRecycle,             // Karma, Channeler
+    WhenYouRecycleARune,        // "When you recycle a rune," (Battle Mistress)
+    WhenYouPlayATokenUnit,      // "When you play a token unit," (Lillia, Protector of Dreams)
+    WhenAnOpponentHolds,        // delayed only: "When they hold," (Ashe, Focused)
+    WhenItTakesDamage,          // delayed only: "the next time it takes damage" (Noxian Guillotine)
+    WhenYouKillAnEnemyUnit,     // "When you kill a ... enemy unit" (Solari Shrine); subject = the unit
     WhenEquipmentAttachedToMe,  // Aphelios, Exalted
     WhenAUnitBecomesMighty,     // Fiora Worthy / Grand Duelist
     WhenYouActivateAGearAbility, // Prize of Progress

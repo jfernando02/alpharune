@@ -42,6 +42,20 @@ inline bool payableOnePower(const GameState& state, PlayerId player,
             *obj.location == base && runeMatchesDomain(obj, domain)) return true;
     return false;
 }
+/// Recycle `rune` (in `player`'s base) to pay Power: it goes to the bottom of
+/// the rune deck and "you recycled a rune" triggers see it (LeftBoardEvent).
+inline void recycleRuneForPower(CardContext& ctx, PlayerId player, GameObjectId rune) {
+    auto& state = ctx.state;
+    auto& dr = state.getObject(rune);
+    const LocationId was_at = dr.location.value_or(LocationId{BaseLocation{player}});
+    dr.location = std::nullopt;
+    dr.zone = ZoneType::RuneDeck;
+    dr.is_exhausted = false;
+    state.player(player).rune_deck.insert(state.player(player).rune_deck.begin(), rune);
+    state.player(player).power_spent_this_turn++;
+    ctx.events.logTrace("  ADDL_COST: recycled " + dr.name + " for power");
+    ctx.events.emit(LeftBoardEvent{rune, player, CardType::Rune, was_at, ZoneType::RuneDeck, false});
+}
 inline bool payOnePower(CardContext& ctx, PlayerId player,
                         std::optional<Domain> domain, SpendPurpose purpose = {}) {
     auto& state = ctx.state;
@@ -69,15 +83,7 @@ inline bool payOnePower(CardContext& ctx, PlayerId player,
             rune = id;
     }
     if (rune == kInvalidId) return false;
-    auto& dr = state.getObject(rune);
-    dr.location = std::nullopt;
-    dr.zone = ZoneType::RuneDeck;
-    dr.is_exhausted = false;
-    state.player(player).rune_deck.insert(state.player(player).rune_deck.begin(), rune);
-    state.player(player).power_spent_this_turn++;
-    ctx.events.logTrace("  ADDL_COST: recycled " + dr.name + " for power");
-    ctx.events.emit(LeftBoardEvent{rune, player, CardType::Rune, BaseLocation{player},
-                                   ZoneType::RuneDeck, false});
+    recycleRuneForPower(ctx, player, rune);
     return true;
 }
 

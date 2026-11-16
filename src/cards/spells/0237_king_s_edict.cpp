@@ -17,23 +17,15 @@ public:
     // "Starting with the next player, each other player chooses a unit you don't
     //  control that hasn't been chosen for this spell. Kill those units."
     // In 1v1 this means: the opponent chooses one of their OWN units to be
-    // killed. The opponent's choice isn't surfaced through the caster's agent,
-    // so we approximate their rational pick (lowest-Might unit they control).
+    // killed, with their own agent.
     void onResolve(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
         PlayerId opp = opponent(ctx.controller);
-        GameObjectId victim = kInvalidId;
-        int best_might = 0;
-        for (auto& [id, obj] : ctx.state.objects) {
-            // "a unit you don't control" — not controlled by the caster.
-            if (!obj.isUnit() || obj.controller == ctx.controller) continue;
-            if (!obj.location.has_value()) continue;
-            if (obj.controller != opp) continue;  // 1v1: opponent's own unit
-            if (victim == kInvalidId || obj.current_might < best_might) {
-                victim = id;
-                best_might = obj.current_might;
-            }
-        }
-        if (victim != kInvalidId) {
+        std::vector<GameObjectId> theirs;
+        for (auto& [id, obj] : ctx.state.objects)
+            if (obj.isUnit() && obj.controller == opp && obj.location.has_value()) theirs.push_back(id);
+        if (theirs.empty()) return;
+        const GameObjectId victim = ctx.executor.chooseObjectNow(opp, theirs);
+        if (victim != kInvalidId && ctx.state.objectExists(victim)) {
             ctx.executor.killObject(victim);
             ctx.events.logTrace("KING'S EDICT: opponent's chosen unit killed");
         }

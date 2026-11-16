@@ -17,10 +17,8 @@ public:
     unsigned choicesAtFinalization() const override { return kFinalizeTrigger; }
     // "As you look at or reveal me from the top of your deck, you may banish
     // me. If you do, you may play me for [A]." [Ganking] engine-handled.
-    // The two nested "may"s are collapsed into one decision (the resume-slot
-    // helpers run once per resolution). The [A] cost is approximated as
-    // ignoring-cost — there's no clean cost-payment cursor in a reveal-trigger
-    // context (TODO).
+    // Two choices: banish (confirmOptional), then play for [A] (pickMode),
+    // offered only when one [A] can be paid.
     TriggerType triggerType() const override { return TriggerType::WhenIRevealedFromTop; }
     void onTrigger(CardContext& ctx, const std::vector<GameObjectId>&) override {
         if (!ctx.state.objectExists(ctx.source)) return;
@@ -30,19 +28,25 @@ public:
                    ctx.state.getObject(ctx.source).zone == ZoneType::MainDeck;
         };
         if (!still_in_deck()) return;  // already left the deck top
-        int conf = confirmOptional(ctx, "Nocturne: banish from deck and play for [A]?",
-                                    still_in_deck);
+        int conf = confirmOptional(ctx, "Nocturne: banish me from the deck?", still_in_deck);
+        if (conf == -1) return;
+        int play = 0;
+        if (conf == 1 && ctx.executor.payableAnyPower(owner) >= 1) {
+            play = pickMode(ctx, "Nocturne: play me for [A]?", 2, {"no", "yes"});
+            if (play == -1) return;
+        }
         if (finalizingChoices(ctx)) return;   // choices end here (CR 383.3)
-        if (conf != 1) return;
+        if (conf != 1 || !still_in_deck()) return;
         auto& ps = ctx.state.player(owner);
         auto it = std::find(ps.main_deck.begin(), ps.main_deck.end(), ctx.source);
         if (it != ps.main_deck.end()) ps.main_deck.erase(it);
         ctx.executor.banishObject(ctx.source);
+        ctx.events.logTrace("NOCTURNE: banished from the deck top");
+        if (play != 1 || !ctx.executor.payAnyPower(owner, 1)) return;
         auto& bz = ctx.state.player(owner).banishment;
         bz.erase(std::remove(bz.begin(), bz.end(), ctx.source), bz.end());
-        ctx.executor.playIgnoringCost(owner, ctx.source,
-                                      LocationId{BaseLocation{owner}});
-        ctx.events.logTrace("NOCTURNE: banished from deck top and played for [A]");
+        ctx.executor.playIgnoringCost(owner, ctx.source, LocationId{BaseLocation{owner}});
+        ctx.events.logTrace("NOCTURNE: played for [A]");
     }
 private:
     const CardDef def_ = [] {

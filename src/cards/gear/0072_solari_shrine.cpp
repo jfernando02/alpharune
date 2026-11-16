@@ -16,10 +16,13 @@ public:
     const CardDef& def() const override { return def_; }
     unsigned choicesAtFinalization() const override { return kFinalizeTrigger; }
     // "When you kill a stunned enemy unit, you may exhaust this to draw 1."
-    // The dying unit's prior stunned state is not surfaced to the trigger
-    // (cleared/gone by resolve), so the "stunned" condition is treated as
-    // satisfied (documented approximation, as with Piltover Enforcer/Gauntlets).
-    TriggerType triggerType() const override { return TriggerType::WhenAnEnemyUnitDies; }
+    // "Stunned" is the unit's last-known state as it died.
+    TriggerType triggerType() const override { return TriggerType::WhenYouKillAnEnemyUnit; }
+    bool triggerCondition(const GameState& state, GameObjectId /*source*/, PlayerId /*controller*/,
+                          TriggerType /*trigger*/, GameObjectId subject) const override {
+        return state.objectExists(subject) && state.getObject(subject).last_known.valid &&
+               state.getObject(subject).last_known.stunned;
+    }
     void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
         if (!ctx.state.objectExists(ctx.source)) return;
         auto still_legal = [&]() {
@@ -33,8 +36,7 @@ public:
         if (costDueNow(ctx)) ctx.executor.exhaustObject(ctx.source);
         if (finalizingChoices(ctx)) return;   // choices and costs end here (CR 383.3)
         ctx.executor.drawCards(ctx.controller, 1);
-        ctx.events.logTrace("SOLARI SHRINE: exhaust -> draw 1 "
-                            "(stunned condition not engine-checked)");
+        ctx.events.logTrace("SOLARI SHRINE: killed a stunned enemy unit -> exhaust, draw 1");
     }
 private:
     const CardDef def_ = [] {

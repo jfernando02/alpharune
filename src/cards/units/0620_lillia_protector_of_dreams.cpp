@@ -16,10 +16,6 @@ public:
     const CardDef& def() const override { return def_; }
 
     // "Your token units have [Tank]." (Granted via aura.)
-    // NOTE: the companion clause "When you play a token unit, give me +1 [M]
-    // this turn" is an ENGINE GAP — tokens enter via EffectExecutor::createToken
-    // which emits only EnteredBoardEvent, not CardPlayedEvent, so there is no
-    // "play a token unit" trigger to subscribe to. Left unimplemented.
     void applyPassiveAura(GameState& state, PlayerId controller) const override {
         for (auto& [id, obj] : state.objects) {
             if (!obj.isUnit() || obj.controller != controller) continue;
@@ -28,6 +24,13 @@ public:
             ae.keyword = Keyword::Tank;
             obj.aura_effects.push_back(ae);
         }
+    }
+    // "When you play a token unit, give me +1 [M] this turn."
+    TriggerType triggerType() const override { return TriggerType::WhenYouPlayATokenUnit; }
+    void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
+        if (!ctx.state.objectExists(ctx.source) || !ctx.state.getObject(ctx.source).location) return;
+        ctx.executor.giveTemporaryMight(ctx.source, 1);
+        ctx.events.logTrace("LILLIA: played a token unit -> +1 [M] this turn");
     }
 private:
     const CardDef def_ = [] {

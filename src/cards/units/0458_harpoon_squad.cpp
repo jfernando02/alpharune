@@ -15,10 +15,16 @@ class HarpoonSquad : public UnitCard {
 public:
     const CardDef& def() const override { return def_; }
     // "When I move from a battlefield, give me +2 [M] this turn."
-    // The WhenIMove trigger doesn't surface the source location to onTrigger,
-    // so the "from a battlefield" qualifier can't be checked here; granted on
-    // any move (close approximation — combat units predominantly move off BFs).
+    // TriggerManager::onUnitMoved records where I moved from in
+    // card_counters["__moved_from_bf"] (-1 = a base) before triggers fire.
     TriggerType triggerType() const override { return TriggerType::WhenIMove; }
+    bool triggerCondition(const GameState& state, GameObjectId source, PlayerId,
+                          TriggerType, GameObjectId) const override {
+        if (!state.objectExists(source)) return false;
+        const auto& c = state.getObject(source).card_counters;
+        auto it = c.find("__moved_from_bf");
+        return it != c.end() && it->second >= 0;
+    }
     void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
         if (!ctx.state.objectExists(ctx.source)) return;
         ctx.executor.giveTemporaryMight(ctx.source, 2);

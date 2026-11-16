@@ -17,10 +17,15 @@ public:
     std::vector<TriggerType> triggerTypes() const override {
         return {TriggerType::WhenYouPlayMe, TriggerType::WhenYouPlayAUnit};
     }
+    // "or another Dragon": the played unit (the trigger's subject) is a Dragon.
+    bool triggerCondition(const GameState& state, GameObjectId source, PlayerId,
+                          TriggerType trigger, GameObjectId subject) const override {
+        if (trigger != TriggerType::WhenYouPlayAUnit) return true;
+        if (subject == source || !state.objectExists(subject)) return false;
+        for (const auto& tag : state.getObject(subject).tags) if (tag == "Dragon") return true;
+        return false;
+    }
     void onTrigger(CardContext& ctx, const std::vector<GameObjectId>&) override {
-        // NOTE: WhenYouPlayAUnit doesn't surface the played unit's tags, so the
-        // "another Dragon" qualifier can't be checked precisely; we ready on any
-        // friendly unit play (documented approximation).
         int readied = 0;
         for (auto& [id, obj] : ctx.state.objects) {
             if (readied >= 2) break;

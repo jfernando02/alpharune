@@ -18,9 +18,14 @@ public:
 
     // "Discard 1, [E]: Choose a friendly unit. The next time it would die this
     //  turn, you may pay [C] to heal it, exhaust it, and recall it instead."
-    // Uses the engine's one-shot death-replacement-recall flag (CR / Tactical
-    // Retreat 737). NOTE: the optional "pay [C]" at death time is not modeled
-    // by the flag — the recall happens automatically (documented approximation).
+    // Uses the engine's one-shot death-replacement-recall flag (as Tactical
+    // Retreat 737), tagged with this card: as the unit would die its
+    // controller may pay [C] (Fury) for the replacement (acceptDeathReplacement).
+    bool acceptDeathReplacement(CardContext& ctx, GameObjectId unit) const override {
+        if (!payableOnePower(ctx.state, ctx.controller, Domain::Fury)) return false;
+        if (ctx.executor.chooseObjectOrNoneNow(ctx.controller, {unit}) != unit) return false;
+        return payOnePower(ctx, ctx.controller, Domain::Fury);
+    }
     std::vector<ActivatedAbility> activatedAbilities() const override {
         return {{
             .cost = {.exhaust = true, .discard = true, .discard_count = 1},
@@ -49,6 +54,7 @@ public:
                                  enumerateLegalTargets(ctx.state, ctx.controller, 0));
         if (picked == kInvalidId || !ctx.state.objectExists(picked)) return;
         ctx.state.getObject(picked).death_replacement_recall_pending = true;
+        ctx.state.getObject(picked).death_replacement_recall_by = cardDefId();
         ctx.events.logTrace("UNLICENSED ARMORY: " + ctx.state.getObject(picked).name +
                             " — next death this turn becomes heal/exhaust/recall");
     }

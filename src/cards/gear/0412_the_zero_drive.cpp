@@ -143,10 +143,7 @@ private:
             }
         }
         {
-            auto& dr = state.getObject(domain_rune);
-            dr.location = std::nullopt;
-            dr.zone = ZoneType::RuneDeck;
-            ps.rune_deck.insert(ps.rune_deck.begin(), domain_rune);
+            recycleRuneForPower(ctx, ctx.controller, domain_rune);
         }
 
         auto& gear = state.getObject(gear_id);

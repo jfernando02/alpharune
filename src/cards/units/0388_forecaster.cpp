@@ -15,6 +15,13 @@ class Forecaster : public UnitCard {
 public:
     const CardDef& def() const override { return def_; }
 
+    bool grantsKeywordTo(const GameState& state, GameObjectId self, const GameObject& unit,
+                         Keyword kw) const override {
+        if (kw != Keyword::Vision || !unit.isUnit() || !state.objectExists(self) ||
+            unit.controller != state.getObject(self).controller) return false;
+        for (auto& tag : unit.tags) if (tag == "Mech") return true;
+        return false;
+    }
     // "Your Mechs have [Vision]." The engine's aura text-matcher only handles
     // "your mechs EACH have", not "your mechs have", so grant Vision here.
     void applyPassiveAura(GameState& state, PlayerId controller) const override {

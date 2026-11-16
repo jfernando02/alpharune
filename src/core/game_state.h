@@ -206,6 +206,10 @@ struct PlayerState {
     bool unit_died_in_beginning_this_turn = false;
     // A unit or gear this player controlled died this turn (Lingering Animus).
     bool unit_or_gear_died_this_turn = false;
+    // A unit this player controlled died this turn (Spoils of War).
+    bool unit_died_this_turn = false;
+    // "You can hide cards ignoring costs this turn" (Guerilla Warfare).
+    bool hide_ignoring_costs_this_turn = false;
     int draw_on_unit_play_this_turn = 0;   // Fanfare: draw 1 for each of the next N units played this turn
     bool played_permanent_to_bf_this_turn = false;   // a unit or gear played to a battlefield (Hold 'Em)
     // Battlefields this player played a unit or gear to this turn (Hunters' Circle).
@@ -440,6 +444,8 @@ struct PlayerState {
         draws_this_turn = 0;
         unit_died_in_beginning_this_turn = false;
         unit_or_gear_died_this_turn = false;
+        unit_died_this_turn = false;
+        hide_ignoring_costs_this_turn = false;
         draw_on_unit_play_this_turn = 0;
         played_permanent_to_bf_this_turn = false;
         bfs_played_permanent_this_turn.clear();
@@ -516,6 +522,9 @@ struct BattlefieldState {
     // still move to other battlefields (with Ganking). Honored by
     // GameEngine::generateMainPhaseActions when emitting BF→Base moves.
     bool blocks_move_to_base = false;
+    // The same, from a continuous effect, reset each aura pass ("Units can't
+    // move to base": Minotaur Reckoner).
+    bool aura_blocks_move_to_base = false;
 
     // Play-location restriction (Rockfall Path [530]). When true, no
     // unit/gear may be played to this battlefield. Honored by play-
@@ -534,6 +543,8 @@ struct BattlefieldState {
     // with the current turn number + conquering player; consumers compare
     // against the live turn so the marker auto-expires next turn (no reset).
     int conquered_on_turn = -1;
+    // The most recent conquest here took a battlefield nobody controlled (Yone, Blademaster).
+    bool conquered_from_uncontrolled = false;
     PlayerId conquered_by_player = PlayerId::None;
 
     // Aura-derived per-BF flags (reset + recomputed each recalculateAuras by the
@@ -822,6 +833,9 @@ struct DelayedAbility {
     // subject (Deadly Flourish: "when IT dies"). kInvalidId = no filter,
     // fires on any matching trigger.
     GameObjectId target_filter = kInvalidId;
+    // An object the ability refers to ("return IT to their hand"): becomes the
+    // chain item's triggering subject when the event carries none.
+    GameObjectId payload = kInvalidId;
 };
 
 // ─── Complete Game State ─────────────────────────────────────────────────────

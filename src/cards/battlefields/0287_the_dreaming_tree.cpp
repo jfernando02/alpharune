@@ -17,9 +17,7 @@ public:
     // "When a player chooses a friendly unit here with a spell for the first
     // time each turn, they draw 1." Handler wired on WhenAFriendlyUnitChosenHere
     // (once-per-turn-per-player via a turn-stamped card_counter -> draw 1).
-    // APPROX/INERT: no engine site currently emits "a spell chose a friendly unit
-    // here", so this handler does not yet fire in play. It is the faithful card
-    // implementation, ready for that emit; this card is also tournament-BANNED.
+    // TriggerManager fires it only when the choosing item is a spell.
     TriggerType triggerType() const override {
         return TriggerType::WhenAFriendlyUnitChosenHere;
     }

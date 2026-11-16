@@ -15,33 +15,29 @@ class GuerillaWarfare : public SpellCard {
 public:
     const CardDef& def() const override { return def_; }
 
+    // The player chooses up to two [Hidden] cards in their trash, one at a
+    // time (declining stops). Then hiding ignores its [A] cost this turn
+    // (PlayerState::hide_ignoring_costs_this_turn).
     void onResolve(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
         auto& ps = ctx.state.player(ctx.controller);
         const CardDB& db = ctx.executor.cardDB();
-
-        // Collect up to two [Hidden] cards from trash and return them. We
-        // return the first matching cards (deterministic); modeled as "up to
-        // two" by stopping at two.
-        int returned = 0;
-        for (int i = static_cast<int>(ps.trash.size()) - 1;
-             i >= 0 && returned < 2; --i) {
-            auto cid = ps.trash[i];
-            if (!ctx.state.objectExists(cid)) continue;
-            auto& obj = ctx.state.getObject(cid);
-            if (obj.card_def_id == kInvalidId) continue;
-            if (!db.get(obj.card_def_id).keywords.has(Keyword::Hidden)) continue;
-            // Move trash -> hand.
-            ps.trash.erase(ps.trash.begin() + i);
+        for (int returned = 0; returned < 2; ++returned) {
+            std::vector<GameObjectId> hidden;
+            for (auto cid : ps.trash)
+                if (ctx.state.objectExists(cid) && ctx.state.getObject(cid).card_def_id != kInvalidId &&
+                    db.get(ctx.state.getObject(cid).card_def_id).keywords.has(Keyword::Hidden))
+                    hidden.push_back(cid);
+            if (hidden.empty()) break;
+            const GameObjectId pick = ctx.executor.chooseObjectOrNoneNow(ctx.controller, hidden);
+            if (pick == kInvalidId) break;
+            ps.trash.erase(std::find(ps.trash.begin(), ps.trash.end(), pick));
+            auto& obj = ctx.state.getObject(pick);
             obj.zone = ZoneType::Hand;
             obj.location = std::nullopt;
-            ps.hand.push_back(cid);
-            ++returned;
-            ctx.events.logTrace("GUERILLA WARFARE: returned " + obj.name +
-                                 " from trash to hand");
+            ps.hand.push_back(pick);
+            ctx.events.logTrace("GUERILLA WARFARE: returned " + obj.name + " from trash to hand");
         }
-        // TODO: "You can hide cards ignoring costs this turn." — the engine
-        // has no per-player "hide ignoring costs" flag, so this clause is not
-        // implemented (engine gap).
+        ps.hide_ignoring_costs_this_turn = true;
     }
 private:
     const CardDef def_ = [] {

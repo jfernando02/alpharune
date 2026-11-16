@@ -94,9 +94,16 @@ TEST_F(WaveABatch3Test, ShardKillsOpponentUnitInBeginningPhase) {
     g.card_def_id = kShardUndoing;
     g.location = BaseLocation{P1};
 
-    // P2 has two units; rational pick = lowest might (the 2M one).
+    // P2 has two units and chooses which one to kill (here the 2M one).
     auto weak   = addUnit(P2, kInvalidId, 2, 1);
     auto strong = addUnit(P2, kInvalidId, 7, 1);
+    PlayerId asked = PlayerId::None;
+    exec.setAgentQuery([&](PlayerId p, const std::vector<Intent>& ch) {
+        asked = p;
+        for (const auto& i : ch)
+            if (!i.chosen_objects.empty() && i.chosen_objects[0] == weak) return i;
+        return ch.front();
+    });
 
     state.turn.turn_player = P1;
     state.turn.phase = TurnPhase::BeginningStep;
@@ -104,8 +111,9 @@ TEST_F(WaveABatch3Test, ShardKillsOpponentUnitInBeginningPhase) {
 
     fireTriggerAs(kShardUndoing, P1, gear, TriggerType::WhenAFriendlyUnitDies, exec);
 
-    EXPECT_EQ(state.getObject(weak).zone, ZoneType::Trash);     // lowest might killed
-    EXPECT_NE(state.getObject(strong).zone, ZoneType::Trash);   // stronger survives
+    EXPECT_EQ(asked, P2) << "the opponent chooses";
+    EXPECT_EQ(state.getObject(weak).zone, ZoneType::Trash);
+    EXPECT_NE(state.getObject(strong).zone, ZoneType::Trash);
 }
 
 TEST_F(WaveABatch3Test, ShardOnlyFiresOncePerTurn) {

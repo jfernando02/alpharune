@@ -17,42 +17,33 @@ namespace {
 //  control. You may play me to its battlefield (even if you don't have other
 //  units there)."
 //
-// The mandatory sacrifice is modeled as a WhenYouPlayMe forced kill of an
-// agent-chosen Bird/Cat/Dog/Poro. APPROXIMATIONS / ENGINE GAP:
-//  - Timing: the sacrifice fires as a play trigger (after Stalking Wolf is on
-//    the board), not strictly as a pre-play additional cost.
-//  - "play me to its battlefield": tying Stalking Wolf's landing zone to the
-//    sacrificed unit's battlefield is not modeled — getPlayLocations is
-//    consulted before the kill choice exists, so the location can't depend on
-//    it. Stalking Wolf lands per the normal play rules.
+// The kill is a required additional cost (executePlayCard asks for it as I am
+// played, before paying), restricted to Bird/Cat/Dog/Poro by
+// additionalCostAccepts. "You may [Ambush] me to its battlefield": [Ambush]
+// already allows a battlefield where the player has a unit as I am played,
+// which the unit about to be killed is.
 
 class StalkingWolf : public UnitCard {
 public:
     const CardDef& def() const override { return def_; }
-    unsigned choicesAtFinalization() const override { return kFinalizeTrigger; }
-    TriggerType triggerType() const override { return TriggerType::WhenYouPlayMe; }
-    void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
-        std::vector<GameObjectId> legal;
-        for (auto& [id, obj] : ctx.state.objects) {
-            if (id == ctx.source) continue;
-            if (!obj.isUnit() || obj.controller != ctx.controller) continue;
-            if (!obj.location.has_value()) continue;
-            if (hasTag(obj, "Bird") || hasTag(obj, "Cat") ||
-                hasTag(obj, "Dog") || hasTag(obj, "Poro")) {
-                legal.push_back(id);
-            }
-        }
-        if (legal.empty()) return;
-        GameObjectId victim = pickTarget(ctx, "Stalking Wolf: kill a Bird/Cat/Dog/Poro you control",
-                                         legal);
-        if (finalizingChoices(ctx)) return;   // choices end here (CR 383.3)
-        if (victim == kInvalidId && ctx.state.chain.resuming.has_value() &&
-            ctx.state.chain.resuming->resume_point == 7) {
-            return;  // suspended
-        }
-        if (victim == kInvalidId || !ctx.state.objectExists(victim)) return;
-        ctx.executor.killObject(victim);
-        ctx.events.logTrace("STALKING WOLF: sacrificed a Bird/Cat/Dog/Poro (additional cost)");
+    static bool fodder(const GameObject& obj) {
+        return obj.isUnit() && (hasTag(obj, "Bird") || hasTag(obj, "Cat") ||
+                                hasTag(obj, "Dog") || hasTag(obj, "Poro"));
+    }
+    OptionalAdditionalCost optionalAdditionalCost() const override {
+        OptionalAdditionalCost c;
+        c.valid = true;
+        c.kill_friendly_unit = true;
+        c.required = true;
+        return c;
+    }
+    bool additionalCostAccepts(const GameState&, const GameObject& o) const override {
+        return fodder(o);
+    }
+    bool canBePlayed(const GameState& state, PlayerId player) const override {
+        for (const auto& [id, obj] : state.objects)
+            if (obj.controller == player && obj.location.has_value() && fodder(obj)) return true;
+        return false;
     }
 private:
     const CardDef def_ = [] {

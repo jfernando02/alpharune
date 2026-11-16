@@ -88,6 +88,10 @@ public:
     // ── Atomic game operations ──
     void dealDamage(GameObjectId target, int amount, GameObjectId source);
     void killObject(GameObjectId target);
+    /// Consume `unit`'s one-shot "next time it would die, recall it instead"
+    /// replacement: true if it applies (the card that made it may ask "you
+    /// may pay ..." through Card::acceptDeathReplacement).
+    bool takeDeathRecallReplacement(GameObjectId unit);
     /// Fill GameObject::last_known from the object's current state (called by
     /// the kill paths just before it dies).
     void snapshotLastKnown(GameObjectId id);

@@ -23,45 +23,45 @@ public:
     }
     unsigned choicesAtFinalization() const override { return kFinalizeTrigger; }
 
+    // "When I conquer a battlefield that was uncontrolled":
+    // BattlefieldState::conquered_from_uncontrolled, set as control changes.
+    bool triggerCondition(const GameState& state, GameObjectId source, PlayerId,
+                          TriggerType trigger, GameObjectId) const override {
+        if (trigger != TriggerType::WhenIConquer) return true;
+        if (!state.objectExists(source)) return false;
+        const auto bf = state.getObject(source).battlefieldId();
+        if (!bf) return false;
+        for (const auto& b : state.battlefields)
+            if (b.id == *bf) return b.conquered_from_uncontrolled;
+        return false;
+    }
+
     void onTrigger(CardContext& ctx,
                    const std::vector<GameObjectId>& /*targets*/) override {
         if (ctx.firing_trigger == TriggerType::WhenYouPlayMe) {
             resolveWeaponmaster(*this, ctx, def().name);
-        } else if (ctx.firing_trigger == TriggerType::WhenIConquer) {
-            if (finalizingChoices(ctx)) return;   // no choices
-            doConquerDamage(ctx);
-        }
-    }
-
-private:
-
-    void doConquerDamage(CardContext& ctx) {
-        // ENGINE GAP: printed condition is "When I conquer a battlefield THAT
-        // WAS UNCONTROLLED". By the time WhenIConquer resolves, the BF is
-        // already controlled by us and the prior-controller is not surfaced to
-        // the trigger (no captured "was uncontrolled" flag), so we cannot gate
-        // on it. Fires on any conquer (over-fires when conquering a BF that
-        // was enemy-controlled). Low severity; documented approximation.
-        if (!ctx.state.objectExists(ctx.source)) return;
-        const auto& self = ctx.state.getObject(ctx.source);
-        int my_might = self.current_might;
-        if (my_might <= 0) return;
-        PlayerId opp = opponent(ctx.controller);
-        // Target an enemy unit in a base.
-        for (auto& [id, obj] : ctx.state.objects) {
-            if (!obj.isUnit() || obj.controller != opp) continue;
-            if (!obj.isAtBase()) continue;
-            ctx.executor.dealDamage(id, my_might, ctx.source);
-            if (ctx.state.objectExists(id) &&
-                ctx.state.getObject(id).hasLethalDamage()) {
-                ctx.executor.killObject(id);
-            }
-            ctx.events.logTrace("YONE: conquer -> deal " +
-                                 std::to_string(my_might) +
-                                 " to enemy unit in base");
             return;
         }
+        if (ctx.firing_trigger != TriggerType::WhenIConquer) return;
+        // "deal damage equal to my Might to an enemy unit in a base": chosen
+        // as the trigger is finalized; my Might is read as it resolves.
+        std::vector<GameObjectId> enemies;
+        for (const auto& [id, obj] : ctx.state.objects)
+            if (obj.isUnit() && obj.controller != ctx.controller && obj.isAtBase())
+                enemies.push_back(id);
+        GameObjectId unit = kInvalidId;
+        if (!enemies.empty()) unit = pickTarget(ctx, "Yone: deal my Might to an enemy unit in a base", enemies);
+        if (ctx.executor.hasPendingChoice()) return;
+        if (finalizingChoices(ctx)) return;   // choices end here (CR 383.3)
+        if (unit == kInvalidId || !ctx.state.objectExists(unit) ||
+            !ctx.state.getObject(unit).isAtBase() || !ctx.state.objectExists(ctx.source)) return;
+        const int might = ctx.state.getObject(ctx.source).current_might;
+        if (might <= 0) return;
+        ctx.executor.dealDamage(unit, might, ctx.source);
+        ctx.events.logTrace("YONE: conquered an uncontrolled battlefield -> dealt " +
+                            std::to_string(might) + " to an enemy unit in a base");
     }
+
 private:
     const CardDef def_ = [] {
         CardDef d;

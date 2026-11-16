@@ -373,10 +373,10 @@ TEST_F(AuditFix5Test, Yone_ConquerDealsMightDamageAndKills) {
 
     fireTriggerAs(kYone, P1, yone, TriggerType::WhenIConquer, exec);
 
-    // killObject routes the unit to Trash (it stays in the objects map), so
-    // assert the zone rather than objectExists.
-    EXPECT_EQ(state.getObject(enemy).zone, ZoneType::Trash)
-        << "5 damage to a 4-might enemy is lethal -> killed (to trash)";
+    // Lethal damage is marked; cleanup kills it (as for any damage effect).
+    EXPECT_EQ(state.getObject(enemy).damage_marked, 5);
+    EXPECT_TRUE(state.getObject(enemy).hasLethalDamage())
+        << "5 damage to a 4-might enemy is lethal";
 }
 
 // WhenIConquer with a tougher enemy: damaged but survives (no kill).

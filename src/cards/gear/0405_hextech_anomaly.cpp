@@ -50,10 +50,7 @@ public:
         }
         // Recycle exhausted runes for the rest (move base → rune deck).
         for (size_t i = 0; i < recyclable.size() && remaining > 0; ++i, --remaining) {
-            auto& r = ctx.state.getObject(recyclable[i]);
-            r.location = std::nullopt;
-            r.zone = ZoneType::RuneDeck;
-            ps.rune_deck.insert(ps.rune_deck.begin(), recyclable[i]);
+            recycleRuneForPower(ctx, ctx.controller, recyclable[i]);
         }
         ctx.executor.addFloatingEnergy(ctx.controller, x);
         ctx.events.logTrace("HEXTECH ANOMALY: paid " + std::to_string(x) +

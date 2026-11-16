@@ -16,8 +16,9 @@ class RisenAltar : public BattlefieldCard {
 public:
     const CardDef& def() const override { return def_; }
     // "[Empower] costs of your units here cost [1] or [A] less."
-    // Applied as [1] less Energy for the battlefield controller's units here
-    // (the "or [A]" alternative is not modeled).
+    // The battlefield controller's units here get empower_cost_reduction 1;
+    // as an [Empower] cost is paid it comes off the Energy or a Power (the
+    // player's choice when the cost has both: GameEngine's activation path).
     void applyPassiveAura(GameState& state, PlayerId controller) const override {
         if (controller == PlayerId::None) return;
         for (auto& bf : state.battlefields) {

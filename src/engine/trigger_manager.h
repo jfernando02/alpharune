@@ -76,6 +76,7 @@ private:
 
     /// Fires WhenYouPlayThis for gear entering the board.
     void onEnteredBoard(const EnteredBoardEvent& e);
+    void onTokenCreated(const TokenCreatedEvent& e);
 
     /// Fires WhenIAttack, WhenIDefend, WhenIAttackOrDefend for combat units.
     void onCombatStarted(const CombatStartedEvent& e);

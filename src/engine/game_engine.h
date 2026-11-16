@@ -705,7 +705,14 @@ private:
     /// `extra_any_power`: [A] owed on top of everything else (a battlefield's
     /// pay-to-play-here cost).
     bool canAfford(PlayerId player, GameObjectId card_obj, int extra_any_power = 0,
-                   int energy_discount = 0) const;
+                   int energy_discount = 0, int power_discount = 0) const;
+    /// Affordable only by paying the card's optional additional cost that
+    /// reduces it (Card::OptionalAdditionalCost: discard / kill a friendly unit).
+    bool affordableWithAdditionalCost(PlayerId player, GameObjectId card_obj) const;
+    /// {Energy, Power} the additional cost takes off when `fodder` is the
+    /// object killed / returned / discarded for it.
+    std::pair<int, int> additionalCostDiscount(const Card::OptionalAdditionalCost& oac,
+                                               GameObjectId fodder) const;
     /// A battlefield's Energy discount for `card` played by `player` to it
     /// (Card::playHereDiscount — Hunters' Circle).
     int playHereDiscount(PlayerId player, BattlefieldId bf, const GameObject& card) const;

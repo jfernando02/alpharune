@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "cards/card_helpers.h"
 
 namespace riftbound {
 namespace {
@@ -17,15 +18,39 @@ namespace {
 class SivirAmbitious : public UnitCard {
 public:
     const CardDef& def() const override { return def_; }
+    unsigned choicesAtFinalization() const override { return kFinalizeTrigger; }
     TriggerType triggerType() const override { return TriggerType::WhenIConquer; }
+    // "after an attack": the conquer follows a combat here that I attacked in.
+    bool triggerCondition(const GameState& state, GameObjectId source, PlayerId controller,
+                          TriggerType, GameObjectId) const override {
+        if (!state.objectExists(source)) return false;
+        const auto bf = state.getObject(source).battlefieldId();
+        if (!bf) return false;
+        const auto& ps = state.player(controller);
+        return ps.last_combat_bf == *bf && ps.last_combat_attacker &&
+               excessCombatDamageAt(state, controller, *bf) >= 5;
+    }
     void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
-        // ENGINE GAP: the amount of excess combat damage assigned to enemy
-        // units is not surfaced to triggers (same gap as Tryndamere / Yeti
-        // Brawler). Unlike those cards, Sivir's payoff SCALES with that amount
-        // ("deal that much"), so it can't be faithfully approximated with a
-        // fixed value. Left unimplemented pending excess-damage tracking.
-        ctx.events.logTrace("SIVIR AMBITIOUS: conquer (excess-damage amount not "
-                            "engine-tracked -> payoff skipped)");
+        const auto& ps = ctx.state.player(ctx.controller);
+        const int amount = ps.excess_combat_damage;
+        auto enemies = [&] {
+            std::vector<GameObjectId> out;
+            for (const auto& [id, o] : ctx.state.objects)
+                if (o.isUnit() && o.location.has_value() && o.controller != ctx.controller)
+                    out.push_back(id);
+            return out;
+        };
+        const int yes = confirmOptional(ctx, "Sivir: deal " + std::to_string(amount) +
+                                        " to an enemy unit?", [&] { return !enemies().empty(); });
+        if (yes == -1) return;   // waiting for the answer
+        GameObjectId unit = kInvalidId;
+        if (yes == 1) unit = pickTarget(ctx, "Sivir: deal that much to an enemy unit", enemies());
+        if (ctx.executor.hasPendingChoice()) return;
+        if (finalizingChoices(ctx)) return;   // choices end here (CR 383.3)
+        if (unit == kInvalidId || !ctx.state.objectExists(unit) ||
+            !ctx.state.getObject(unit).location.has_value()) return;
+        ctx.executor.dealDamage(unit, amount, ctx.source);
+        ctx.events.logTrace("SIVIR AMBITIOUS: dealt " + std::to_string(amount) + " (excess damage)");
     }
 private:
     const CardDef def_ = [] {

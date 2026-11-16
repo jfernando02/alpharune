@@ -17,9 +17,8 @@ namespace {
 //  additional cost, you don't kill a unit this way."
 //
 // The optional 3-XP payment is offered at trigger time via confirmOptional.
-// The controller's own kill is the controller's choice (pickTarget). The
-// OPPONENT's forced kill is approximated as their rational pick — lowest-Might
-// unit they control (same convention as King's Edict #237).
+// The controller's own kill is the controller's choice (pickTarget); the
+// opponent chooses theirs with their own agent.
 
 class SafetyInspector : public UnitCard {
 public:
@@ -60,21 +59,16 @@ public:
             }
         }
 
-        // Opponent's forced kill — approximate their rational pick (lowest Might).
+        // The opponent's forced kill: they choose, with their own agent.
         PlayerId opp = opponent(ctx.controller);
-        GameObjectId opp_victim = kInvalidId;
-        int best_might = 0;
-        for (auto& [id, obj] : ctx.state.objects) {
-            if (!obj.isUnit() || obj.controller != opp) continue;
-            if (!obj.location.has_value()) continue;
-            if (opp_victim == kInvalidId || obj.current_might < best_might) {
-                opp_victim = id;
-                best_might = obj.current_might;
-            }
-        }
-        if (opp_victim != kInvalidId) {
+        std::vector<GameObjectId> theirs;
+        for (auto& [id, obj] : ctx.state.objects)
+            if (obj.isUnit() && obj.controller == opp && obj.location.has_value()) theirs.push_back(id);
+        if (theirs.empty()) return;
+        const GameObjectId opp_victim = ctx.executor.chooseObjectNow(opp, theirs);
+        if (opp_victim != kInvalidId && ctx.state.objectExists(opp_victim)) {
             ctx.executor.killObject(opp_victim);
-            ctx.events.logTrace("SAFETY INSPECTOR: opponent's chosen unit killed (approx.)");
+            ctx.events.logTrace("SAFETY INSPECTOR: opponent's chosen unit killed");
         }
     }
 private:
