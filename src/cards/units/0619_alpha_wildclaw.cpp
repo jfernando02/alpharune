@@ -16,14 +16,19 @@ public:
     const CardDef& def() const override { return def_; }
     // "[Tank]" is engine-handled.
     // "Your units here with less Might than me can't be chosen by enemy spells
-    // and abilities." is an ENGINE GAP. Granting targeting-protection to OTHER
-    // units is not expressible: GameObject::untargetable_by_enemy is RESET to
-    // false per-object inside the same cleanup loop that calls applyPassiveAura
-    // (game_engine.cpp ~3548), and is only ever set from the stateless
-    // canBeChosenByEnemy() of the object itself. Setting the flag on other
-    // units from applyPassiveAura would be clobbered by their own reset
-    // depending on GameObjectId iteration order, so it cannot be done reliably.
-    // Left unimplemented.
+    // and abilities": GameObject::untargetable_by_enemy, reset before the
+    // aura pass and set here on each qualifying unit.
+    void applyPassiveAura(GameState& state, PlayerId controller) const override {
+        for (const auto& [sid, self] : state.objects) {
+            if (self.card_def_id != cardDefId() || self.controller != controller) continue;
+            if (!self.location.has_value()) continue;
+            for (auto& [uid, u] : state.objects) {
+                if (uid == sid || !u.isUnit() || u.controller != controller) continue;
+                if (!u.location.has_value() || *u.location != *self.location) continue;
+                if (u.current_might < self.current_might) u.untargetable_by_enemy = true;
+            }
+        }
+    }
 private:
     const CardDef def_ = [] {
         CardDef d;

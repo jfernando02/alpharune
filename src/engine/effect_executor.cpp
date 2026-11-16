@@ -194,6 +194,16 @@ bool EffectExecutor::takeDeathRecallReplacement(GameObjectId unit) {
     return card->acceptDeathReplacement(ctx, unit);
 }
 
+void EffectExecutor::spendBuff(GameObjectId target) {
+    if (!state_.objectExists(target)) return;
+    auto& obj = state_.getObject(target);
+    if (obj.buff_count <= 0) return;
+    obj.buff_count -= 1;
+    obj.recomputeMight();
+    events_.logTrace("  SPEND BUFF: " + obj.name);
+    events_.emit(ObjectStateChangedEvent{target, "buff_spent"});
+}
+
 void EffectExecutor::killObject(GameObjectId target) {
     if (!state_.objectExists(target)) return;
     auto& obj = state_.getObject(target);
@@ -734,6 +744,11 @@ void EffectExecutor::readyObject(GameObjectId target) {
                          " can't be readied by effects (Mageseeker Warden)");
         return;
     }
+    if (card_registry_ && obj.card_def_id != kInvalidId)
+        if (const Card* c = card_registry_->get(obj.card_def_id); c && c->cantBeReadied()) {
+            events_.logTrace("READY_SUPPRESSED: " + obj.name + " can't be readied");
+            return;
+        }
     bool was_exhausted = obj.is_exhausted;
     obj.is_exhausted = false;
     events_.emit(ObjectStateChangedEvent{target, "readied"});
@@ -1355,13 +1370,14 @@ GameObjectId EffectExecutor::createToken(PlayerId controller, CardType type,
 
     // Zilean, Time Mage (648): "Once each turn, if you would play a token unit
     // while I'm at a battlefield, you may play that token and an additional copy
-    // instead." Approximated as automatic (token creation isn't an agent
-    // decision point). Stamp the turn BEFORE the recursive call to bound it to
-    // once per turn and to stop the recursion (the copy sees the stamp set).
+    // instead." The player answers yes / no (choosing the token or none);
+    // declining doesn't use the once-a-turn. Stamp the turn BEFORE the
+    // recursive call so the copy does not ask again.
     if (type == CardType::Unit) {
         auto& ps = state_.player(controller);
         if (ps.zilean_present &&
-            ps.zilean_double_token_turn != state_.turn.turn_number) {
+            ps.zilean_double_token_turn != state_.turn.turn_number &&
+            chooseObjectOrNoneNow(controller, {id}) == id) {
             ps.zilean_double_token_turn = state_.turn.turn_number;
             events_.logTrace("ZILEAN: play an additional copy of the token unit");
             createToken(controller, type, name, might, tags, keywords, location, enter_ready);

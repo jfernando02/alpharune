@@ -45,7 +45,7 @@ public:
                 auto& u = ctx.state.getObject(id);
                 if (u.buff_count <= 0) continue;
                 // Spend one buff: -1 [M], then ready.
-                u.buff_count -= 1;
+                ctx.executor.spendBuff(id);
                 u.temp_might_bonus -= 1;
                 u.recomputeMight();
                 ctx.executor.readyObject(id);

@@ -108,7 +108,7 @@ void TriggerManager::checkDelayedAbilities(TriggerType trigger,
         if (da.target_filter != kInvalidId &&
             da.target_filter != event_object) continue;
 
-        da.fired = true;
+        if (!da.repeats) da.fired = true;
         events_.logTrace("DELAYED_ABILITY: firing for " +
                          (state_.objectExists(da.source) ? state_.getObject(da.source).name : "?"));
         chain_.addAbility(da.source, da.controller, da.card_def_id);
@@ -1040,6 +1040,15 @@ void TriggerManager::onScore(const ScoreEvent& e) {
             for (auto& [id, t] : here) fireTrigger(id, e.player, 0, t);
     }
 
+    // Cards in the scorer's trash with "When you conquer" (Super Mega Death Rocket).
+    if (e.method == ScoreMethod::Conquer) {
+        const auto trash = state_.player(e.player).trash;
+        for (auto tid : trash)
+            if (state_.objectExists(tid) &&
+                cardFiresOn(card_registry_, state_.getObject(tid).card_def_id, TriggerType::WhenYouConquerInTrash))
+                fireTrigger(tid, e.player, 0, TriggerType::WhenYouConquerInTrash);
+    }
+
     // Delayed "when they hold" abilities of the scorer's opponent (Ashe, Focused).
     if (e.method == ScoreMethod::Hold)
         checkDelayedAbilities(TriggerType::WhenAnOpponentHolds, opponent(e.player), kInvalidId);
@@ -1332,6 +1341,17 @@ void TriggerManager::onObjectStateChanged(const ObjectStateChangedEvent& e) {
 
     // "When you attach an Equipment to me" — fires on the equipped unit itself
     // (attachGearToUnit / attachFree emit "equipped"). (Aphelios, Exalted 372.)
+    if (e.what_changed == "buff_spent") {
+        // "When you spend a buff" — the buffed object's controller spent it.
+        std::vector<GameObjectId> watchers;
+        for (auto& [id, obj] : state_.objects)
+            if (obj.controller == controller && obj.location.has_value() &&
+                cardFiresOn(card_registry_, obj.card_def_id, TriggerType::WhenYouSpendABuff))
+                watchers.push_back(id);
+        for (auto wid : watchers)
+            fireTrigger(wid, controller, 0, TriggerType::WhenYouSpendABuff, /*subject=*/e.object);
+        return;
+    }
     if (e.what_changed == "chosen_by_controller") {
         // "When you choose a friendly unit" — a spell or ability its own
         // controller played chose this unit (at play or at resolution).

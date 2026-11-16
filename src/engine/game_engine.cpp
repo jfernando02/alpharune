@@ -921,6 +921,7 @@ void GameEngine::awakenPhase() {
         if (obj.controller == player && obj.is_exhausted && obj.location.has_value()) {
             // "Units don't ready during the Awaken Phase." (Firebrand Raider)
             if (state_.turn.no_awaken_unit_ready && obj.isUnit()) continue;
+            if (const Card* c = card_registry_.get(obj.card_def_id); c && c->cantBeReadied()) continue;
             obj.is_exhausted = false;
             events_.emit(ObjectStateChangedEvent{id, "readied"});
             events_.emit(ObjectStateChangedEvent{id, "became_ready"});
@@ -1901,9 +1902,8 @@ bool GameEngine::payAndQueueAbility(const Intent& intent) {
         effect_executor_->disempower(intent.ability_source);
     // "Spend my buff:" as a cost (Sett, Brawler; Udyr, Wildman).
     if (act_cost.spend_buff_self && source.buff_count > 0) {
-        source.buff_count -= 1;
-        source.recomputeMight();
         events_.logTrace("ACTIVATE_COST: " + source.name + " spends a buff");
+        effect_executor_->spendBuff(intent.ability_source);
     }
     // "Kill a friendly unit" as a cost: the chosen unit rides in targets.
     if (act_cost.kill_friendly_unit && !intent.targets.empty() &&
@@ -2128,7 +2128,40 @@ void GameEngine::executePlayCard(const Intent& intent) {
             ? card_registry_.get(card.card_def_id) : nullptr;
         Card::OptionalAdditionalCost oac = pc ? pc->optionalAdditionalCost()
                                               : Card::OptionalAdditionalCost{};
-        if (oac.valid && (oac.kill_friendly_unit || oac.kill_friendly_gear || oac.return_friendly_gear)) {
+        if (oac.valid && oac.kill_any_number) {
+            // One unit at a time until the player stops; stopping is offered
+            // once the card is affordable with the kills so far.
+            while (true) {
+                std::vector<GameObjectId> fodder;
+                for (const auto& [oid, o] : state_.objects)
+                    if (oid != intent.card && o.controller == intent.player && o.isUnit() &&
+                        o.location.has_value() && pc->additionalCostAccepts(state_, o))
+                        fodder.push_back(oid);
+                if (fodder.empty()) break;
+                std::vector<Intent> opts;
+                if (canAfford(intent.player, intent.card, 0, prepay_discount, prepay_power)) {
+                    Intent stop; stop.type = IntentType::MakeChoice; stop.player = intent.player;
+                    stop.chosen_value = 0;
+                    opts.push_back(stop);
+                }
+                for (auto f : fodder) {
+                    Intent c; c.type = IntentType::MakeChoice; c.player = intent.player;
+                    c.chosen_objects = {f};
+                    opts.push_back(c);
+                }
+                state_.decision_index++;
+                events_.logTrace("DECISION #" + std::to_string(state_.decision_index) + " (" +
+                    toString(intent.player) + "): kill a friendly unit to reduce " + card.name +
+                    "? [" + std::to_string(opts.size()) + " options]");
+                auto chosen = getAgent(intent.player).selectAction(state_, opts);
+                recordAppliedIntent(chosen);
+                if (on_decision) on_decision(state_, opts, chosen);
+                if (chosen.chosen_objects.empty() || !state_.objectExists(chosen.chosen_objects[0])) break;
+                effect_executor_->killObject(chosen.chosen_objects[0]);
+                prepay_power += oac.power_reduction_per_kill;
+                events_.logTrace("ADDITIONAL_COST: killed a unit for " + card.name);
+            }
+        } else if (oac.valid && (oac.kill_friendly_unit || oac.kill_friendly_gear || oac.return_friendly_gear)) {
             std::vector<GameObjectId> fodder;
             for (const auto& [oid, o] : state_.objects) {
                 if (oid == intent.card || o.controller != intent.player || !o.location.has_value()) continue;
@@ -3235,10 +3268,33 @@ void GameEngine::executeHideCard(const Intent& intent) {
     if (it != ps.hand.end()) ps.hand.erase(it);
 
     // Pay [A] cost — recycle a ready rune (universal power cost), unless
-    // the player may hide ignoring costs this turn.
+    // the player may hide ignoring costs this turn, or pays [1] instead
+    // (Swift Scout: the player's choice when both can be paid).
     auto base_loc = BaseLocation{intent.player};
+    bool pay_energy = false;
+    if (!ps.hide_ignoring_costs_this_turn && ps.hide_for_energy &&
+        canPayAdditionalCost(intent.player, 1, 0, Domain::Fury, SpendPurpose{})) {
+        bool rune_ready = false;
+        for (const auto& [id, obj] : state_.objects)
+            if (obj.isRune() && obj.controller == intent.player && !obj.is_exhausted &&
+                obj.location.has_value() && *obj.location == LocationId{base_loc}) { rune_ready = true; break; }
+        pay_energy = true;
+        if (rune_ready) {
+            Intent a; a.type = IntentType::MakeChoice; a.player = intent.player; a.chosen_value = 0;
+            Intent e; e.type = IntentType::MakeChoice; e.player = intent.player; e.chosen_value = 1;
+            std::vector<Intent> opts = {a, e};
+            state_.decision_index++;
+            events_.logTrace("DECISION #" + std::to_string(state_.decision_index) + " (" +
+                             toString(intent.player) + "): hide for [A] or [1]?");
+            auto chosen = getAgent(intent.player).selectAction(state_, opts);
+            recordAppliedIntent(chosen);
+            if (on_decision) on_decision(state_, opts, chosen);
+            pay_energy = chosen.chosen_value.value_or(0) == 1;
+        }
+        if (pay_energy) payAdditionalCost(intent.player, 1, 0, Domain::Fury, SpendPurpose{});
+    }
     for (auto& [id, obj] : state_.objects) {
-        if (ps.hide_ignoring_costs_this_turn) break;
+        if (ps.hide_ignoring_costs_this_turn || pay_energy) break;
         if (!obj.isRune() || obj.controller != intent.player || obj.is_exhausted) continue;
         if (!obj.location.has_value() || *obj.location != LocationId{base_loc}) continue;
         // Recycle the rune for [A]
@@ -3716,7 +3772,9 @@ std::vector<Intent> GameEngine::generateMainPhaseActions(PlayerId player) const 
                 break;
             }
         }
-        if (!has_rune && !ps.hide_ignoring_costs_this_turn) continue;
+        if (!has_rune && !ps.hide_ignoring_costs_this_turn &&
+            !(ps.hide_for_energy && canPayAdditionalCost(player, 1, 0, Domain::Fury, SpendPurpose{})))
+            continue;
 
         // Can hide at any controlled BF with available facedown slot
         for (auto& bf : state_.battlefields) {
@@ -5435,6 +5493,7 @@ void GameEngine::recalculateAuras() {
         ps.repeat_cost_reduction = 0;            // Marai Spire
         ps.has_reveal_peek = false;              // Void Hatchling
         ps.zilean_present = false;               // Zilean, Time Mage
+        ps.hide_for_energy = false;              // Swift Scout
         // Vendetta continuous effects.
         ps.skip_draw_phase = false;              // Endless Riches
         ps.may_play_from_trash = false;
@@ -5475,8 +5534,11 @@ void GameEngine::recalculateAuras() {
     // flag set; off-board cards stay default-false. Cheap O(n) pass over
     // GameState::objects; collocated with aura recalc so all "static
     // attributes of on-board cards" get refreshed in one place.
-    for (auto& [id, obj] : state_.objects) {
+    // Reset first, in its own pass, so a card's aura can protect OTHER
+    // objects (Alpha Wildclaw) whatever the iteration order.
+    for (auto& [id, obj] : state_.objects)
         obj.untargetable_by_enemy = obj.untargetable_by_enemy_this_turn;
+    for (auto& [id, obj] : state_.objects) {
         // On-board cards AND legends (LegendZone, no location) broadcast their
         // passive auras. Without including legends, legend-sourced passives
         // (Purifier's [Assault], Wuju Master's +1 [M], etc.) never fired.
@@ -5872,6 +5934,11 @@ void GameEngine::recalculateAuras() {
             if (ae.suppress_combat_damage) obj.aura_no_combat_damage = true;
             obj.aura_bonus_damage_taken += ae.bonus_damage_taken;
         }
+        // "Buffs give an additional +1 [M] to friendly units this turn" (Stand United).
+        if (obj.isUnit() && obj.location.has_value() && obj.buff_count > 0 &&
+            obj.controller != PlayerId::None)
+            obj.aura_might_bonus += obj.buff_count *
+                state_.player(obj.controller).extra_buff_might_this_turn;
         // Recompute might with new aura values
         if (obj.isUnit() && obj.location.has_value()) {
             obj.recomputeMight();
@@ -6493,7 +6560,8 @@ void GameEngine::maybePayOptionalAdditionalCost(PlayerId player, GameObjectId ca
     // it is NOT handled here.
     if ((cost.discard_cards > 0 || cost.spend_xp > 0) && cost.reduce_energy > 0) return;
     // Kill / return-a-gear costs are decided in executePlayCard too.
-    if (cost.kill_friendly_unit || cost.kill_friendly_gear || cost.return_friendly_gear) return;
+    if (cost.kill_friendly_unit || cost.kill_friendly_gear || cost.return_friendly_gear ||
+        cost.kill_any_number) return;
 
     // Pure "you may discard N as an additional cost" (Zed, From the Shadows;
     // Ruthless Strike): offered whenever the hand can cover it.
@@ -6651,6 +6719,13 @@ bool GameEngine::affordableWithAdditionalCost(PlayerId player, GameObjectId card
         const int others = static_cast<int>(state_.player(player).hand.size()) - 1;
         return others >= oac.discard_cards && state_.player(player).xp >= oac.spend_xp &&
                canAfford(player, card_obj, 0, oac.reduce_energy);
+    }
+    if (oac.kill_any_number) {
+        int units = 0;
+        for (const auto& [oid, o] : state_.objects)
+            if (oid != card_obj && o.controller == player && o.isUnit() && o.location.has_value() &&
+                pc->additionalCostAccepts(state_, o)) ++units;
+        return canAfford(player, card_obj, 0, 0, units * oac.power_reduction_per_kill);
     }
     if (!oac.kill_friendly_unit && !oac.kill_friendly_gear && !oac.return_friendly_gear) return false;
     for (const auto& [oid, o] : state_.objects) {

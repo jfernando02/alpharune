@@ -55,8 +55,7 @@ public:
         }
         // "Spend my buff" is the cost of the second and third modes.
         if ((mode == 1 || mode == 2) && costDueNow(ctx) && self.buff_count > 0) {
-            self.buff_count -= 1;
-            self.recomputeMight();
+            ctx.executor.spendBuff(ctx.source);
         }
         if (finalizingChoices(ctx)) return;   // choices end here (CR 383.3)
         if (mode < 0) return;                 // no mode left this turn

@@ -24,13 +24,18 @@ TEST_F(ZileanTest, DoublesTokenUnitOncePerTurn) {
     ASSERT_TRUE(state.player(P1).zilean_present);
 
     EffectExecutor exec(state, events, card_db);
-    // First token unit -> original + 1 copy.
+    // "you may": declining doesn't use the once-a-turn.
+    exec.setAgentQuery([](PlayerId, const std::vector<Intent>& ch) { return ch.front(); });
     exec.createToken(P1, CardType::Unit, "Soldier", 1, {}, {}, BaseLocation{P1}, false);
-    EXPECT_EQ(countP1TokenUnits(state), 2) << "Zilean spawns an extra copy";
+    EXPECT_EQ(countP1TokenUnits(state), 1) << "declined";
+    // Accepted -> the token + 1 copy.
+    exec.setAgentQuery([](PlayerId, const std::vector<Intent>& ch) { return ch.back(); });
+    exec.createToken(P1, CardType::Unit, "Soldier", 1, {}, {}, BaseLocation{P1}, false);
+    EXPECT_EQ(countP1TokenUnits(state), 3) << "Zilean spawns an extra copy";
 
     // Second token unit this turn -> NOT doubled (once per turn).
     exec.createToken(P1, CardType::Unit, "Soldier", 1, {}, {}, BaseLocation{P1}, false);
-    EXPECT_EQ(countP1TokenUnits(state), 3) << "only one doubling per turn";
+    EXPECT_EQ(countP1TokenUnits(state), 4) << "only one doubling per turn";
     (void)z;
 }
 

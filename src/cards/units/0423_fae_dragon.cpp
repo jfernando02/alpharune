@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "cards/card_helpers.h"
 
 namespace riftbound {
 namespace {
@@ -19,11 +20,17 @@ public:
     // Auto-applies to up to four currently-unbuffed friendly units — faithful
     // since buffing unbuffed units is strictly beneficial and never declined.
     //
-    // ENGINE GAP: "When you spend a buff, play a Gold gear token exhausted."
-    // There is no "spend a buff" trigger event in TriggerType, so this second
-    // clause is left unimplemented.
-    TriggerType triggerType() const override { return TriggerType::WhenYouPlayMe; }
+    // "When you spend a buff, play a Gold gear token exhausted":
+    // WhenYouSpendABuff (EffectExecutor::spendBuff).
+    std::vector<TriggerType> triggerTypes() const override {
+        return {TriggerType::WhenYouPlayMe, TriggerType::WhenYouSpendABuff};
+    }
     void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
+        if (ctx.firing_trigger == TriggerType::WhenYouSpendABuff) {
+            createGoldExhausted(ctx);
+            ctx.events.logTrace("FAE DRAGON: spent a buff -> Gold gear token exhausted");
+            return;
+        }
         int buffed = 0;
         for (auto& [id, obj] : ctx.state.objects) {
             if (buffed >= 4) break;

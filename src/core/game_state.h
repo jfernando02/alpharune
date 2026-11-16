@@ -210,6 +210,8 @@ struct PlayerState {
     bool unit_died_this_turn = false;
     // "You can hide cards ignoring costs this turn" (Guerilla Warfare).
     bool hide_ignoring_costs_this_turn = false;
+    // "Buffs give an additional +1 [M] to friendly units this turn" (Stand United): per cast.
+    int extra_buff_might_this_turn = 0;
     int draw_on_unit_play_this_turn = 0;   // Fanfare: draw 1 for each of the next N units played this turn
     bool played_permanent_to_bf_this_turn = false;   // a unit or gear played to a battlefield (Hold 'Em)
     // Battlefields this player played a unit or gear to this turn (Hunters' Circle).
@@ -242,6 +244,7 @@ struct PlayerState {
     Domain spells_have_repeat_domain = Domain::Chaos; // ... and its domain ([P] default)
     int  repeat_cost_reduction = 0;            // Marai Spire (525): friendly [Repeat] costs cost N less
     bool has_reveal_peek = false;              // Void Hatchling (341): peek/recycle top before revealing
+    bool hide_for_energy = false;              // Swift Scout (259): may pay [1] instead of [A] to hide (aura)
     bool zilean_present = false;               // Zilean, Time Mage (648): a Zilean is at one of my battlefields (aura)
     // Turn-scoped riders (NOT aura-derived — reset in resetTurnTracking):
     int max_spell_spent_this_turn = 0;         // most-expensive single spell paid for this turn (Jhin, Meticulous Killer: "spent [4]+ to play a spell")
@@ -446,6 +449,7 @@ struct PlayerState {
         unit_or_gear_died_this_turn = false;
         unit_died_this_turn = false;
         hide_ignoring_costs_this_turn = false;
+        extra_buff_might_this_turn = 0;
         draw_on_unit_play_this_turn = 0;
         played_permanent_to_bf_this_turn = false;
         bfs_played_permanent_this_turn.clear();
@@ -836,6 +840,9 @@ struct DelayedAbility {
     // An object the ability refers to ("return IT to their hand"): becomes the
     // chain item's triggering subject when the event carries none.
     GameObjectId payload = kInvalidId;
+    // Fires every time until it expires ("When a friendly unit is played this
+    // turn": Rally the Troops), instead of once.
+    bool repeats = false;
 };
 
 // ─── Complete Game State ─────────────────────────────────────────────────────

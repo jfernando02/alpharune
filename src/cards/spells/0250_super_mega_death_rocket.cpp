@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "cards/card_helpers.h"
 
 namespace riftbound {
 namespace {
@@ -26,11 +27,32 @@ public:
     TargetRequirements getTargetRequirements() const override {
         return TargetRequirements{.count = 1, .must_be_unit = true};
     }
-    // ENGINE GAP: "When you conquer, you may discard 1 to return this from your
-    // trash to your hand." Conquer triggers fire only on units at the scoring
-    // battlefield; the engine does not scan trash-resident spells for conquer
-    // triggers, so this recursion clause cannot be wired from the card file.
-    // The deal-5 effect above is correct.
+    // "When you conquer, you may discard 1 to return this from your trash to
+    // your hand": TriggerManager fires WhenYouConquerInTrash on the scorer's
+    // trash; the discard is the cost, paid as the trigger is finalized.
+    unsigned choicesAtFinalization() const override { return kFinalizeTrigger; }
+    TriggerType triggerType() const override { return TriggerType::WhenYouConquerInTrash; }
+    void onTrigger(CardContext& ctx, const std::vector<GameObjectId>&) override {
+        auto in_trash = [&] {
+            if (!ctx.state.objectExists(ctx.source)) return false;
+            const auto& t = ctx.state.player(ctx.controller).trash;
+            return std::find(t.begin(), t.end(), ctx.source) != t.end();
+        };
+        auto payable = [&] { return in_trash() && !ctx.state.player(ctx.controller).hand.empty(); };
+        if (!costAlreadyPaid(ctx) && !payable()) return;
+        const int yes = confirmOptional(ctx, "Super Mega Death Rocket: discard 1 to return it to hand?", payable);
+        if (yes < 1) return;
+        if (costDueNow(ctx)) ctx.executor.discardCards(ctx.controller, 1);
+        if (finalizingChoices(ctx)) return;   // choices and costs end here (CR 383.3)
+        if (!in_trash()) return;
+        auto& ps = ctx.state.player(ctx.controller);
+        ps.trash.erase(std::find(ps.trash.begin(), ps.trash.end(), ctx.source));
+        auto& me = ctx.state.getObject(ctx.source);
+        me.zone = ZoneType::Hand;
+        me.location = std::nullopt;
+        ps.hand.push_back(ctx.source);
+        ctx.events.logTrace("SUPER MEGA DEATH ROCKET: returned from trash to hand");
+    }
 private:
     const CardDef def_ = [] {
         CardDef d;

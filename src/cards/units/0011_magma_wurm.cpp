@@ -15,10 +15,10 @@ class MagmaWurm : public UnitCard {
 public:
     const CardDef& def() const override { return def_; }
     // "Other friendly units enter ready."
-    // ENGINE GAP: the engine consults only the ENTERING card's own
-    // entersReadyOnPlay() (resolvePermanent), so a passive that makes OTHER
-    // units enter ready cannot be expressed per-card — it needs an engine-side
-    // check (e.g. "any friendly Magma Wurm in play?") at unit-resolution time.
+    // Card::grantsEnterReadyTo, asked of my controller's cards as a unit enters.
+    bool grantsEnterReadyTo(const GameState&, GameObjectId self, const GameObject& played) const override {
+        return played.isUnit() && played.id != self;
+    }
 private:
     const CardDef def_ = [] {
         CardDef d;

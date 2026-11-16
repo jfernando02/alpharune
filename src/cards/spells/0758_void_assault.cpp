@@ -19,11 +19,7 @@ public:
     //  battlefield you don't control, you're the attacker.)"
     // The agent now picks a destination (the controller's base, or any
     // battlefield) that both moved units go to, instead of always forcing base.
-    // ENGINE GAP: the parenthetical "you're the attacker" designation when both
-    // units land on an enemy battlefield is NOT applied — there is no per-card
-    // hook to designate the controller as the attacker / open a showdown
-    // mid-resolution. Movement itself is faithful; only the attacker-status
-    // rider is unimplemented.
+    // "you're the attacker": the spell applies Contested for its controller.
     void onResolve(CardContext& ctx, const std::vector<GameObjectId>& targets) override {
         if (targets.size() < 2) return;
         // Build destination menu: base + each battlefield.
@@ -46,8 +42,24 @@ public:
         };
         move(targets[0]);   // friendly
         move(targets[1]);   // enemy
-        ctx.events.logTrace("VOID ASSAULT: moved both units (attacker designation "
-                            "not engine-applied)");
+        // "If they both move to a battlefield you don't control, you're the
+        // attacker": I apply Contested there before cleanup would give it to
+        // the turn player.
+        if (dests[chosen].has_value()) {
+            for (auto& bf : ctx.state.battlefields) {
+                if (bf.id != *dests[chosen]) continue;
+                const bool both_there = ctx.state.objectExists(targets[0]) && ctx.state.objectExists(targets[1]) &&
+                    ctx.state.getObject(targets[0]).battlefieldId() == bf.id &&
+                    ctx.state.getObject(targets[1]).battlefieldId() == bf.id;
+                if (both_there && !(bf.controller.has_value() && *bf.controller == ctx.controller) &&
+                    !bf.is_contested) {
+                    bf.is_contested = true;
+                    bf.contested_by = ctx.controller;
+                    ctx.events.emit(ContestedEvent{bf.id, ctx.controller});
+                }
+            }
+        }
+        ctx.events.logTrace("VOID ASSAULT: moved both units");
     }
     TargetRequirements getTargetRequirements() const override {
         return TargetRequirements{.count = 2, .must_be_unit = true};

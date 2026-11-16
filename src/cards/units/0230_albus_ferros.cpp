@@ -36,7 +36,7 @@ public:
             if (!obj.isUnit() || obj.controller != ctx.controller || !obj.location.has_value())
                 continue;
             while (obj.buff_count > 0 && remaining > 0) {
-                obj.buff_count -= 1;
+                ctx.executor.spendBuff(id);
                 remaining--;
             }
             obj.recomputeMight();

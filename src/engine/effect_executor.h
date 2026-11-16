@@ -100,6 +100,9 @@ public:
     void giveTemporaryMight(GameObjectId target, int amount, int minimum = 0);
     void giveTemporaryKeyword(GameObjectId target, Keyword kw, int value);
     void buffUnit(GameObjectId target);
+    /// Spend one of `target`'s buffs: -1 buff, Might recomputed, and
+    /// ObjectStateChangedEvent "buff_spent" (WhenYouSpendABuff: Fae Dragon).
+    void spendBuff(GameObjectId target);
     void readyObject(GameObjectId target);
     void moveToBase(GameObjectId target);
     /// Unattach a single gear from the unit it's equipped to. Removes it from

@@ -78,6 +78,14 @@ protected:
 
 constexpr CardDefId kTheBoss = 264;
 
+/// Answers every choice with its last option ("yes" / the object over "none").
+class LastChoiceAgent : public AgentInterface {
+public:
+    Intent selectAction(const GameState&, const std::vector<Intent>& legal) override {
+        return legal.empty() ? Intent{} : legal.back();
+    }
+};
+
 TEST_F(RulesComplianceTest, DeathReplacement_TheBoss_DoesNotSaveAnUnbuffedUnit) {
     makeEngine();
     setLegend(P1, kTheBoss);
@@ -99,6 +107,9 @@ TEST_F(RulesComplianceTest, DeathReplacement_TheBoss_SavesABuffedUnit) {
     s().getObject(unit).buff_count = 1;
     s().getObject(unit).recomputeMight();
     s().getObject(unit).damage_marked = 5;      // lethal
+    s().player(P1).rune_pool.power[static_cast<int>(Domain::Order)] = 1;   // [C]
+    LastChoiceAgent yes;
+    engine_->testHook_setAgents(&yes, &a2_);
 
     engine_->testHook_processLethalDamage();
 
@@ -118,10 +129,14 @@ TEST_F(RulesComplianceTest, DeathReplacement_AppliesToEffectKillsToo) {
     s().getObject(unit).buff_count = 1;
     s().getObject(unit).recomputeMight();
 
+    s().player(P1).rune_pool.power[static_cast<int>(Domain::Body)] = 1;   // [C]
+
     EffectExecutor exec(s(), events, card_db, &card_registry);
+    exec.setAgentQuery([](PlayerId, const std::vector<Intent>& ch) { return ch.back(); });
     exec.killObject(unit);
 
     EXPECT_TRUE(onBoard(unit)) << "saved by The Boss";
+    EXPECT_EQ(s().player(P1).rune_pool.power[static_cast<int>(Domain::Body)], 0) << "paid [C]";
     EXPECT_TRUE(s().getObject(unit).isAtBase());
 }
 

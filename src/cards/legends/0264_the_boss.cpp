@@ -1,5 +1,6 @@
 #include "cards/card.h"
 #include "cards/card_registry.h"
+#include "cards/card_helpers.h"
 #include "core/game_state.h"
 #include "core/events.h"
 #include "engine/effect_executor.h"
@@ -41,11 +42,16 @@ public:
         if (victim.controller != self.controller) return false;
         if (victim.buff_count <= 0) return false;
         if (self.is_exhausted) return false;  // can't exhaust me again
-        // Pay: exhaust me, spend one of its buffs ([C] cost not charged here —
-        // see header note).
+        // "you may pay [C]" (CR 135.2.e.6.c: Body or Order power), the
+        // player's yes / no.
+        std::optional<Domain> dom;
+        for (Domain d : {Domain::Body, Domain::Order})
+            if (payableOnePower(ctx.state, self.controller, d)) { dom = d; break; }
+        if (!dom) return false;
+        if (ctx.executor.chooseObjectOrNoneNow(self.controller, {dying_unit}) != dying_unit) return false;
+        if (!payOnePower(ctx, self.controller, *dom)) return false;
         self.is_exhausted = true;
-        victim.buff_count -= 1;
-        victim.recomputeMight();
+        ctx.executor.spendBuff(victim.id);
         ctx.events.logTrace("THE BOSS: save buffed unit " + victim.name +
                             " (exhaust me, spend buff) -> heal/exhaust/recall");
         // Heal, exhaust, recall to base.

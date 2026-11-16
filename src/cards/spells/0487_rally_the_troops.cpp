@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "cards/card_helpers.h"
 
 namespace riftbound {
 namespace {
@@ -17,17 +18,28 @@ namespace {
 class RallyTheTroops : public SpellCard {
 public:
     const CardDef& def() const override { return def_; }
+    // "When a friendly unit is played this turn, buff it": a repeating
+    // delayed ability for the rest of the turn; the played unit is the chain
+    // item's triggering subject.
     void onResolve(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
-        // ENGINE GAP: the delayed-ability mechanism is one-shot (fires once
-        // then is removed) and does NOT surface the played-unit id to the
-        // delayed onTrigger. So the rest-of-turn "buff EACH friendly unit
-        // played" rider can't be expressed (neither the per-unit repeat nor
-        // the buff target are reachable). Only the unconditional "Draw 1"
-        // half is implemented; the delayed buff is left for a per-event
-        // delayed-ability hook that passes the subject object.
+        DelayedAbility da;
+        da.source = ctx.source;
+        da.card_def_id = cardDefId();
+        da.controller = ctx.controller;
+        da.trigger = TriggerType::WhenYouPlayAUnit;
+        da.expires_on_turn = ctx.state.turn.turn_number;
+        da.repeats = true;
+        ctx.state.delayed_abilities.push_back(da);
         ctx.executor.drawCards(ctx.controller, 1);
-        ctx.events.logTrace("RALLY THE TROOPS: draw 1 (delayed buff-on-play "
-                            "rider not engine-expressible)");
+        ctx.events.logTrace("RALLY THE TROOPS: draw 1; friendly units played this turn get buffed");
+    }
+    TriggerType triggerType() const override { return TriggerType::WhenYouPlayAUnit; }
+    void onTrigger(CardContext& ctx, const std::vector<GameObjectId>&) override {
+        const GameObjectId unit = triggerSubject(ctx);
+        if (unit == kInvalidId || !ctx.state.objectExists(unit) ||
+            !ctx.state.getObject(unit).location.has_value()) return;
+        ctx.executor.buffUnit(unit);
+        ctx.events.logTrace("RALLY THE TROOPS: buffed " + ctx.state.getObject(unit).name);
     }
 private:
     const CardDef def_ = [] {

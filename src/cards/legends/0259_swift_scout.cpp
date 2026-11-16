@@ -16,8 +16,16 @@ class SwiftScout : public LegendCard {
 public:
     const CardDef& def() const override { return def_; }
     // "You may pay [1] to hide a card with [Hidden] instead of [A]."
-    //   ENGINE GAP: hide-cost is an alternative-cost modifier with no card-side
-    //   hook; left unmodeled.
+    //   PlayerState::hide_for_energy (this aura); the engine's hide action
+    //   offers [A] or [1].
+    void applyPassiveAura(GameState& state, PlayerId controller) const override {
+        for (const auto& [id, obj] : state.objects)
+            if (obj.card_def_id == cardDefId() && obj.controller == controller &&
+                obj.zone == ZoneType::LegendZone) {
+                state.player(controller).hide_for_energy = true;
+                return;
+            }
+    }
     // "[1], [E]: Put a Teemo unit you own into your hand from your Champion Zone
     //   or the board."
     bool hasActivatedAbility() const override { return true; }

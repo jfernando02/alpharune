@@ -175,6 +175,8 @@ enum class TriggerType : uint8_t {
     WhenYouPlayATokenUnit,      // "When you play a token unit," (Lillia, Protector of Dreams)
     WhenAnOpponentHolds,        // delayed only: "When they hold," (Ashe, Focused)
     WhenItTakesDamage,          // delayed only: "the next time it takes damage" (Noxian Guillotine)
+    WhenYouSpendABuff,
+    WhenYouConquerInTrash,      // "When you conquer, ... return this from your trash" (Super Mega Death Rocket)          // "When you spend a buff," (Fae Dragon); subject = the unit
     WhenYouKillAnEnemyUnit,     // "When you kill a ... enemy unit" (Solari Shrine); subject = the unit
     WhenEquipmentAttachedToMe,  // Aphelios, Exalted
     WhenAUnitBecomesMighty,     // Fiora Worthy / Grand Duelist

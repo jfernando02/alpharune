@@ -650,6 +650,10 @@ public:
         // "You may spend N XP as an additional cost to play me. If you do, I
         // cost [reduce_energy] less" (Poppy, Defender of the Meek).
         int spend_xp = 0;
+        // "you may kill any number of friendly units as an additional cost.
+        // Reduce my cost by [power] for each" (Commander Ledros).
+        bool kill_any_number = false;
+        int power_reduction_per_kill = 0;
     };
     virtual OptionalAdditionalCost optionalAdditionalCost() const { return {}; }
     /// Which friendly objects the kill / return additional cost may take
@@ -814,6 +818,9 @@ public:
     virtual bool acceptDeathReplacement(CardContext& /*ctx*/, GameObjectId /*unit*/) const {
         return true;
     }
+
+    /// "I can't be readied" (Maduli): neither the Awaken Phase nor effects ready it.
+    virtual bool cantBeReadied() const { return false; }
 
     virtual bool grantsKeywordTo(const GameState& /*state*/, GameObjectId /*self*/,
                                  const GameObject& /*unit*/, Keyword /*kw*/) const {
