@@ -18,7 +18,32 @@ public:
     // "If Neeko is in your deck, choose 3 different legends in addition to your
     // starting legend. When you play me, choose one of those legends and add it to
     // your Legend Zone while I'm on the board."
-    // APPROX: the extra legends are not modeled; Neeko is a 4 [M] unit.
+    // The 3 legends are chosen with the deck (DeckSubmission::extra_legends,
+    // PlayerState::reserve_legends); the added legend's legend_anchor is me,
+    // and the engine takes it out of the Legend Zone once I leave the board.
+    int extraLegendsAtDeckBuilding() const override { return 3; }
+    unsigned choicesAtFinalization() const override { return kFinalizeTrigger; }
+    TriggerType triggerType() const override { return TriggerType::WhenYouPlayMe; }
+    void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
+        const auto reserve = ctx.state.player(ctx.controller).reserve_legends;
+        int m = 0;
+        if (reserve.size() > 1) {
+            std::vector<std::string> labels;
+            for (auto id : reserve) labels.push_back(ctx.executor.cardDB().get(id).name);
+            m = pickMode(ctx, "Neeko: add which legend?", static_cast<int>(reserve.size()), labels);
+            if (m == -1) return;
+        }
+        if (finalizingChoices(ctx)) return;   // choices end here (CR 383.3)
+        if (reserve.empty() || m < 0 || m >= static_cast<int>(reserve.size())) return;
+        if (!ctx.state.objectExists(ctx.source) || !ctx.state.getObject(ctx.source).location) return;
+        const auto legend = ctx.executor.instantiateCard(reserve[m], ctx.controller);
+        auto& l = ctx.state.getObject(legend);
+        l.zone = ZoneType::LegendZone;
+        l.legend_anchor = ctx.source;
+        ctx.state.player(ctx.controller).extra_legends.push_back(legend);
+        ctx.events.logTrace("NEEKO: " + l.name + " added to the Legend Zone");
+    }
+
 private:
     const CardDef def_ = [] {
         CardDef d;

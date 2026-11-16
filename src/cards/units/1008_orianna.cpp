@@ -16,7 +16,7 @@ class OriannaMechanicalMarvel : public UnitCard {
 public:
     const CardDef& def() const override { return def_; }
     // "Once each turn, while I'm at a battlefield, you may pay [1][A] less to
-    // play a gear." (approximated as the first gear each turn)
+    // play a gear." The player chooses which gear (GameEngine::executePlayCard).
     void applyPassiveAura(GameState& state, PlayerId controller) const override {
         forEachSelfOnce(*this, state, controller, [&](GameObjectId sid, GameObject& self) {
             if (!self.isAtBattlefield()) return;
@@ -25,7 +25,7 @@ public:
             m.energy_reduction = 1;
             m.power_reduction = 1;
             m.gear_only = true;
-            m.first_gear_per_turn = true;
+            m.once_per_turn_optional = true;
             m.affects_friendly_only = true;
             m.this_turn_only = false;
             state.player(controller).cost_modifiers.push_back(m);

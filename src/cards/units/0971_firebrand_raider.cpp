@@ -17,9 +17,12 @@ public:
     const CardDef& def() const override { return def_; }
     // "I enter ready. When you play me, ready all enemy units. Other units enter
     // ready. Units don't ready during the Awaken Phase."
-    // APPROX: the two static effects (others enter ready, no Awaken readying)
-    // are not modeled.
+    void applyPassiveAura(GameState& state, PlayerId /*controller*/) const override {
+        state.turn.all_units_enter_ready = true;
+        state.turn.no_awaken_unit_ready = true;
+    }
     bool entersReadyOnPlay() const override { return true; }
+
     TriggerType triggerType() const override { return TriggerType::WhenYouPlayMe; }
     void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
         std::vector<GameObjectId> ids;

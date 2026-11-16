@@ -51,16 +51,21 @@ protected:
         const DeckSubmission d1 = DeckValidator::loadFromDeckList(rootPath("decks/leblanc_test.txt"), *db_);
         const DeckSubmission d2 = DeckValidator::loadFromDeckList(rootPath("decks/vex_test_deck.txt"), *db_);
         std::vector<Point> out;
-        EventBus bus;
-        GameEngine engine(*db_, bus, *registry_);
-        std::mt19937_64 rng(seed);
-        StepResult step = engine.beginGame(d1, d2, seed);
-        for (int n = 0; n < 3000 && step.kind == StepKind::NeedDecision && out.size() < max_points; ++n) {
-            if (step.legal.size() >= 2) out.push_back({engine.state(), step.legal});
-            step = engine.applyChoice(static_cast<int>(
-                std::uniform_int_distribution<size_t>(0, step.legal.size() - 1)(rng)));
+        // Games go on (new seeds) until there are enough decisions.
+        for (uint64_t g = 0; g < 8 && out.size() < max_points; ++g) {
+            const uint64_t game_seed = seed + g * 1000;
+            EventBus bus;
+            GameEngine engine(*db_, bus, *registry_);
+            std::mt19937_64 rng(game_seed);
+            StepResult step = engine.beginGame(d1, d2, game_seed);
+            for (int n = 0; n < 3000 && step.kind == StepKind::NeedDecision && out.size() < max_points; ++n) {
+                if (step.legal.size() >= 2) out.push_back({engine.state(), step.legal});
+                step = engine.applyChoice(static_cast<int>(
+                    std::uniform_int_distribution<size_t>(0, step.legal.size() - 1)(rng)));
+            }
         }
         return out;
+
     }
 
     /// A one-tree policy that scores ScriptedAgent's pick +1 and every other
@@ -109,6 +114,7 @@ TEST_F(PolicyModelTest, EncodingIsSortedAndMarksTheAction) {
         }
     }
     EXPECT_GT(checked, 400);   // sample size of the 300 decisions; changes with the rules
+
     EXPECT_EQ(ml::policyFeatureNames(*db_).size(), static_cast<size_t>(ml::kPolicyFeatureDim));
 }
 

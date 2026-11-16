@@ -14,9 +14,7 @@ namespace {
 // "You may play a unit from hand to a battlefield you control, reducing its
 //  cost by [3]." ([Hidden] / [Action] are engine-handled timing.)
 //
-// NOTE: there is no partial cost-reduction play path (playIgnoringCost ignores
-// ALL cost). The chosen unit is played for free — documented approximation of
-// "-[3]"; most reachable units cost <= 3.
+// The reduced cost is paid through EffectExecutor::playPayingCost.
 
 class HereToHelp : public SpellCard {
 public:
@@ -63,7 +61,7 @@ public:
             if (it != ps.hand.end()) ps.hand.erase(it);
             ctx.executor.playPayingCost(ctx.controller, unit, dest, reduced);
             ctx.events.logTrace("HERE TO HELP: played a unit from hand to a "
-                                "controlled battlefield (-[3] approximated as free)");
+                                "controlled battlefield, reducing its cost by [3]");
             return;
         }
         }

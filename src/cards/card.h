@@ -699,7 +699,38 @@ public:
     enum class HostileEffect : uint8_t { Stun, ReduceMight, ReturnToHand };
     /// Return true if this card replaced the effect (the caller then skips it).
     /// Consulted only for effects of a spell or ability that chose `self`.
+    /// The card's applyReplacement may also replace its own death ("if I would
+    /// die ... instead" â€” Mordekaiser).
+    virtual bool replacementCoversSelf() const { return false; }
+
+    /// A battlefield ability any player may use, not only the controller
+    /// ("Each player may use this ability once on their turn" â€” Black Market).
+    virtual bool activatableByAnyPlayer() const { return false; }
+
+    /// A battlefield's Energy discount for `card` being played by `player` to
+    /// it ("the first unit or gear they play here on their turn costs [1]
+    /// less" â€” Hunters' Circle). Asked of the battlefield's card.
+    virtual int playHereDiscount(const GameState& /*state*/, BattlefieldId /*bf*/,
+                                 PlayerId /*player*/, const GameObject& /*card*/) const {
+        return 0;
+    }
+
+
+    /// "If <card> is in your deck, choose N different legends in addition to
+    /// your starting legend." (Neeko): N.
+    virtual int extraLegendsAtDeckBuilding() const { return 0; }
+
+    /// "As an additional cost to play a spell, you may exhaust me and N friendly
+    /// units to reduce the cost of that spell by [X]." (Starry-Eyed Songstress)
+    struct SpellCostOption {
+        bool valid = false;
+        int exhaust_friendly_units = 0;
+        int reduce_energy = 0;
+    };
+    virtual SpellCostOption spellCostOption() const { return {}; }
+
     virtual bool replaceHostileEffect(CardContext& /*ctx*/, GameObjectId /*self*/,
+
                                       HostileEffect /*kind*/) { return false; }
 
     /// "Ignore [Deflect] while paying this spell's cost." (Decree of Insight)

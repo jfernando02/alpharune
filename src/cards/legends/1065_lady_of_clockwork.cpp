@@ -18,7 +18,56 @@ public:
     // "At the start of your Main Phase, you may pay [1] to choose a friendly
     // gear. It becomes a unit gear with Might equal to its Energy cost until you
     // choose another gear with me."
-    // APPROX: unit gear are not modeled; this legend has no effect.
+    // The chosen gear is kept on the legend (card_counters "__unit_gear" = id+1,
+    // "__unit_gear_might"); applyPassiveAura makes it a unit gear each cleanup.
+    unsigned choicesAtFinalization() const override { return kFinalizeTrigger; }
+    TriggerType triggerType() const override { return TriggerType::AtStartOfMain; }
+    void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
+        auto gears = [&] {
+            std::vector<GameObjectId> out;
+            for (const auto& [id, o] : ctx.state.objects)
+                if (o.isGear() && o.controller == ctx.controller && o.location.has_value())
+                    out.push_back(id);
+            return out;
+        };
+        auto still_legal = [&] {
+            return payableEnergy(ctx.state, ctx.controller) >= 1 && !gears().empty();
+        };
+        if (!costAlreadyPaid(ctx) && !still_legal()) return;
+        const int conf = confirmOptional(ctx, "Lady of Clockwork: pay [1] to make a gear a unit?",
+                                         still_legal);
+        if (conf < 1) return;
+        const auto g = pickTarget(ctx, "Lady of Clockwork: choose a friendly gear", gears());
+        if (costDueNow(ctx) && !payEnergy(ctx, ctx.controller, 1)) return;
+        if (finalizingChoices(ctx)) return;   // choices and costs end here (CR 383.3)
+        if (g == kInvalidId || !ctx.state.objectExists(g) || !ctx.state.objectExists(ctx.source))
+            return;
+        if (ctx.state.getObject(g).attached_to.has_value()) ctx.executor.unattachGear(g);
+        auto& me = ctx.state.getObject(ctx.source);
+        me.card_counters["__unit_gear"] = static_cast<int>(g) + 1;
+        me.card_counters["__unit_gear_might"] = printedEnergy(ctx, ctx.state.getObject(g));
+        ctx.events.logTrace("LADY OF CLOCKWORK: " + ctx.state.getObject(g).name +
+                            " becomes a unit gear");
+    }
+    void applyPassiveAura(GameState& state, PlayerId controller) const override {
+        if (controller == PlayerId::None) return;
+        for (auto l : state.player(controller).legends()) {
+            if (!state.objectExists(l) || state.getObject(l).card_def_id != cardDefId()) continue;
+            const auto& c = state.getObject(l).card_counters;
+            auto it = c.find("__unit_gear");
+            if (it == c.end() || it->second <= 0) continue;
+            const auto g = static_cast<GameObjectId>(it->second - 1);
+            if (!state.objectExists(g)) continue;
+            auto& go = state.getObject(g);
+            if (!go.isGear() || go.controller != controller || !go.location.has_value() ||
+                go.attached_to.has_value())
+                continue;
+            go.is_unit_gear = true;
+            auto m = c.find("__unit_gear_might");
+            go.aura_might_bonus += (m == c.end() ? 0 : m->second);
+        }
+    }
+
 private:
     const CardDef def_ = [] {
         CardDef d;

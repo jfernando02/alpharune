@@ -17,7 +17,28 @@ public:
     const CardDef& def() const override { return def_; }
     // "[Accelerate] [Assault 3] Once each turn, if I would die, you may kill a
     // friendly unit to heal me, exhaust me, and recall me instead."
-    // APPROX: the death replacement is not modeled.
+    bool hasReplacementEffect() const override { return true; }
+    bool replacementCoversSelf() const override { return true; }
+    bool applyReplacement(CardContext& ctx, GameObjectId dying) override {
+        if (dying != ctx.source || !ctx.state.objectExists(dying)) return false;
+        auto& me = ctx.state.getObject(dying);
+        const int turn = ctx.state.turn.turn_number + 1;
+        if (me.card_counters["__mordekaiser_saved"] == turn) return false;   // once each turn
+        std::vector<GameObjectId> fodder;
+        for (const auto& [id, o] : ctx.state.objects)
+            if (id != dying && o.isUnit() && o.controller == me.controller && o.location.has_value())
+                fodder.push_back(id);
+        const auto f = ctx.executor.chooseObjectOrNoneNow(me.controller, fodder);
+        if (f == kInvalidId) return false;
+        me.card_counters["__mordekaiser_saved"] = turn;
+        ctx.executor.killObject(f);
+        ctx.executor.healObject(dying);
+        ctx.executor.exhaustObject(dying);
+        ctx.executor.moveToBase(dying);
+        ctx.events.logTrace("MORDEKAISER: killed a friendly unit -> heal, exhaust, recall");
+        return true;
+    }
+
 private:
     const CardDef def_ = [] {
         CardDef d;

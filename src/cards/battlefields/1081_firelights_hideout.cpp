@@ -16,7 +16,12 @@ class FirelightsHideout : public BattlefieldCard {
 public:
     const CardDef& def() const override { return def_; }
     // "When you conquer here, the next unit you play this turn has [Accelerate]."
-    // APPROX: not modeled.
+    TriggerType triggerType() const override { return TriggerType::WhenYouConquerHere; }
+    void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
+        ctx.state.player(ctx.controller).next_unit_accelerate = true;
+        ctx.events.logTrace("FIRELIGHTS' HIDEOUT: the next unit played this turn has [Accelerate]");
+    }
+
 private:
     const CardDef def_ = [] {
         CardDef d;

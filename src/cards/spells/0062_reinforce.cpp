@@ -18,9 +18,7 @@ public:
     // "Look at the top 5 cards of your Main Deck. You may banish a unit from
     //  among them, then play it, reducing its cost by [5]. Recycle the
     //  remaining cards."
-    // NOTE: there is no partial cost-reduction play path in the executor;
-    // playIgnoringCost ignores ALL cost. The chosen unit is played for free
-    // (documented approximation of "-[5]"; most reachable units cost <= 5).
+    // The rest of the cost is paid through EffectExecutor::playPayingCost.
     void onResolve(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
         auto& ri = ctx.state.chain.resuming.value();
         auto& ps = ctx.state.player(ctx.controller);

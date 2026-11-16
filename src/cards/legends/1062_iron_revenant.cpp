@@ -17,7 +17,7 @@ public:
     const CardDef& def() const override { return def_; }
     // "[Reaction][>] Banish a unit or gear from your trash, [E]: [Add] [A].
     // Spend this Power only to play units or gear."
-    // The banished card is the oldest unit or gear in the trash.
+    // The player picks the unit or gear to banish (a cost of the ability).
     static GameObjectId fodder(const GameState& s, PlayerId p) {
         for (auto c : s.player(p).trash) {
             if (!s.objectExists(c)) continue;
@@ -32,8 +32,14 @@ public:
     bool canActivateAbility(const GameState& s, PlayerId p) const override { return fodder(s, p) != kInvalidId; }
     ActivationCost getActivationCost() const override { ActivationCost c; c.exhaust = true; return c; }
     void onActivate(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
-        const auto f = fodder(ctx.state, ctx.controller);
+        std::vector<GameObjectId> options;
+        for (auto c : ctx.state.player(ctx.controller).trash)
+            if (ctx.state.objectExists(c) &&
+                (ctx.state.getObject(c).isUnit() || ctx.state.getObject(c).isGear()))
+                options.push_back(c);
+        const auto f = ctx.executor.chooseObjectNow(ctx.controller, options);
         if (f == kInvalidId) return;
+
         ctx.executor.banishObject(f);
         ctx.executor.addRestrictedPower(ctx.controller, SpendScope::UnitsOrGear, 1);
     }

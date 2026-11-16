@@ -53,9 +53,7 @@ public:
         if (it != ps.trash.end()) ps.trash.erase(it);
 
         std::string sname = ctx.state.getObject(chosen).name;
-        // NOTE: playIgnoringCost ignores ALL costs (incl. Power); the printed
-        // "you must still pay its Power cost" is approximated as free — same
-        // convention as Fizz, Trickster (461).
+        // "you must still pay its Power cost": playPayingCost with power_only.
         // The spell goes on the chain and resolves; "Then recycle it" replaces
         // where it goes when it leaves the chain.
         ctx.state.getObject(chosen).card_counters["__recycle_on_leave_chain"] = 1;

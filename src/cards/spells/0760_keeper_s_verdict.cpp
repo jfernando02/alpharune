@@ -32,14 +32,18 @@ public:
         return out;
     }
     void onResolve(CardContext& ctx, const std::vector<GameObjectId>& targets) override {
+        // Top or bottom first: pickMode's resume points come before pickTarget's.
+        if (targets.empty() && enumerateLegalTargets(ctx.state, ctx.controller).empty()) return;
+
+        int mode = pickMode(ctx, "Keeper's Verdict: top or bottom of deck", 2,
+                            {"Top", "Bottom"});
+        if (mode < 0) return;  // suspended
         GameObjectId picked = kInvalidId;
         if (!targets.empty()) picked = targets[0];
         else picked = pickTarget(ctx, "Keeper's Verdict: place enemy unit on deck",
                                  enumerateLegalTargets(ctx.state, ctx.controller));
         if (picked == kInvalidId || !ctx.state.objectExists(picked)) return;
-        int mode = pickMode(ctx, "Keeper's Verdict: top or bottom of deck", 2,
-                            {"Top", "Bottom"});
-        if (mode < 0) return;  // suspended
+
 
         auto& u = ctx.state.getObject(picked);
         PlayerId owner = u.owner;

@@ -17,7 +17,30 @@ public:
     const CardDef& def() const override { return def_; }
     // "[A][A]: Draw 1. Each player may use this ability once on their turn (even
     // if they don't control this battlefield)."
-    // APPROX: battlefield abilities usable by any player are not modeled.
+    bool activatableByAnyPlayer() const override { return true; }
+    std::vector<ActivatedAbility> activatedAbilities() const override {
+        ActivatedAbility a;
+        a.cost.power = 2;
+        a.cost.power_any_domain = true;
+        return {a};
+    }
+    // Once per player, on their own turn.
+    bool canActivateAbilityAt(const GameState& state, PlayerId player,
+                              GameObjectId source, int ai) const override {
+        if (!Card::canActivateAbilityAt(state, player, source, ai)) return false;
+        if (state.turn.turn_player != player) return false;
+        const auto& counters = state.getObject(source).card_counters;
+        auto it = counters.find("__ability_used_turn_p" +
+                                std::to_string(static_cast<int>(player)) + "_" +
+                                std::to_string(ai));
+        return it == counters.end() || it->second != state.turn.turn_number + 1;
+    }
+    void onActivate(CardContext& ctx, int /*ability_index*/,
+                    const std::vector<GameObjectId>& /*targets*/) override {
+        ctx.executor.drawCards(ctx.controller, 1);
+        ctx.events.logTrace("BLACK MARKET: draw 1");
+    }
+
 private:
     const CardDef def_ = [] {
         CardDef d;

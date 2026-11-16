@@ -15,37 +15,36 @@ namespace {
 
 // "[Show Off] a card. When you play me, if you showed off a card, [Predict]
 //  equal to its Power cost, then draw 2."
-// APPROX: the engine has no [Show Off] step yet. A card can always be shown
-// off (a card in hand, or another friendly game object — a rune at the least),
-// and showing off reveals nothing worth hiding next to an 8-cost play, so the
-// card is taken as shown off, with the highest Power cost on offer.
+// The player picks the card shown off (a card in hand or another friendly one).
 class TheEmpyrean : public UnitCard {
 public:
     const CardDef& def() const override { return def_; }
+    // [Show Off] is chosen as I am played: the player picks a card in hand or
+    // another friendly card on the board, and Predicts its Power cost.
+    unsigned choicesAtFinalization() const override { return kFinalizeTrigger; }
     TriggerType triggerType() const override { return TriggerType::WhenYouPlayMe; }
+    static std::vector<GameObjectId> showable(const GameState& s, PlayerId me, GameObjectId self) {
+        std::vector<GameObjectId> out;
+        for (auto cid : s.player(me).hand)
+            if (cid != self && s.objectExists(cid)) out.push_back(cid);
+        for (const auto& [id, o] : s.objects)
+            if (id != self && o.controller == me && o.location.has_value()) out.push_back(id);
+        return out;
+    }
     void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
         const PlayerId me = ctx.controller;
-        const auto& db = ctx.executor.cardDB();
-        auto power_of = [&](const GameObject& o) {
-            return o.card_def_id == kInvalidId ? 0 : db.get(o.card_def_id).power_cost;
-        };
-        bool any = false;
-        int best = 0;
-        for (auto cid : ctx.state.player(me).hand) {
-            if (!ctx.state.objectExists(cid)) continue;
-            any = true;
-            best = std::max(best, power_of(ctx.state.getObject(cid)));
-        }
-        for (const auto& [id, o] : ctx.state.objects) {
-            if (id == ctx.source || o.controller != me || !o.location.has_value()) continue;
-            any = true;
-            best = std::max(best, power_of(o));
-        }
-        if (!any) return;   // nothing to show off
-        if (best > 0) ctx.executor.predict(me, best);
+        const auto cards = showable(ctx.state, me, ctx.source);
+        if (cards.empty()) { if (finalizingChoices(ctx)) return; return; }   // nothing to show off
+        const GameObjectId shown = pickTarget(ctx, "The Empyrean: show off a card", cards);
+        if (ctx.executor.hasPendingChoice()) return;   // waiting for the pick
+        if (finalizingChoices(ctx)) return;            // choices end here (CR 383.3)
+        if (shown == kInvalidId || !ctx.state.objectExists(shown)) return;
+        const auto& o = ctx.state.getObject(shown);
+        const int power = o.card_def_id == kInvalidId ? 0 : ctx.executor.cardDB().get(o.card_def_id).power_cost;
+        if (power > 0) ctx.executor.predict(me, power);
         ctx.executor.drawCards(me, 2);
-        ctx.events.logTrace("THE EMPYREAN: showed off a card -> predict " +
-                            std::to_string(best) + ", draw 2");
+        ctx.events.logTrace("THE EMPYREAN: showed off " + o.name + " -> predict " +
+                            std::to_string(power) + ", draw 2");
     }
 private:
     const CardDef def_ = [] {

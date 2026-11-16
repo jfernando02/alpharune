@@ -16,7 +16,11 @@ class DemacianIlluminators : public UnitCard {
 public:
     const CardDef& def() const override { return def_; }
     // "When one or more friendly units die, [Buff] a friendly unit."
-    // APPROX: fires once per friendly unit that dies.
+    // Triggers once for units that die at the same time (one death batch).
+    bool triggerCondition(const GameState& state, GameObjectId /*source*/, PlayerId controller,
+                          TriggerType /*trigger*/, GameObjectId subject) const override {
+        return firstDeathInBatch(state, controller, subject);
+    }
     unsigned choicesAtFinalization() const override { return kFinalizeTrigger; }
     TriggerType triggerType() const override { return TriggerType::WhenAFriendlyUnitDies; }
     void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {

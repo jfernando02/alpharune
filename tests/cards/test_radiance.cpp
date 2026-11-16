@@ -174,7 +174,14 @@ TEST_F(Radiance, CommandAttack_DrawsAGearFromTheTopFiveAndRecyclesTheRest) {
     for (int i = 0; i < 4; ++i) top.push_back(addToDeck(P1, kLifeFromStone));
     auto gear = addToDeck(P1, kSteraksGage);        // the top card
     auto spell = addToHand(P1, kCommandAttack);
-    driveResumable(kCommandAttack, P1, spell, pickIds({gear}), exec);
+    driveResumable(kCommandAttack, P1, spell, [&](const std::vector<Intent>& legal) {
+        for (const auto& i : legal)   // "you may reveal a gear": yes
+            if (i.chosen_objects.empty() && i.chosen_value == 1) return i;
+        for (const auto& i : legal)
+            if (!i.chosen_objects.empty() && i.chosen_objects.front() == gear) return i;
+        return legal.front();
+    }, exec);
+
     const auto& ps = state.player(P1);
     EXPECT_NE(std::find(ps.hand.begin(), ps.hand.end(), gear), ps.hand.end());
     EXPECT_EQ(std::find(ps.hand.begin(), ps.hand.end(), deep), ps.hand.end());

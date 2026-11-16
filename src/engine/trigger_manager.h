@@ -146,7 +146,10 @@ private:
     /// `relevant_player = PlayerId::None` to sweep both players (the
     /// per-handler logic can still scope semantics by passing only the
     /// relevant player's id — e.g. scoring events pass the scoring player).
+    /// "When you play a card ..." watched from the player's trash.
+    void fireTrashPlayWatchers(PlayerId player, GameObjectId played);
     void fireLegendTrigger(TriggerType t, PlayerId relevant_player,
+
                            int triggering_spell_energy_spent = 0,
                            GameObjectId subject = kInvalidId);
 };

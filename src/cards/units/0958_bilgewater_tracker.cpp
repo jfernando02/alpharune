@@ -5,6 +5,7 @@
 #include "engine/effect_executor.h"
 #include <memory>
 #include <string>
+#include <tuple>
 #include <vector>
 #include "cards/card_helpers.h"
 
@@ -13,8 +14,7 @@ namespace {
 
 // "When you play me, deal 1 to each of up to 2 units."
 // The two units are chosen when the trigger is finalized (CR 383.3).
-// APPROX: the picks are enemy units — the target pickers have no "none" option,
-// and dealing 1 to a unit of your own is next to never wanted.
+// The player chooses no unit, one or two; any units.
 class BilgewaterTracker : public UnitCard {
 public:
     const CardDef& def() const override { return def_; }
@@ -22,15 +22,28 @@ public:
     TriggerType triggerType() const override { return TriggerType::WhenYouPlayMe; }
     void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
         const PlayerId me = ctx.controller;
-        auto enemies = chooseableUnits(ctx.state, me,
-                                       [&](const GameObject& o) { return o.controller != me; });
-        auto second = [&](GameObjectId a) {
-            std::vector<GameObjectId> out;
-            for (auto id : enemies) if (id != a) out.push_back(id);
-            return out;
-        };
-        auto [a, b] = pickTargetPair(ctx, "Bilgewater Tracker: deal 1 to each of up to 2 units",
-                                     enemies, second);
+        // "up to 2 units": any units; the player chooses none, one or two.
+        auto units = chooseableUnits(ctx.state, me, [](const GameObject&) { return true; });
+        int how_many = 0;
+        if (!units.empty()) {
+            const int modes = units.size() >= 2 ? 3 : 2;
+            std::vector<std::string> labels = {"no unit", "1 unit", "2 units"};
+            labels.resize(modes);
+            how_many = pickMode(ctx, "Bilgewater Tracker: deal 1 to how many units?", modes, labels);
+            if (how_many == -1) return;   // waiting for the answer
+        }
+        GameObjectId a = kInvalidId, b = kInvalidId;
+        if (how_many == 1) {
+            a = pickTarget(ctx, "Bilgewater Tracker: deal 1 to a unit", units);
+        } else if (how_many == 2) {
+            auto second = [&](GameObjectId first) {
+                std::vector<GameObjectId> out;
+                for (auto id : units) if (id != first) out.push_back(id);
+                return out;
+            };
+            std::tie(a, b) = pickTargetPair(ctx, "Bilgewater Tracker: deal 1 to each of 2 units",
+                                            units, second);
+        }
         if (ctx.executor.hasPendingChoice()) return;   // waiting for a pick
         if (finalizingChoices(ctx)) return;            // choices end here (CR 383.3)
         for (auto t : {a, b})

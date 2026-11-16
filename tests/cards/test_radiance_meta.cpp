@@ -198,13 +198,13 @@ TEST_F(RadianceMeta, RecklessInnovator_PaysChaosToDraw) {
 
 // ── 958 Bilgewater Tracker ─────────────────────────────────────────────────
 
-TEST_F(RadianceMeta, BilgewaterTracker_DealsOneToTwoEnemyUnits) {
+TEST_F(RadianceMeta, BilgewaterTracker_DealsOneToTwoUnits) {
     EffectExecutor exec(state, events, card_db, &card_registry);
     auto me = addUnit(P1, kBilgewaterTracker, 0, 0);
     auto a = addUnit(P2, kInvalidId, 3, 0);
     auto b = addUnit(P2, kInvalidId, 3, 1);
     auto mine = addUnit(P1, kInvalidId, 3, 1);
-    driveResumableTrigger(kBilgewaterTracker, P1, me, pickSeq({a, b}), exec);
+    driveResumableTrigger(kBilgewaterTracker, P1, me, pickSeq({2, a, b}), exec);   // "2 units"
     EXPECT_EQ(state.getObject(a).damage_marked, 1);
     EXPECT_EQ(state.getObject(b).damage_marked, 1);
     EXPECT_EQ(state.getObject(mine).damage_marked, 0);
@@ -222,6 +222,8 @@ TEST_F(RadianceMeta, BedevilingStranger_ReturnsAnEnemyFromACrowdedBattlefield) {
     std::vector<GameObjectId> offered;
     driveResumableTrigger(kBedevilingStranger, P1, me,
         [&](const std::vector<Intent>& legal) {
+            for (const auto& i : legal)   // "you may": yes
+                if (i.chosen_objects.empty() && i.chosen_value == 1) return i;
             for (const auto& i : legal)
                 if (!i.chosen_objects.empty()) offered.push_back(i.chosen_objects[0]);
             for (const auto& i : legal)
@@ -254,11 +256,14 @@ TEST_F(RadianceMeta, TrifarianCaptain_DrawsACheapUnitOrGearAndRecyclesTheRest) {
     std::vector<GameObjectId> offered;
     driveResumableTrigger(kTrifarianCaptain, P1, me,
         [&](const std::vector<Intent>& legal) {
+            for (const auto& i : legal)   // "you may reveal": yes
+                if (i.chosen_objects.empty() && i.chosen_value == 1) return i;
             for (const auto& i : legal)
                 if (!i.chosen_objects.empty()) offered.push_back(i.chosen_objects[0]);
             return legal.front();
         }, exec);
     EXPECT_TRUE(inHand(P1, gear));
+
     EXPECT_TRUE(offered.empty() || offered == std::vector<GameObjectId>{gear});
     // The bottom card (5th) was not looked at and is now above the recycled 3.
     const auto& deck = state.player(P1).main_deck;

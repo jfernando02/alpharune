@@ -90,7 +90,7 @@ protected:
                 const ChainStep taken_step = live.state().turn.chain_step;
                 for (int s = 0; s < 200; ++s) {
                     EXPECT_EQ(cstep.kind, step.kind) << "seed " << seed << " step " << s;
-                    if (cstep.kind != step.kind || step.kind != StepKind::NeedDecision) return out;
+                    if (cstep.kind != step.kind || step.kind != StepKind::NeedDecision) break;   // game over: next seed
                     EXPECT_TRUE(cstep.legal == step.legal)
                         << "seed " << seed << " step " << s << " (phase "
                         << toString(live.state().turn.phase) << ", chain "

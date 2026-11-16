@@ -11,7 +11,7 @@ namespace riftbound {
 namespace {
 
 // "[Deathknell] — Play a 1 [M] Bird unit token with [Deflect] to your base."
-// APPROX: no tags — the gallery entry lists none (it may be a Dog).
+// No tags: the gallery entry lists none.
 class HuntingDog : public UnitCard {
 public:
     const CardDef& def() const override { return def_; }

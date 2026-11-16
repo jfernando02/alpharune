@@ -16,8 +16,7 @@ namespace {
 //  units there, you may return an enemy unit there to its owner's hand."
 // The battlefield and the unit come down to one pick: an enemy unit at a
 // battlefield holding 4+ units, chosen when the trigger is finalized.
-// APPROX: the "you may" is always taken (sending an enemy unit back is next to
-// never worse than leaving it).
+// The "you may" is asked.
 class BedevilingStranger : public UnitCard {
 public:
     const CardDef& def() const override { return def_; }
@@ -36,8 +35,12 @@ public:
     }
     void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
         auto legal = returnable(ctx.state, ctx.controller);   // "4 or more" checked again on resolution
-        GameObjectId t = legal.empty() ? kInvalidId
+        const int go = confirmOptional(ctx, "Bedeviling Stranger: return an enemy unit to hand?",
+                                       [&] { return !returnable(ctx.state, ctx.controller).empty(); });
+        if (go == -1) return;   // waiting for the answer
+        GameObjectId t = (go == 0 || legal.empty()) ? kInvalidId
             : pickTarget(ctx, "Bedeviling Stranger: return an enemy unit to hand", legal);
+
         if (ctx.executor.hasPendingChoice()) return;
         if (finalizingChoices(ctx)) return;   // choices end here (CR 383.3)
         if (t == kInvalidId || !ctx.state.objectExists(t)) return;

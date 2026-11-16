@@ -34,7 +34,11 @@ struct DeckSubmission {
     std::vector<CardDefId> rune_deck;     // 12 runes
     std::vector<CardDefId> battlefields;  // 3 battlefields
     std::vector<CardDefId> sideboard;     // 0-10 cards
+    // Legends chosen in addition to the starting legend ("If Neeko is in your
+    // deck, choose 3 different legends ..."). Deck list section "Extra Legends:".
+    std::vector<CardDefId> extra_legends;
 };
+
 
 struct ValidationResult {
     bool is_legal = true;

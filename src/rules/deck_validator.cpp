@@ -304,6 +304,9 @@ DeckSubmission DeckValidator::loadFromDeckList(const std::string& path,
             for (int i = 0; i < count; ++i) deck.rune_deck.push_back(id);
         } else if (section == "sideboard") {
             for (int i = 0; i < count; ++i) deck.sideboard.push_back(id);
+        } else if (section == "extra legends" || section == "extralegends") {
+            deck.extra_legends.push_back(id);
+
         } else {
             fail("unknown section '" + section + "'");
         }

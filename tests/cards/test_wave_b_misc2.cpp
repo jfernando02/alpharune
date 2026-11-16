@@ -14,10 +14,12 @@ constexpr CardDefId kDreamingTree = 287;
 
 TEST_F(Misc2Test, MageseekerInvestigator_FlagsItsBattlefield) {
     addUnit(P1, kInvestigator, 4, /*at_bf=*/0);
-    EXPECT_FALSE(state.battlefields[0].surcharge_enemy_multi_move);
+    EXPECT_EQ(state.battlefields[0].multi_move_surcharge_power[1], 0);
     card_registry.get(kInvestigator)->applyPassiveAura(state, P1);
-    EXPECT_TRUE(state.battlefields[0].surcharge_enemy_multi_move);
-    EXPECT_FALSE(state.battlefields[1].surcharge_enemy_multi_move);
+    EXPECT_EQ(state.battlefields[0].multi_move_surcharge_power[1], 1) << "the opponent pays";
+    EXPECT_EQ(state.battlefields[0].multi_move_surcharge_power[0], 0);
+    EXPECT_EQ(state.battlefields[1].multi_move_surcharge_power[1], 0);
+
 }
 
 TEST_F(Misc2Test, DreamingTree_DrawsOncePerTurn) {

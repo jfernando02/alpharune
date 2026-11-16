@@ -25,6 +25,7 @@ public:
     std::vector<ActivatedAbility> activatedAbilities() const override {
         ActivatedAbility a;
         a.cost.exhaust = true;
+        a.granted_only = true;   // the legend uses it, not this battlefield
         a.needs_activation_time_target = true;  // pick equipment + unit at resolve
         return {a};
     }

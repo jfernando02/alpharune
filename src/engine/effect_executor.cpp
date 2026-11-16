@@ -222,11 +222,14 @@ void EffectExecutor::killObject(GameObjectId target) {
         if (card_registry_) {
             std::vector<GameObjectId> replacers;
             for (auto& [id, other] : state_.objects) {
-                if (other.controller != controller || id == target) continue;
+                if (other.controller != controller) continue;
                 if (!other.location.has_value() && other.zone != ZoneType::LegendZone) continue;
                 if (other.card_def_id == kInvalidId) continue;
                 const Card* c = card_registry_->get(other.card_def_id);
-                if (c && c->hasReplacementEffect()) replacers.push_back(id);
+                if (!c || !c->hasReplacementEffect()) continue;
+                if (id == target && !c->replacementCoversSelf()) continue;
+                replacers.push_back(id);
+
             }
             for (auto rid : replacers) {
                 Card* c = card_registry_->get(state_.getObject(rid).card_def_id);
@@ -1079,8 +1082,56 @@ GameObjectId EffectExecutor::chooseObjectNow(PlayerId player,
     return objects.front();
 }
 
+GameObjectId EffectExecutor::instantiateCard(CardDefId def_id, PlayerId owner) {
+    auto obj_id = state_.createObject();
+    auto& obj = state_.getObject(obj_id);
+    const auto& def = card_db_.get(def_id);
+    obj.card_def_id = def_id;
+    obj.owner = owner;
+    obj.controller = owner;
+    obj.name = def.name;
+    obj.card_type = def.card_type;
+    obj.super_type = def.super_type;
+    obj.tags = def.tags;
+    obj.domains = def.domains;
+    obj.base_might = def.might;
+    obj.current_might = def.might;
+    obj.keywords = def.keywords;
+    obj.assault_value = def.assault_value;
+    obj.shield_value = def.shield_value;
+    obj.deflect_value = def.deflect_value;
+    obj.might_bonus = def.might_bonus;
+    obj.deploy = def.deploy;
+    return obj_id;
+}
+
+GameObjectId EffectExecutor::chooseObjectOrNoneNow(PlayerId player,
+
+                                                    const std::vector<GameObjectId>& objects) {
+    if (objects.empty() || !agent_query_) return kInvalidId;
+    std::vector<Intent> options;
+    Intent none;
+    none.type = IntentType::MakeChoice;
+    none.player = player;
+    none.chosen_value = 0;
+    options.push_back(none);
+    for (auto id : objects) {
+        Intent i;
+        i.type = IntentType::MakeChoice;
+        i.player = player;
+        i.chosen_objects = {id};
+        options.push_back(std::move(i));
+    }
+    const Intent chosen = agent_query_(player, options);
+    if (!chosen.chosen_objects.empty() &&
+        std::find(objects.begin(), objects.end(), chosen.chosen_objects.front()) != objects.end())
+        return chosen.chosen_objects.front();
+    return kInvalidId;
+}
+
 namespace {
 const char* scopeName(SpendScope s) {
+
     switch (s) {
         case SpendScope::Units:       return "units / unit abilities";
         case SpendScope::Spells:      return "spells";
@@ -1263,6 +1314,8 @@ GameObjectId EffectExecutor::createToken(PlayerId controller, CardType type,
     // replacement on token creation — a friendly token never enters exhausted
     // while the flag is set (refreshed each cleanup via applyPassiveAura).
     if (state_.player(controller).tokens_enter_ready) enter_ready = true;
+    if (state_.turn.all_units_enter_ready) enter_ready = true;   // Firebrand Raider
+
     obj.is_exhausted = !enter_ready && type == CardType::Unit; // units enter exhausted unless ready
 
     if (std::holds_alternative<BaseLocation>(location)) {
@@ -1789,7 +1842,9 @@ void EffectExecutor::playIgnoringCost(PlayerId player, GameObjectId card,
 
     if (obj.isUnit()) {
         // Units enter exhausted (CR 143.4) unless "units you play this turn enter ready" (Confront).
-        bool enters_ready = state_.player(player).units_enter_ready_this_turn;
+        bool enters_ready = state_.player(player).units_enter_ready_this_turn ||
+                            state_.turn.all_units_enter_ready;   // Firebrand Raider
+
         // As GameEngine::resolvePermanent: the unit's own "I enter ready"
         // (Card::entersReadyOnPlay) and another friendly card granting it
         // (Card::grantsEnterReadyTo) apply to units an effect plays too.

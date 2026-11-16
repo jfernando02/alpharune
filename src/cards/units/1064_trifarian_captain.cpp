@@ -16,8 +16,7 @@ namespace {
 // "When you play me, look at the top 4 cards of your Main Deck. You may reveal
 //  from among them a unit or gear with Energy cost no more than [3] and with
 //  Power cost no more than [A] and draw it. Recycle the rest."
-// APPROX: drawing a card is never worth declining, so a fitting card is always
-// taken (the agent picks which).
+// The "you may reveal" is asked, then the agent picks which card.
 class TrifarianCaptain : public UnitCard {
 public:
     const CardDef& def() const override { return def_; }
@@ -39,7 +38,14 @@ public:
             if (d.energy_cost <= 3 && d.power_cost <= 1) fits.push_back(c);
         }
         GameObjectId drawn = kInvalidId;
+        int go = 0;
         if (!fits.empty()) {
+            go = confirmOptional(ctx, "Trifarian Captain: reveal a card and draw it?",
+                                 [&] { return !fits.empty(); });
+            if (go == -1) return;   // waiting for the answer
+        }
+        if (go == 1) {
+
             drawn = pickTarget(ctx, "Trifarian Captain: reveal a unit or gear and draw it", fits);
             if (ctx.executor.hasPendingChoice()) return;  // waiting for the pick
         }

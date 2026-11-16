@@ -53,7 +53,7 @@ public:
                                             LocationId{BaseLocation{ctx.controller}}, reduced);
             }
             ctx.events.logTrace("VOID RUSH: banished + played top card "
-                                "(cost reduction [2] approximated as free)");
+                                "(its cost reduced by [2])");
         }
 
         // Draw any of the revealed cards not banished (they are still on top).

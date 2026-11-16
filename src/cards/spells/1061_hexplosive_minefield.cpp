@@ -17,7 +17,7 @@ public:
     const CardDef& def() const override { return def_; }
     // "Kill any number of friendly Bomb tokens. At end of turn, play that many
     // Bomb tokens to a single battlefield."
-    // APPROX: the end-of-turn battlefield is the one with the most enemy units.
+    // The end-of-turn battlefield is chosen as that delayed ability resolves.
     static std::vector<GameObjectId> bombs(const GameState& s, PlayerId p) {
         std::vector<GameObjectId> out;
         for (const auto& [id, o] : s.objects)
@@ -60,17 +60,14 @@ public:
     }
     void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
         if (!ctx.state.objectExists(ctx.source)) return;
-        auto& me = ctx.state.getObject(ctx.source);
-        const int n = me.card_counters["__bombs"];
-        me.card_counters.erase("__bombs");
+        const int n = ctx.state.getObject(ctx.source).card_counters["__bombs"];
         if (n <= 0 || ctx.state.battlefields.empty()) return;
-        BattlefieldId best = ctx.state.battlefields.front().id;
-        size_t most = 0;
-        for (const auto& bf : ctx.state.battlefields) {
-            const auto e = enemyUnitsAt(ctx.state, ctx.controller, bf.id).size();
-            if (e > most) { most = e; best = bf.id; }
-        }
-        for (int i = 0; i < n; ++i) createBomb(ctx, best);
+        const int bf = pickBattlefield(*this, ctx, "Hexplosive Minefield: play the Bombs to which battlefield?");
+        if (bf == -1) return;   // waiting for the choice
+        ctx.state.getObject(ctx.source).card_counters.erase("__bombs");
+        if (bf < 0) return;
+        for (int i = 0; i < n; ++i) createBomb(ctx, static_cast<BattlefieldId>(bf));
+
     }
 private:
     const CardDef def_ = [] {

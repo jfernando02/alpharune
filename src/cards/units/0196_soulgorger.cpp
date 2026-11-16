@@ -18,8 +18,7 @@ public:
     unsigned choicesAtFinalization() const override { return kFinalizeTrigger; }
     TriggerType triggerType() const override { return TriggerType::WhenYouPlayMe; }
     // "When you play me, you may play a unit from your trash, ignoring its
-    // Energy cost." (Power cost approximated as free — same convention as
-    // Spectral Matron / Fizz.)
+    // Energy cost." The Power cost is paid (playPayingCost).
     std::vector<GameObjectId> trashUnits(CardContext& ctx) const {
         std::vector<GameObjectId> out;
         const auto& ps = ctx.state.player(ctx.controller);

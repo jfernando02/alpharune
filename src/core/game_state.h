@@ -208,6 +208,22 @@ struct PlayerState {
     bool unit_or_gear_died_this_turn = false;
     int draw_on_unit_play_this_turn = 0;   // Fanfare: draw 1 for each of the next N units played this turn
     bool played_permanent_to_bf_this_turn = false;   // a unit or gear played to a battlefield (Hold 'Em)
+    // Battlefields this player played a unit or gear to this turn (Hunters' Circle).
+    std::vector<BattlefieldId> bfs_played_permanent_this_turn;
+    // "The next unit you play this turn has [Accelerate]" (Firelights' Hideout).
+    bool next_unit_accelerate = false;
+    // "The next unit you play this turn can be played to any battlefield" (Last Caress).
+    bool next_unit_any_bf = false;
+    // Neeko: the legends chosen at deck building, and the ones in the Legend
+    // Zone besides the starting legend (each tied to the object keeping it).
+    std::vector<CardDefId> reserve_legends;
+    std::vector<GameObjectId> extra_legends;
+    std::vector<GameObjectId> legends() const {
+        std::vector<GameObjectId> out;
+        if (legend_zone != kInvalidId) out.push_back(legend_zone);
+        out.insert(out.end(), extra_legends.begin(), extra_legends.end());
+        return out;
+    }
     // Continuous-effect values (reset + recomputed during aura recompute; set by
     // cards' applyPassiveAura — default = no effect):
     bool cannot_gain_points = false; // Tianna Crownguard ("opponents can't gain points")
@@ -277,6 +293,11 @@ struct PlayerState {
         bool gear_only = false;             // applies only to gear plays (Ornn's Forge)
         bool first_gear_per_turn = false;   // applies only to the FIRST gear played this
                                             // turn (consult gears_played_this_turn == 0)
+        // "Once each turn, you may pay [..] less" (Orianna): the player decides on
+        // each play it applies to (GameEngine::executePlayCard); once used it is
+        // spent until the next turn (source's card_counters["__discount_turn"]).
+        bool once_per_turn_optional = false;
+
         bool spells_only = false;           // "spells you play" (Eager Apprentice)
         bool units_only = false;            // "your units" (Vaults of Helia)
         std::string tag_only;               // "your Dragons" (Herald of Scales)
@@ -307,6 +328,15 @@ struct PlayerState {
         bool banish_after = false;        // granted [Flow]: banish the spell after it's played
     };
     std::vector<TrashReplayGrant> trash_replay_grants;
+    // "Until your next Ending Phase, you may play that card." (Runeblade
+    // Anvil): a banished card this player may play, paying its costs, while
+    // turn_number <= until_turn.
+    struct BanishPlayGrant {
+        GameObjectId card = kInvalidId;
+        int until_turn = 0;
+    };
+    std::vector<BanishPlayGrant> banish_play_grants;
+
 
     // Karthus, Eternal (and similar): "Your Deathknell effects trigger
     // an additional time." Counted from board via aura recalculation —
@@ -412,6 +442,9 @@ struct PlayerState {
         unit_or_gear_died_this_turn = false;
         draw_on_unit_play_this_turn = 0;
         played_permanent_to_bf_this_turn = false;
+        bfs_played_permanent_this_turn.clear();
+        next_unit_accelerate = false;
+        next_unit_any_bf = false;
 
         // (cannot_gain_points / extra_points_to_win are continuous-effect flags,
         //  recomputed during aura cleanup — not per-turn counters.)
@@ -449,6 +482,11 @@ struct BattlefieldState {
     // Facedown sub-zone
     std::vector<GameObjectId> facedown;
     int facedown_max_occupancy = 1;
+    int extra_hide_slots = 0;   // aura: more hide slots for this BF's controller (Bushwhack Trap)
+    // Aura: a player must pay this to move one or more units here (Gravity
+    // Field), indexed by the moving player (0 = Player1).
+    int move_tax_energy[2] = {0, 0};
+    int move_tax_power[2] = {0, 0};
 
     // Staged events
     bool showdown_staged = false;
@@ -500,7 +538,10 @@ struct BattlefieldState {
 
     // Aura-derived per-BF flags (reset + recomputed each recalculateAuras by the
     // BF/unit cards' applyPassiveAura):
-    bool surcharge_enemy_multi_move = false; // Mageseeker Investigator (725): enemy multi-unit moves here cost [A]/extra unit
+    // Mageseeker Investigator (725): [A] per unit beyond the first to move
+    // several units here at once, indexed by the moving player (0 = Player1).
+    int multi_move_surcharge_power[2] = {0, 0};
+
     bool opp_hidden_unrevealable = false;    // Noxus Saboteur (018): opponent [Hidden] cards can't be revealed here
     bool death_recall_for_pay = false;       // Altar of Blood (762): a unit dying here in combat may pay [A][A][A] to heal+exhaust+recall instead
 
@@ -582,6 +623,15 @@ struct TurnState {
     // during their first or second turn, they draw 1 instead." Recomputed each
     // recalculateAuras.
     bool early_score_draws_instead = false;
+    // Firebrand Raider: "Other units enter ready." / "Units don't ready during
+    // the Awaken Phase." Recomputed each recalculateAuras.
+    bool all_units_enter_ready = false;
+    bool no_awaken_unit_ready = false;
+    // The printed Energy cost of the card a play trigger is about, while that
+    // trigger is being checked (Card::triggerCondition reads it).
+    int event_card_energy = 0;
+
+
 
     // Per-turn decision counters (reset each turn)
     int turn_decisions_p1 = 0;

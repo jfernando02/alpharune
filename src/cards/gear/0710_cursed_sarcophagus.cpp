@@ -15,9 +15,8 @@ namespace {
 // "When you play this, banish all units from your trash.
 //  [E]: Play a unit banished with this. (You must pay its costs.)"
 // Units banished by this are recorded in the gear's tracked_objects so the
-// activated ability knows which banished units it may re-play. Power/Energy
-// cost payment for the replayed unit is approximated as free (playIgnoringCost)
-// — no structured "play from banishment while paying full cost" hook exists.
+// activated ability knows which banished units it may re-play; their full
+// cost is paid through EffectExecutor::playPayingCost.
 
 class CursedSarcophagus : public GearCard {
 public:

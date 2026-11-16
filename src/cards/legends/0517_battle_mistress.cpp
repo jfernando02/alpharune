@@ -1,5 +1,6 @@
 #include "cards/card.h"
 #include "cards/card_registry.h"
+#include "cards/card_helpers.h"
 #include "core/game_state.h"
 #include "core/events.h"
 #include "engine/effect_executor.h"
@@ -15,6 +16,11 @@ class BattleMistress : public LegendCard {
 public:
     const CardDef& def() const override { return def_; }
     TriggerType triggerType() const override { return TriggerType::WhenAnEnemyUnitDies; }
+    // "one or more": once for units that die at the same time.
+    bool triggerCondition(const GameState& state, GameObjectId /*source*/, PlayerId controller,
+                          TriggerType /*trigger*/, GameObjectId subject) const override {
+        return firstDeathInBatch(state, opponent(controller), subject);
+    }
     void onTrigger(CardContext& ctx, const std::vector<GameObjectId>&) override {
         // "When one or more enemy units die, ready me."
         if (!ctx.state.objectExists(ctx.source)) return;

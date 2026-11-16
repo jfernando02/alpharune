@@ -17,7 +17,18 @@ public:
     const CardDef& def() const override { return def_; }
     // "[Deploy] While you or an ally control this battlefield, that player may
     // hide an additional card here."
-    // APPROX: the extra hide slot is not modeled.
+    // One more slot per Trap its controller has at a battlefield they control.
+    void applyPassiveAura(GameState& state, PlayerId controller) const override {
+        for (auto& bf : state.battlefields) {
+            if (!bf.controller.has_value() || *bf.controller != controller) continue;
+            int n = 0;
+            for (const auto& [id, o] : state.objects)
+                if (o.card_def_id == cardDefId() && o.controller == controller &&
+                    o.battlefieldId() == bf.id) ++n;
+            bf.extra_hide_slots = n;
+        }
+    }
+
 private:
     const CardDef def_ = [] {
         CardDef d;

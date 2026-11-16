@@ -71,6 +71,8 @@ enum class TriggerType : uint8_t {
     WhenIDie,           // "When I die,"
     WhenIMoveToFB,      // "When I move to a battlefield,"
     WhenIMove,          // "When I move,"
+    WhenILeaveTheBoard, // "When this leaves the board," (any way: killed, returned, banished, ...)
+
     WhenIConquer,       // "When I conquer,"
     WhenIHold,          // "When I hold,"
     WhenIConquerOrHold, // "When I conquer or hold,"
@@ -80,6 +82,8 @@ enum class TriggerType : uint8_t {
     WhenYouHoldHere,    // "When you hold here,"
     WhenYouScoreHere,   // "When you score here,"
     WhenYouDefendHere,  // "When you defend here,"
+    WhenYouWinACombatHere, // "When you win a combat here," — a non-unit (Deploy gear) at that battlefield
+
 
     // Phase triggers
     AtEndOfTurn,        // "At the end of your turn,"
@@ -188,6 +192,8 @@ enum class TriggerType : uint8_t {
     WhenYouPlayACardNotFromHand, // "When you play a card from anywhere other than your hand,"
     WhenIAmDiscarded,            // "When you discard me," (Mask Mother) — fires from trash
     WhenYouPlayACard,            // "When you play a card," / "your first card each turn"
+    WhenYouPlayACardInTrash,     // the same, watched by a card in its owner's trash (Meticulous Restorationist)
+
     WhenAnEnemyUnitDiesHere,     // "when an enemy unit here dies," (Nasus, Guardian of Knowledge)
     WhenIBecomeReady,            // "When I become ready," — any readying, including the
                                  // Awaken phase (WhenIAmReadied only covers "you ready me" effects)
@@ -358,6 +364,10 @@ struct ActivatedAbility {
     // Play only if not Empowered." The generator gates it on the source's
     // Empowered state and resolution empowers the source.
     bool is_empower = false;
+    // Only usable by the objects the card grants it to (Heartening Soul's
+    // "Friendly legends have ..."), not by the card's own object.
+    bool granted_only = false;
 };
+
 
 } // namespace riftbound

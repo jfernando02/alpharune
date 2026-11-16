@@ -18,10 +18,10 @@ public:
     // "When you play this or when this leaves the board, banish the top card of
     // your Main Deck. Until your next Ending Phase, you may play that card.
     // [2][P], [E]: Kill this."
-    // APPROX: the banished card may be played (paying its cost) as the ability
-    // resolves, not later; "leaves the board" counts only its death.
+    // The banished card gets a PlayerState::banish_play_grants entry: the
+    // player may play it (paying its costs) until their next Ending Phase.
     std::vector<TriggerType> triggerTypes() const override {
-        return {TriggerType::WhenYouPlayThis, TriggerType::WhenIDie};
+        return {TriggerType::WhenYouPlayThis, TriggerType::WhenILeaveTheBoard};
     }
     void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
         auto& ps = ctx.state.player(ctx.controller);
@@ -31,17 +31,16 @@ public:
         auto& c = ctx.state.getObject(top);
         c.zone = ZoneType::Banishment;
         c.location = std::nullopt;
-        ps.banishment.push_back(top);
+        ctx.state.player(c.owner).banishment.push_back(top);
         ctx.events.emit(CardRevealedEvent{top, c.card_def_id, c.owner, true, ctx.controller, ZoneType::MainDeck});
         ctx.events.logTrace("RUNEBLADE ANVIL: banished " + c.name);
-        if (ctx.executor.canPlayPayingCost(ctx.controller, top)) {
-            ps.banishment.erase(std::find(ps.banishment.begin(), ps.banishment.end(), top));
-            if (!ctx.executor.playPayingCost(ctx.controller, top)) {
-                auto& back = ctx.state.getObject(top);
-                back.zone = ZoneType::Banishment;
-                ps.banishment.push_back(top);
-            }
-        }
+        // "Until your next Ending Phase": this turn's if it is the controller's
+        // turn and that phase hasn't started, else their next turn's.
+        const auto& t = ctx.state.turn;
+        int until = t.turn_number;
+        if (t.turn_player != ctx.controller) until += 1;
+        else if (t.phase == TurnPhase::EndingStep || t.phase == TurnPhase::ExpirationStep) until += 2;
+        ps.banish_play_grants.push_back({top, until});
     }
     bool hasActivatedAbility() const override { return true; }
     ActivationCost getActivationCost() const override {

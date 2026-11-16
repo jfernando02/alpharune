@@ -798,5 +798,19 @@ inline void pullFromZoneLists(GameState& state, GameObjectId card) {
     }
 }
 
-} // namespace riftbound
+/// "When one or more [friendly / enemy] units die": true only for the first
+/// death of `owner`'s units in a death batch (units that die at the same time,
+/// GameState::death_batch), so the ability triggers once per batch. Use it in
+/// Card::triggerCondition with the event's `subject`.
+inline bool firstDeathInBatch(const GameState& state, PlayerId owner, GameObjectId subject) {
+    if (!state.objectExists(subject)) return true;
+    const auto& lk = state.getObject(subject).last_known;
+    if (!lk.valid) return true;
+    for (const auto& [id, o] : state.objects) {
+        if (id == subject || !o.isUnit() || o.controller != owner || o.location.has_value()) continue;
+        if (o.last_known.valid && o.last_known.death_batch == lk.death_batch) return false;
+    }
+    return true;
+}
 
+} // namespace riftbound

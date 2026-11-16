@@ -29,6 +29,12 @@ public:
         // the action generator never emits pre-resolved targets for
         // needsPlayTimeTarget=true so production always falls through
         // to pickTarget.
+        // X first: pickXAmount's resume points come before pickTarget's, so a
+        // target picked first would leave X unasked. [A] is paid from the pool
+        // or by recycling runes, ready or exhausted.
+        const int max_x = ctx.executor.payableAnyPower(ctx.controller);
+        int x = pickXAmount(ctx, "Bullet Time: X power", 0, max_x);
+        if (x < 0) return;  // pending choice
         GameObjectId target_unit;
         if (!targets.empty()) {
             target_unit = targets[0];
@@ -43,40 +49,13 @@ public:
         auto bf_id_opt = tgt.battlefieldId();
         if (!bf_id_opt.has_value()) return;
         auto bf_id = *bf_id_opt;
-
-        // Compute the maximum X the controller can pay: count of
-        // exhausted runes in their base (recyclable for [A]).
-        auto& ps = ctx.state.player(ctx.controller);
-        int max_x = 0;
-        for (const auto& [id, obj] : ctx.state.objects) {
-            if (!obj.isRune() || obj.controller != ctx.controller) continue;
-            if (!obj.location.has_value()) continue;
-            if (!std::holds_alternative<BaseLocation>(*obj.location)) continue;
-            if (obj.is_exhausted) max_x++;
-        }
-        int x = pickXAmount(ctx, "Bullet Time: X power", 0, max_x);
-        if (x < 0) return;  // pending choice
         if (x == 0) {
             ctx.events.logTrace("BULLET TIME: X=0, no damage");
             return;
         }
-
-        // Pay X power by recycling X exhausted runes (any domain — [A]
-        // is universal).
-        int paid = 0;
-        for (auto& [id, obj] : ctx.state.objects) {
-            if (paid >= x) break;
-            if (!obj.isRune() || obj.controller != ctx.controller) continue;
-            if (!obj.location.has_value()) continue;
-            if (!std::holds_alternative<BaseLocation>(*obj.location)) continue;
-            if (!obj.is_exhausted) continue;
-            obj.location = std::nullopt;
-            obj.zone = ZoneType::RuneDeck;
-            ps.rune_deck.insert(ps.rune_deck.begin(), id);
-            paid++;
-        }
-        ctx.events.logTrace("BULLET TIME: paid " + std::to_string(paid) +
-                             " power → dealing " + std::to_string(x) +
+        if (!ctx.executor.payAnyPower(ctx.controller, x)) return;
+        ctx.events.logTrace("BULLET TIME: paid " + std::to_string(x) +
+                             " power -> dealing " + std::to_string(x) +
                              " damage to all enemies at BF#" +
                              std::to_string(bf_id));
 

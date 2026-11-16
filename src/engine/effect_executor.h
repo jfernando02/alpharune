@@ -70,6 +70,14 @@ public:
     /// attaching). Returns the first object when there is no agent to ask, and
     /// kInvalidId when `objects` is empty.
     GameObjectId chooseObjectNow(PlayerId player, const std::vector<GameObjectId>& objects);
+    /// As chooseObjectNow, with a "none" option first ("you may ..."): returns
+    /// kInvalidId when declined (or when there is no agent to ask).
+    GameObjectId chooseObjectOrNoneNow(PlayerId player, const std::vector<GameObjectId>& objects);
+    /// A new card object for `def_id`, owned and controlled by `owner`, in no
+    /// zone (the caller places it — Neeko adds a legend to the Legend Zone).
+    GameObjectId instantiateCard(CardDefId def_id, PlayerId owner);
+
+
 
     /// "You may make new choices for it" (CR 750-755): the item's controller
     /// re-chooses its targets. Costs already paid are unaffected (755.1).

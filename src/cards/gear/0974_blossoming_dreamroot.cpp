@@ -16,9 +16,8 @@ class BlossomingDreamroot : public GearCard {
 public:
     const CardDef& def() const override { return def_; }
     // "[Deploy] When you win a combat here, draw 1."
-    // A combat won here = you conquered here after a combat or held it as
-    // defender; approximated by "when you conquer here".
-    TriggerType triggerType() const override { return TriggerType::WhenYouConquerHere; }
+    TriggerType triggerType() const override { return TriggerType::WhenYouWinACombatHere; }
+
     void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
         ctx.executor.drawCards(ctx.controller, 1);
     }

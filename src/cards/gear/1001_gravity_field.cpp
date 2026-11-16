@@ -17,7 +17,21 @@ public:
     const CardDef& def() const override { return def_; }
     // "[Deploy] Opponents must pay [1][A] to move one or more units to this
     // battlefield. [Deathknell][>] Draw 1."
-    // APPROX: the move tax is not modeled.
+    // The tax, per Gravity Field the controller has at a battlefield, for the
+    // opponent (the engine charges it once per move — CR 144.3).
+    void applyPassiveAura(GameState& state, PlayerId controller) const override {
+        if (controller == PlayerId::None) return;
+        const int opp = playerIndex(opponent(controller));
+        for (auto& bf : state.battlefields) {
+            int n = 0;
+            for (const auto& [id, o] : state.objects)
+                if (o.card_def_id == cardDefId() && o.controller == controller &&
+                    o.battlefieldId() == bf.id) ++n;
+            bf.move_tax_energy[opp] = n;
+            bf.move_tax_power[opp] = n;
+        }
+    }
+
     TriggerType triggerType() const override { return TriggerType::WhenIDie; }
     void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
         ctx.executor.drawCards(ctx.controller, 1);

@@ -17,7 +17,13 @@ public:
     const CardDef& def() const override { return def_; }
     // "Your gear with [Deploy] have [Action]. When I conquer, if there is a
     // friendly gear with [Deploy] here, channel 1 rune exhausted."
-    // APPROX: the [Action] grant is not modeled.
+    // [Action] on the controller's [Deploy] gear (in hand: played in showdowns).
+    void applyPassiveAura(GameState& state, PlayerId controller) const override {
+        for (auto& [id, o] : state.objects)
+            if (o.isGear() && o.deploy && o.controller == controller)
+                o.aura_keywords.set(Keyword::Action);
+    }
+
     TriggerType triggerType() const override { return TriggerType::WhenIConquer; }
     void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
         if (!ctx.state.objectExists(ctx.source)) return;

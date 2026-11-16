@@ -21,6 +21,29 @@ public:
     }
     void onResolve(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
         auto legal = enumerateLegalTargets(ctx.state, ctx.controller);
+        if (legal.empty()) return;
+        // Both choices before anything happens (pickMode's resume points come
+        // before pickTarget's): the battlefield the unit is played to, then the unit.
+        std::vector<LocationId> locations;
+        std::vector<std::string> labels;
+        for (const auto& bf : ctx.state.battlefields) {
+            locations.push_back(LocationId{BattlefieldLocation{bf.id}});
+            std::string bf_name = "BF#" + std::to_string(static_cast<int>(bf.id));
+            if (ctx.state.objectExists(bf.card_object_id)) {
+                bf_name = ctx.state.getObject(bf.card_object_id).name;
+            }
+            labels.push_back(bf_name);
+        }
+        int chosen = -2;
+        if (!locations.empty()) {
+            const uint32_t legal_mask = (locations.size() >= 32)
+                ? 0xFFFFFFFFu
+                : ((1u << locations.size()) - 1);
+            chosen = pickMode(ctx, "Thrill: which battlefield",
+                              static_cast<int>(locations.size()), labels, legal_mask);
+            if (chosen == -1) return;  // yielded for agent input
+            if (chosen < 0 || static_cast<size_t>(chosen) >= locations.size()) chosen = 0;
+        }
         GameObjectId unit_id = pickTarget(ctx, "Thrill of the Hunt", legal);
         if (unit_id == kInvalidId || !ctx.state.objectExists(unit_id)) return;
         auto owner = ctx.state.getObject(unit_id).owner;
@@ -33,19 +56,7 @@ public:
         auto& bz = ctx.state.player(owner).banishment;
         bz.erase(std::remove(bz.begin(), bz.end(), unit_id), bz.end());
 
-        // Step 2: owner plays it to ANY battlefield, ignoring cost. Use
-        // pickMode so the agent records the battlefield choice (one option
-        // per battlefield on the board, not just controlled ones).
-        std::vector<LocationId> locations;
-        std::vector<std::string> labels;
-        for (const auto& bf : ctx.state.battlefields) {
-            locations.push_back(LocationId{BattlefieldLocation{bf.id}});
-            std::string bf_name = "BF#" + std::to_string(static_cast<int>(bf.id));
-            if (ctx.state.objectExists(bf.card_object_id)) {
-                bf_name = ctx.state.getObject(bf.card_object_id).name;
-            }
-            labels.push_back(bf_name);
-        }
+        // Step 2: its owner plays it to the chosen battlefield, ignoring cost.
         if (locations.empty()) {
             // No battlefields — fall back to owner's base.
             ctx.executor.playIgnoringCost(owner, unit_id,
@@ -53,13 +64,6 @@ public:
             ctx.events.logTrace("THRILL: " + uname + " (no BF) played to base");
             return;
         }
-        uint32_t legal_mask = (locations.size() >= 32)
-            ? 0xFFFFFFFFu
-            : ((1u << locations.size()) - 1);
-        int chosen = pickMode(ctx, "Thrill: which battlefield",
-                              static_cast<int>(locations.size()), labels, legal_mask);
-        if (chosen == -1) return;  // yielded for agent input
-        if (chosen < 0 || static_cast<size_t>(chosen) >= locations.size()) chosen = 0;
         ctx.executor.playIgnoringCost(owner, unit_id, locations[chosen]);
         ctx.events.logTrace("THRILL: " + uname + " played to " + labels[chosen] +
                              ", ignoring cost");

@@ -548,6 +548,28 @@ private:
     void executePlayCard(const Intent& intent);
     void executePlaySpell(const Intent& intent);
     void executeStandardMove(const Intent& intent);
+    /// Cards `player` may play now and where from: the hand, plus the trash
+    /// (Endless Riches) and banished cards they may play (Runeblade Anvil).
+    std::vector<std::pair<GameObjectId, Intent::PlaySource>> playableCards(PlayerId player) const;
+    /// Stamps the play source on the intents a generator loop adds for one card.
+    struct PlaySourceStamp {
+        std::vector<Intent>& actions;
+        size_t first;
+        Intent::PlaySource source;
+        ~PlaySourceStamp() {
+            if (source == Intent::PlaySource::Hand) return;
+            for (size_t i = first; i < actions.size(); ++i) actions[i].play_source = source;
+        }
+    };
+
+    /// Whether `unit` may make its standard move to `dest` (CR 144.4).
+    bool canStandardMoveTo(const GameObject& unit, const LocationId& dest) const;
+    /// What `player` must pay to move `n_units` to `dest` at once: {Energy,
+    /// Power of any domain} (Gravity Field, Mageseeker Investigator).
+    std::pair<int, int> moveCost(PlayerId player, const LocationId& dest, int n_units) const;
+    bool canPayAnyDomainCost(PlayerId player, int energy, int power) const;
+    void payAnyDomainCost(PlayerId player, int energy, int power);
+
     void executeEndTurn(const Intent& intent);
     void executeMulligan(const Intent& intent);
     void executeAssignCombatDamage(const Intent& intent);
@@ -556,7 +578,9 @@ private:
     void executePlayFromHidden(const Intent& intent);
     /// Plays `card` from facedown (CR 811) and adds its chain item, without running the chain.
     void playFromFacedown(PlayerId player, GameObjectId card,
-                          const std::vector<GameObjectId>& targets);
+                          const std::vector<GameObjectId>& targets,
+                          std::optional<BattlefieldId> to_bf = std::nullopt);
+
 
     // ── Chain ──
     /// `resume`: re-enter at the pending priority decision of a snapshot
@@ -680,7 +704,18 @@ private:
     /// Check if a player can afford a card's cost with available runes.
     /// `extra_any_power`: [A] owed on top of everything else (a battlefield's
     /// pay-to-play-here cost).
-    bool canAfford(PlayerId player, GameObjectId card_obj, int extra_any_power = 0) const;
+    bool canAfford(PlayerId player, GameObjectId card_obj, int extra_any_power = 0,
+                   int energy_discount = 0) const;
+    /// A battlefield's Energy discount for `card` played by `player` to it
+    /// (Card::playHereDiscount — Hunters' Circle).
+    int playHereDiscount(PlayerId player, BattlefieldId bf, const GameObject& card) const;
+    /// The best spell-cost option (Card::spellCostOption — Starry-Eyed
+    /// Songstress) `player` can pay right now, as an Energy discount (0 = none).
+    int spellCostOptionDiscount(PlayerId player) const;
+    /// Offer that option while `spell` is being played; returns the discount taken.
+    int maybePaySpellCostOption(PlayerId player, GameObjectId spell, bool required);
+
+
 
     /// Auto-pay a card's cost by exhausting/recycling runes.
     /// Returns false if payment failed (shouldn't happen if canAfford was checked).

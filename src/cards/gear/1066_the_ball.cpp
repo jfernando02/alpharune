@@ -17,9 +17,13 @@ public:
     const CardDef& def() const override { return def_; }
     // "[Deploy] [Ganking] When you play or move this, choose one — Draw 1. /
     // Deal 2 to enemy units here."
-    // APPROX: The Ball never becomes a unit (Lady of Clockwork), so it never moves.
+    // It moves only while it is a unit (Lady of Clockwork).
     unsigned choicesAtFinalization() const override { return kFinalizeTrigger; }
     TriggerType triggerType() const override { return TriggerType::WhenYouPlayThis; }
+    std::vector<TriggerType> triggerTypes() const override {
+        return {TriggerType::WhenYouPlayThis, TriggerType::WhenIMove};
+    }
+
     void onTrigger(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
         const int m = pickMode(ctx, "The Ball", 2, {"Draw 1", "Deal 2 to enemy units here"});
         if (m == -1) return;

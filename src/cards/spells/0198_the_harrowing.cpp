@@ -14,8 +14,8 @@ namespace {
 class TheHarrowing : public SpellCard {
 public:
     const CardDef& def() const override { return def_; }
-    // "Play a unit from your trash, ignoring its Energy cost." (Power cost
-    // approximated as free.) Target lives in trash — defer to resolve-time pick.
+    // "Play a unit from your trash, ignoring its Energy cost." The Power cost
+    // is paid (playPayingCost). Target lives in trash — defer to resolve-time pick.
     bool needsPlayTimeTarget() const override { return true; }
     void onResolve(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
         auto& ps = ctx.state.player(ctx.controller);

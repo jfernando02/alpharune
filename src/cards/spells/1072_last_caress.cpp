@@ -17,8 +17,9 @@ public:
     const CardDef& def() const override { return def_; }
     // "The next unit you play this turn (even from face down) can be played to
     // any battlefield. When you play it, [Buff] it."
-    // APPROX: the any-battlefield permission is not modeled.
     void onResolve(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
+        ctx.state.player(ctx.controller).next_unit_any_bf = true;
+
         DelayedAbility da;
         da.source = ctx.source;
         da.card_def_id = cardDefId();

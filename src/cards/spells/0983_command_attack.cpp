@@ -15,13 +15,49 @@ namespace {
 // "Choose one — Move a friendly gear with [Deploy] to a battlefield. / Look at
 // the top 5 cards of your Main Deck. You may reveal a gear from among them and
 // draw it. Recycle the rest."
-// APPROX: the engine has no [Deploy] gear yet, so the first mode can never be
-// chosen and the card always looks for a gear. Drawing the gear is taken
-// whenever there is one (the "you may" is never worth declining).
+// Both modes; the "you may reveal" is asked.
 class CommandAttack : public SpellCard {
 public:
     const CardDef& def() const override { return def_; }
+    // The mode is chosen as the spell is played (CR 355): "move a [Deploy] gear"
+    // is the yes of a confirmOptional, so the battlefield can use pickMode.
+    unsigned choicesAtFinalization() const override { return kFinalizeResolve; }
+    static std::vector<GameObjectId> deployGear(const GameState& s, PlayerId me) {
+        std::vector<GameObjectId> out;
+        for (const auto& [id, o] : s.objects)
+            if (o.isGear() && o.deploy && o.controller == me && o.location.has_value()) out.push_back(id);
+        return out;
+    }
     void onResolve(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
+        const int move = confirmOptional(ctx, "Command: Attack: move a friendly [Deploy] gear "
+                                              "(no: look at the top 5)?",
+                                         [&] { return !deployGear(ctx.state, ctx.controller).empty(); });
+        if (move == -1) return;   // waiting for the mode
+        if (finalizingChoices(ctx)) return;   // choices end here (CR 383.3)
+        if (move == 1) {
+            // The battlefield first (pickMode's resume points come before pickTarget's).
+            auto notThere = [&](BattlefieldId b) {
+                std::vector<GameObjectId> out;
+                for (auto g : deployGear(ctx.state, ctx.controller)) {
+                    const auto at = ctx.state.getObject(g).battlefieldId();
+                    if (!at || *at != b) out.push_back(g);
+                }
+                return out;
+            };
+            const int bf = pickBattlefield(*this, ctx, "Command: Attack: move a gear to which battlefield",
+                                           [&](BattlefieldId b) { return !notThere(b).empty(); });
+            if (bf == -1) return;   // waiting for the battlefield
+            if (bf < 0) return;
+            const auto gears = notThere(static_cast<BattlefieldId>(bf));
+            if (gears.empty()) return;
+            const GameObjectId g = pickTarget(ctx, "Command: Attack: move which gear", gears);
+            if (ctx.executor.hasPendingChoice()) return;
+            if (g == kInvalidId || !ctx.state.objectExists(g)) return;
+            ctx.executor.moveToBattlefield(g, static_cast<BattlefieldId>(bf));
+
+            ctx.events.logTrace("COMMAND: ATTACK: moved " + ctx.state.getObject(g).name);
+            return;
+        }
         auto& ps = ctx.state.player(ctx.controller);
         std::vector<GameObjectId> top;  // top = back of the deck vector
         for (int i = static_cast<int>(ps.main_deck.size()) - 1;
@@ -33,8 +69,14 @@ public:
             if (ctx.state.objectExists(c) && ctx.state.getObject(c).isGear()) gears.push_back(c);
 
         GameObjectId drawn = kInvalidId;
-        if (!gears.empty()) {
+        int reveal = 0;
+        if (!gears.empty()) {   // "you may reveal a gear" (pickMode is free in this mode)
+            reveal = pickMode(ctx, "Command: Attack: reveal a gear?", 2, {"no", "yes"});
+            if (reveal == -1) return;
+        }
+        if (reveal == 1) {
             drawn = pickTarget(ctx, "Command: Attack: reveal a gear and draw it", gears);
+
             if (ctx.executor.hasPendingChoice()) return;  // waiting for the pick
         }
         if (drawn != kInvalidId && ctx.state.objectExists(drawn)) {

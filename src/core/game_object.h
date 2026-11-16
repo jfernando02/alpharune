@@ -177,6 +177,8 @@ struct GameObject {
     int might_bonus = 0;                               // this gear's might bonus (from CardDef)
     int attachment_might_bonus = 0;                    // total might bonus from attached gear
     bool is_rules_text_inactive = false;              // gear: rules text inactive while attached (CR 718.2)
+    bool is_unit_gear = false;                        // a gear that is also a unit (aura, recomputed)
+    GameObjectId legend_anchor = kInvalidId;          // an added legend stays while this is on the board (Neeko)
 
     // ── Targeting protection (CR 700.x — "can't be chosen by ...") ──
     // Set by the engine during cleanup / aura recalc by consulting the
@@ -289,7 +291,8 @@ struct GameObject {
 
     // ── Convenience ──
     bool isReady() const { return !is_exhausted; }
-    bool isUnit() const { return card_type == CardType::Unit; }
+    bool isUnit() const { return card_type == CardType::Unit || is_unit_gear; }
+
     bool isGear() const { return card_type == CardType::Gear; }
     bool isSpell() const { return card_type == CardType::Spell; }
     bool isRune() const { return card_type == CardType::Rune; }

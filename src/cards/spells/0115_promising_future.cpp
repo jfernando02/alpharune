@@ -17,7 +17,7 @@ public:
     // "Each player looks at the top 5 cards of their Main Deck, banishes one of
     // them, then recycles the rest. Starting with the next player, each player
     // plays those cards [the banished card], ignoring Energy costs."
-    // (Power cost approximated as free.)
+    // (Power costs are paid: EffectExecutor::playPayingCost.)
     //
     // Resumable: rp0 prompt controller to banish one of their top 5; rp1 apply
     // controller's banish + recycle rest, prompt opponent; rp2 apply opponent's
@@ -91,9 +91,7 @@ public:
             auto& bz = ctx.state.player(p).banishment;
             auto it = std::find(bz.begin(), bz.end(), banished);
             if (it != bz.end()) bz.erase(it);
-            // Only units/gear are playable to a board; spells would need chain
-            // handling. playIgnoringCost places permanents; for spells it puts
-            // them on board zone without resolution (best-effort, free).
+            // Paying the Power cost (optional, CR 445.2).
             ctx.executor.playPayingCost(p, banished, std::nullopt, power_only);
         };
 

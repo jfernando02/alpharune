@@ -16,15 +16,15 @@ namespace {
 // The unit is chosen when the spell is finalized.
 // Id 1100: Battle Preparations is missing from the card gallery snapshot the
 // Radiance ids were ranked from (956 + rank); 1100 is the one id left past them.
-// APPROX: the engine has no [Show Off] step yet. A gear is shown off whenever
-// one can be (a gear in hand or a friendly gear), checked as the spell
-// resolves; the unit is a friendly one (+2 [M] to an enemy is never wanted).
+// Showing off is the player's yes/no, made as the spell is played; which gear
+// is shown changes nothing here. The unit may be any unit. Which runes are
+// readied doesn't matter (energy has no domain).
 class BattlePreparations : public SpellCard {
 public:
     const CardDef& def() const override { return def_; }
     unsigned choicesAtFinalization() const override { return kFinalizeResolve; }
     TargetRequirements getTargetRequirements() const override {
-        return TargetRequirements{.count = 1, .must_be_unit = true, .must_be_friendly = true};
+        return TargetRequirements{.count = 1, .must_be_unit = true};
     }
     bool needsPlayTimeTarget() const override { return true; }
     static bool canShowOffAGear(const GameState& state, PlayerId me) {
@@ -35,6 +35,9 @@ public:
         return false;
     }
     void onResolve(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
+        const int shown = confirmOptional(ctx, "Battle Preparations: show off a gear?",
+                                          [&] { return canShowOffAGear(ctx.state, ctx.controller); });
+        if (shown == -1) return;   // waiting for the answer
         GameObjectId unit = pickTarget(ctx, "Battle Preparations: give a unit +2 [M] this turn",
                                        enumerateLegalTargets(ctx.state, ctx.controller));
         if (ctx.executor.hasPendingChoice()) return;
@@ -42,7 +45,8 @@ public:
         if (unit != kInvalidId && ctx.state.objectExists(unit) &&
             ctx.state.getObject(unit).location.has_value())
             ctx.executor.giveTemporaryMight(unit, 2);
-        if (!canShowOffAGear(ctx.state, ctx.controller)) return;
+        if (shown != 1) return;
+
         int readied = 0;
         for (auto& [id, o] : ctx.state.objects) {
             if (readied >= 2) break;

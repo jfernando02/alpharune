@@ -17,7 +17,15 @@ public:
     const CardDef& def() const override { return def_; }
     // "As an additional cost to play a spell, you may exhaust me and three
     // friendly units to reduce the cost of that spell by [2]."
-    // APPROX: not modeled; this legend has no effect.
+    // Offered by the engine as a spell is paid for (GameEngine::maybePaySpellCostOption).
+    SpellCostOption spellCostOption() const override {
+        SpellCostOption o;
+        o.valid = true;
+        o.exhaust_friendly_units = 3;
+        o.reduce_energy = 2;
+        return o;
+    }
+
 private:
     const CardDef def_ = [] {
         CardDef d;

@@ -18,56 +18,114 @@ public:
     // "As an additional cost to play this, pay any amount of Power. Banish that
     // many units you control, then for each, its owner plays that unit back to
     // the same location or to their base, ignoring its cost."
-    // APPROX: X is chosen and paid at resolution; units return to the same location.
+    // X is chosen and paid as the spell is played (CR 355 — an additional
+    // cost), so the finalization pass runs this callback first. Then the
+    // units are chosen one by one (the order they come back in), all banished,
+    // and each owner picks the same location or their base.
+    // resume_data: [9] replay index, [10] X paid, [11] units chosen,
+    // [12..27] chosen ids, [30..45] where each was (0 base, 1+i battlefield i, -1 gone).
+    unsigned choicesAtFinalization() const override { return kFinalizeResolve; }
     void onResolve(CardContext& ctx, const std::vector<GameObjectId>& /*targets*/) override {
+        constexpr int kMax = 16, kIdx = 9, kPaid = 10, kCount = 11, kSel = 12, kWhere = 30;
         auto& ri = ctx.state.chain.resuming.value();
-        if (ri.resume_data.size() < 12) ri.resume_data.resize(12, 0);
+        if (ri.resume_data.size() < 48) ri.resume_data.resize(48, 0);
         if (ri.resume_point < 20) {
-            int power = 0;
-            const auto& pool = ctx.state.player(ctx.controller).rune_pool;
-            power = pool.totalPower() + pool.universal_power;
-            for (const auto& [id, o] : ctx.state.objects)
-                if (o.isRune() && o.controller == ctx.controller && o.isAtBase()) ++power;
-            const int maxX = std::min<int>(power, static_cast<int>(friendlyUnits(ctx.state, ctx.controller).size()));
+            int maxX = kMax;
+            if (!costAlreadyPaid(ctx)) {
+                const auto& pool = ctx.state.player(ctx.controller).rune_pool;
+                int power = pool.totalPower() + pool.universal_power;
+                for (const auto& [id, o] : ctx.state.objects)
+                    if (o.isRune() && o.controller == ctx.controller && o.isAtBase()) ++power;
+                maxX = std::min({power, kMax,
+                                 static_cast<int>(friendlyUnits(ctx.state, ctx.controller).size())});
+            }
             const int x = pickXAmount(ctx, "Chronobreak: pay X Power", 0, maxX);
             if (x < 0) return;
-            int paid = 0;
-            for (int i = 0; i < x; ++i)
-                if (payOnePower(ctx, ctx.controller, std::nullopt)) ++paid;
-            ri.resume_data[10] = paid;
-            ri.resume_data[11] = 0;
+            if (costDueNow(ctx)) {
+                int paid = 0;
+                const auto purpose = ctx.state.purposePlaying(CardType::Spell);
+                for (int i = 0; i < x; ++i)
+                    if (payOnePower(ctx, ctx.controller, std::nullopt, purpose)) ++paid;
+                ri.resume_data[kPaid] = paid;
+            }
+            if (finalizingChoices(ctx)) return;   // choices and costs end here (CR 383.3)
+            ri.resume_data[kCount] = 0;
+            ri.resume_data[kIdx] = 0;
             ri.resume_point = 20;
         }
-        while (ri.resume_data[11] < ri.resume_data[10]) {
-            if (ri.resume_point == 20) {
-                std::vector<Intent> opts;
-                for (auto u : friendlyUnits(ctx.state, ctx.controller)) {
-                    if (ctx.state.getObject(u).card_counters.count("__chrono")) continue;
-                    Intent i = valChoice(ctx.controller, 0, ctx.state.getObject(u).name);
-                    i.chosen_objects = {u};
-                    opts.push_back(std::move(i));
-                }
-                if (opts.empty()) break;
-                ctx.executor.requestChoice(ctx.controller, std::move(opts), "Chronobreak: banish and replay a unit");
-                ri.resume_point = 21;
-                return;
+        auto chosen = [&](GameObjectId u) {
+            for (int k = 0; k < ri.resume_data[kCount]; ++k)
+                if (ri.resume_data[kSel + k] == static_cast<int>(u)) return true;
+            return false;
+        };
+        // 20/21: choose the units.
+        while (ri.resume_point == 20 || ri.resume_point == 21) {
+            if (ri.resume_point == 21) {
+                ri.resume_point = 20;
+                auto ch = ctx.executor.takeChoice();
+                if (!ch || ch->chosen_objects.empty()) { ri.resume_point = 22; break; }
+                const auto u = ch->chosen_objects[0];
+                if (ctx.state.objectExists(u) && !chosen(u))
+                    ri.resume_data[kSel + ri.resume_data[kCount]++] = static_cast<int>(u);
             }
-            ri.resume_point = 20;
-            ++ri.resume_data[11];
-            auto ch = ctx.executor.takeChoice();
-            if (!ch || ch->chosen_objects.empty()) continue;
-            const auto u = ch->chosen_objects[0];
-            if (!ctx.state.objectExists(u) || !ctx.state.getObject(u).location) continue;
-            const auto loc = *ctx.state.getObject(u).location;
+            if (ri.resume_data[kCount] >= ri.resume_data[kPaid]) { ri.resume_point = 22; break; }
+            std::vector<Intent> opts;
+            for (auto u : friendlyUnits(ctx.state, ctx.controller)) {
+                if (chosen(u)) continue;
+                Intent i = valChoice(ctx.controller, 0, ctx.state.getObject(u).name);
+                i.chosen_objects = {u};
+                opts.push_back(std::move(i));
+            }
+            if (opts.empty()) { ri.resume_point = 22; break; }
+            ctx.executor.requestChoice(ctx.controller, std::move(opts),
+                                       "Chronobreak: choose a unit to banish (in replay order)");
+            ri.resume_point = 21;
+            return;
+        }
+        // 22: banish them all.
+        if (ri.resume_point == 22) {
+            for (int k = 0; k < ri.resume_data[kCount]; ++k) {
+                const auto u = static_cast<GameObjectId>(ri.resume_data[kSel + k]);
+                int where = -1;
+                if (ctx.state.objectExists(u) && ctx.state.getObject(u).location.has_value()) {
+                    const auto& o = ctx.state.getObject(u);
+                    const auto bf = o.battlefieldId();
+                    where = bf ? 1 + static_cast<int>(*bf) : 0;
+                    const bool token = o.is_token;
+                    ctx.executor.banishObject(u);
+                    if (token || !ctx.state.objectExists(u)) where = -1;
+                }
+                ri.resume_data[kWhere + k] = where;
+            }
+            ri.resume_point = 23;
+        }
+        // 23/24: each owner plays theirs back, to the same location or their base.
+        while (ri.resume_point == 23 || ri.resume_point == 24) {
+            int& k = ri.resume_data[kIdx];
+            if (k >= ri.resume_data[kCount]) break;
+            const auto u = static_cast<GameObjectId>(ri.resume_data[kSel + k]);
+            const int where = ri.resume_data[kWhere + k];
+            if (where < 0 || !ctx.state.objectExists(u)) { ++k; ri.resume_point = 23; continue; }
             const auto owner = ctx.state.getObject(u).owner;
-            const bool token = ctx.state.getObject(u).is_token;
-            ctx.executor.banishObject(u);
-            if (token || !ctx.state.objectExists(u)) continue;
+            bool same = false;
+            if (where > 0) {
+                if (ri.resume_point == 23) {
+                    std::vector<Intent> opts = {valChoice(owner, 1, "Same battlefield"),
+                                                valChoice(owner, 0, "Base")};
+                    ctx.executor.requestChoice(owner, std::move(opts),
+                                               "Chronobreak: play it back where?");
+                    ri.resume_point = 24;
+                    return;
+                }
+                same = takenValue(ctx, 1) == 1;
+            }
+            ri.resume_point = 23;
+            ++k;
+            LocationId loc = BaseLocation{owner};
+            if (same) loc = BattlefieldLocation{static_cast<BattlefieldId>(where - 1)};
             pullFromZoneLists(ctx.state, u);
             ctx.executor.playIgnoringCost(owner, u, loc);
-            if (ctx.state.objectExists(u)) ctx.state.getObject(u).card_counters["__chrono"] = 1;
         }
-        for (auto u : friendlyUnits(ctx.state, ctx.controller)) ctx.state.getObject(u).card_counters.erase("__chrono");
         ri.resume_point = 30;
     }
 private:

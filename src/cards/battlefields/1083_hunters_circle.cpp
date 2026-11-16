@@ -16,7 +16,14 @@ class HuntersCircle : public BattlefieldCard {
 public:
     const CardDef& def() const override { return def_; }
     // "For each player, the first unit or gear they play here on their turn costs [1] less."
-    // APPROX: not modeled.
+    int playHereDiscount(const GameState& state, BattlefieldId bf, PlayerId player,
+                         const GameObject& card) const override {
+        if (!card.isUnit() && !card.isGear()) return 0;
+        if (state.turn.turn_player != player) return 0;
+        const auto& done = state.player(player).bfs_played_permanent_this_turn;
+        return std::find(done.begin(), done.end(), bf) == done.end() ? 1 : 0;
+    }
+
 private:
     const CardDef def_ = [] {
         CardDef d;

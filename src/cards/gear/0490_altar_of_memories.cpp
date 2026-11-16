@@ -42,12 +42,14 @@ public:
         if (ps.hand.empty()) return;
         // Choose a hand card to put on top or bottom of the Main Deck.
         std::vector<GameObjectId> hand(ps.hand.begin(), ps.hand.end());
-        GameObjectId card = pickTarget(ctx, "Altar: put which hand card onto deck?", hand);
-        if (card == kInvalidId) return;  // suspend or empty
-        if (!ctx.state.objectExists(card)) return;
+        // Top or bottom first: pickMode's resume points come before pickTarget's.
         int mode = pickMode(ctx, "Altar: top or bottom of deck?", 2, {"top", "bottom"});
         if (mode == -1) return;   // suspend
         if (mode == -2) return;   // no legal mode
+        GameObjectId card = pickTarget(ctx, "Altar: put which hand card onto deck?", hand);
+        if (card == kInvalidId) return;  // suspend or empty
+        if (!ctx.state.objectExists(card)) return;
+
         auto it = std::find(ps.hand.begin(), ps.hand.end(), card);
         if (it != ps.hand.end()) ps.hand.erase(it);
         auto& c = ctx.state.getObject(card);

@@ -34,46 +34,41 @@ public:
             enemy_at_bf.push_back(id);
         }
         std::sort(enemy_at_bf.begin(), enemy_at_bf.end());
-        GameObjectId stunned = pickTarget(ctx, "Zenith Blade: stun enemy unit",
-                                          enemy_at_bf);
-        if (stunned == kInvalidId) {
-            if (ctx.state.chain.resuming.has_value() &&
-                ctx.state.chain.resuming->resume_point == 7) return;  // suspend
-            return;  // no legal target — fizzle
-        }
-        if (!ctx.state.objectExists(stunned)) return;
-        ctx.executor.stunUnitBy(stunned, ctx.source);
-        std::optional<LocationId> dest = ctx.state.getObject(stunned).location;
-
-        // "You may move a friendly unit to that enemy unit's battlefield."
-        auto movable_exists = [&]() -> bool {
-            if (!dest.has_value() ||
-                !std::holds_alternative<BattlefieldLocation>(*dest)) return false;
+        if (enemy_at_bf.empty()) return;   // no legal target: fizzle
+        // "You may move a friendly unit to that enemy unit's battlefield." Asked
+        // first (confirmOptional's resume points come before pickTarget's),
+        // then the enemy to stun, then the friendly unit to move.
+        auto movable = [&](std::optional<LocationId> dest) {
+            std::vector<GameObjectId> out;
             for (auto& [id, obj] : ctx.state.objects) {
                 if (!obj.isUnit() || obj.controller != ctx.controller) continue;
                 if (!obj.location.has_value()) continue;
-                if (obj.location == dest) continue;  // already there
-                return true;
+                if (dest && obj.location == dest) continue;  // already there
+                out.push_back(id);
             }
-            return false;
+            return out;
         };
         int conf = confirmOptional(ctx,
             "Zenith Blade: move a friendly unit to that battlefield?",
-            movable_exists);
+            [&] { return !movable(std::nullopt).empty(); });
         if (conf == -1) return;  // waiting on agent
+        GameObjectId stunned = pickTarget(ctx, "Zenith Blade: stun enemy unit",
+                                          enemy_at_bf);
+        if (stunned == kInvalidId || !ctx.state.objectExists(stunned)) return;
+        std::optional<LocationId> dest = ctx.state.getObject(stunned).location;
+        ctx.executor.stunUnitBy(stunned, ctx.source);   // nothing after this suspends
+
         if (conf == 0) return;   // declined / nothing to move
         if (!dest.has_value() ||
             !std::holds_alternative<BattlefieldLocation>(*dest)) return;
-        BattlefieldId dest_bf = std::get<BattlefieldLocation>(*dest).id;
-        for (auto& [id, obj] : ctx.state.objects) {
-            if (!obj.isUnit() || obj.controller != ctx.controller) continue;
-            if (!obj.location.has_value()) continue;
-            if (obj.location == dest) continue;
-            ctx.executor.moveToBattlefield(id, dest_bf);
-            ctx.events.logTrace("ZENITH BLADE: stunned enemy + moved a friendly "
-                                "unit to that battlefield");
-            return;
-        }
+        const BattlefieldId dest_bf = std::get<BattlefieldLocation>(*dest).id;
+        const auto units = movable(dest);
+        if (units.empty()) return;
+        const GameObjectId mover = ctx.executor.chooseObjectNow(ctx.controller, units);
+        if (mover == kInvalidId) return;
+        ctx.executor.moveToBattlefield(mover, dest_bf);
+        ctx.events.logTrace("ZENITH BLADE: stunned enemy + moved a friendly "
+                            "unit to that battlefield");
     }
 private:
     const CardDef def_ = [] {

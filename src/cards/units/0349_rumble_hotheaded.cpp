@@ -92,7 +92,7 @@ public:
         ctx.executor.playPayingCost(ctx.controller, trash_mech,
                                     LocationId{BaseLocation{ctx.controller}}, reduced);
         ctx.events.logTrace("RUMBLE: conquer -> recycled a unit, played a Mech "
-                            "from trash (cost reduction approximated as free)");
+                            "from trash (its cost reduced)");
     }
 private:
     const CardDef def_ = [] {

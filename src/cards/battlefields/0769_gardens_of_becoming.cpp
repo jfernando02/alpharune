@@ -24,6 +24,7 @@ public:
     std::vector<ActivatedAbility> activatedAbilities() const override {
         ActivatedAbility a;
         a.cost.exhaust = true;
+        a.granted_only = true;   // the legend uses it, not this battlefield
         return {a};
     }
     void onActivate(CardContext& ctx, int /*ability_index*/,
