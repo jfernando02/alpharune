@@ -636,6 +636,11 @@ public:
         const char* paid_flag = "";     // card_counters key set when paid
         int discard_cards = 0;          // discard N from hand as the additional cost (Brazen Buccaneer)
         int reduce_energy = 0;          // if paid, reduce this card's energy cost by N (applied before payment)
+        // Radiance: "kill a friendly unit [or gear]" / "return a friendly gear to
+        // its owner's hand" as the additional cost (one object, the player's pick).
+        bool kill_friendly_unit = false;
+        bool kill_friendly_gear = false;
+        bool return_friendly_gear = false;
     };
     virtual OptionalAdditionalCost optionalAdditionalCost() const { return {}; }
 
@@ -758,6 +763,11 @@ public:
     /// Attach after the alternative cost was paid (no other cost). Returns
     /// whether the gear was attached.
     virtual bool onEquipPaid(CardContext& /*ctx*/, GameObjectId /*unit*/) { return false; }
+
+    /// "Friendly [Deathknell] effects here trigger an additional time."
+    /// (Detonation Amplifier): extra fires this object grants to its
+    /// controller's Deathknells at its battlefield.
+    virtual int extraDeathknellTriggersHere() const { return 0; }
 
     /// Change to the points needed to win while this card is a battlefield in
     /// play ("Increase the points needed to win the game by 1").

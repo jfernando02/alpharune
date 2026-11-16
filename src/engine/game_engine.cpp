@@ -2017,6 +2017,53 @@ void GameEngine::executePlayCard(const Intent& intent) {
             }
         }
     }
+    // "You may kill a friendly unit / return a friendly gear as an additional
+    // cost to play me" (Shimmering Swimmer, Dune Devourer, Skystrike Squadron).
+    if (!intent.use_alt_play_cost) {
+        const Card* pc = card.card_def_id != kInvalidId
+            ? card_registry_.get(card.card_def_id) : nullptr;
+        Card::OptionalAdditionalCost oac = pc ? pc->optionalAdditionalCost()
+                                              : Card::OptionalAdditionalCost{};
+        if (oac.valid && (oac.kill_friendly_unit || oac.kill_friendly_gear || oac.return_friendly_gear)) {
+            std::vector<GameObjectId> fodder;
+            for (const auto& [oid, o] : state_.objects) {
+                if (oid == intent.card || o.controller != intent.player || !o.location.has_value()) continue;
+                if (o.attached_to.has_value() && !oac.return_friendly_gear && !oac.kill_friendly_gear) continue;
+                if ((oac.kill_friendly_unit && o.isUnit()) ||
+                    ((oac.kill_friendly_gear || oac.return_friendly_gear) && o.isGear()))
+                    fodder.push_back(oid);
+            }
+            if (!fodder.empty()) {
+                std::vector<Intent> opts;
+                Intent decline; decline.type = IntentType::MakeChoice;
+                decline.player = intent.player; decline.chosen_value = 0;
+                opts.push_back(decline);
+                for (auto f : fodder) {
+                    Intent c; c.type = IntentType::MakeChoice; c.player = intent.player;
+                    c.chosen_objects = {f};
+                    opts.push_back(c);
+                }
+                state_.decision_index++;
+                events_.logTrace("DECISION #" + std::to_string(state_.decision_index) +
+                    " (" + toString(intent.player) + "): " +
+                    (oac.return_friendly_gear ? "return a friendly gear" : "kill a friendly object") +
+                    " as an additional cost to play " + card.name + "? [" +
+                    std::to_string(opts.size()) + " options]");
+                auto chosen = getAgent(intent.player).selectAction(state_, opts);
+                recordAppliedIntent(chosen);
+                if (on_decision) on_decision(state_, opts, chosen);
+                if (!chosen.chosen_objects.empty() && state_.objectExists(chosen.chosen_objects[0])) {
+                    const auto f = chosen.chosen_objects[0];
+                    if (oac.return_friendly_gear) effect_executor_->bounceToHand(f);
+                    else effect_executor_->killObject(f);
+                    prepay_discount += oac.reduce_energy;
+                    if (oac.paid_flag && oac.paid_flag[0] != '\0')
+                        card.card_counters[oac.paid_flag] = 1;
+                    events_.logTrace("ADDITIONAL_COST: paid for " + card.name);
+                }
+            }
+        }
+    }
     ps.transient_play_discount += prepay_discount;
 
     ps.current_play_source = intent.play_source;
@@ -2066,6 +2113,10 @@ void GameEngine::executePlayCard(const Intent& intent) {
 
     // Track play count
     ps.cards_played_this_turn++;
+    if ((card.isUnit() || card.isGear()) && intent.play_location.has_value() &&
+        std::holds_alternative<BattlefieldLocation>(*intent.play_location))
+        ps.played_permanent_to_bf_this_turn = true;
+
     // Per-turn gear/equipment counters (Emperor of the Sands gate; Ornn's
     // Forge "first gear each turn"). NOTE: this runs AFTER payCardCost, so the
     // first gear's cost reduction still sees gears_played_this_turn == 0.
@@ -3226,6 +3277,15 @@ std::vector<Intent> GameEngine::generateMainPhaseActions(PlayerId player) const 
         play_intent.type = IntentType::PlayCard;
         play_intent.player = player;
         play_intent.card = card_id;
+        // [Deploy] (CR 830.1.b): only to a battlefield, any battlefield.
+        if (card.card_def_id != kInvalidId && card_db_.get(card.card_def_id).deploy) {
+            for (const auto& bf : state_.battlefields) {
+                Intent to_bf = play_intent;
+                to_bf.play_location = BattlefieldLocation{bf.id};
+                actions.push_back(to_bf);
+            }
+            continue;
+        }
         play_intent.play_location = BaseLocation{player};
         actions.push_back(play_intent);
     }
@@ -4833,6 +4893,22 @@ void GameEngine::scoreConquer(PlayerId player, BattlefieldId bf) {
 void GameEngine::scoreHold(PlayerId player, BattlefieldId bf) {
     auto& ps = state_.player(player);
 
+    // [Deploy] (CR 830.1.b): "When an opponent holds here, kill this."
+    {
+        std::vector<GameObjectId> deployed;
+        for (const auto& [id, obj] : state_.objects)
+            if (obj.controller != player && obj.card_def_id != kInvalidId &&
+                !obj.attached_to.has_value() && obj.battlefieldId() == bf &&
+                card_db_.get(obj.card_def_id).deploy)
+                deployed.push_back(id);
+        for (auto id : deployed) {
+            if (!state_.objectExists(id) || !state_.getObject(id).location.has_value()) continue;
+            events_.logTrace("DEPLOY: " + state_.getObject(id).name +
+                             " killed (an opponent holds its battlefield)");
+            effect_executor_->killObject(id);
+        }
+    }
+
     // Continuous "can't gain points" lock (Tianna Crownguard, set via aura).
     if (ps.cannot_gain_points) {
         events_.logTrace(std::string("SCORE_BLOCKED: ") + toString(player) +
@@ -5647,8 +5723,9 @@ void GameEngine::recallMisplacedObjects() {
         if (obj.controller == PlayerId::None) continue;
         const LocationId home{BaseLocation{obj.controller}};
         bool recall = false;
-        if (obj.isGear() && !obj.attached_to.has_value() && obj.isAtBattlefield())
-            recall = true;
+        if (obj.isGear() && !obj.attached_to.has_value() && obj.isAtBattlefield() &&
+            !(obj.card_def_id != kInvalidId && card_db_.get(obj.card_def_id).deploy))
+            recall = true;   // CR 830.1.b.3: non-unit gear with [Deploy] stays
         if ((obj.isPermanent() || obj.isRune()) && !obj.attached_to.has_value() &&
             obj.isAtBase() && *obj.location != home)
             recall = true;
@@ -5766,8 +5843,10 @@ GameObjectId GameEngine::instantiateCard(CardDefId def_id, PlayerId owner) {
     obj.shield_value = def.shield_value;
     obj.deflect_value = def.deflect_value;
     obj.might_bonus = def.might_bonus;
+    obj.deploy = def.deploy;
 
     return obj_id;
+
 }
 
 void GameEngine::drawCards(PlayerId player, int count) {

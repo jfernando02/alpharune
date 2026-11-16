@@ -197,6 +197,11 @@ enum class TriggerType : uint8_t {
     WhenIBecomeExhausted,        // "When I become exhausted," — a ready unit is exhausted (a
                                  // move, an ability or equip cost, an exhaust effect). Riven,
                                  // Broken Blade; Reckless Innovator.
+    WhenAFriendlyUnitAttacks,   // another card: a friendly unit attacks (subject = it)
+    WhenYouAttackHere,          // a non-unit object at a battlefield: friendly units attack here
+    WhenAUnitDiesHere,          // a battlefield card: a unit died there (subject = it)
+    WhenAFriendlyGearDies,      // another card: a friendly gear died (subject = it)
+
 };
 
 // ─── Conditions ─────────────────────────────────────────────────────────────

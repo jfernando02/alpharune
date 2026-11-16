@@ -88,6 +88,11 @@ private:
     /// Also fires WhenAFriendlyUnitDies for other objects the controller owns.
     void onUnitDied(const UnitDiedEvent& e);
 
+    /// Fires WhenIDie/Deathknell for a dying gear.
+    void onLeftBoard(const LeftBoardEvent& e);
+    /// Extra Deathknell fires granted by `controller`'s cards at `where`.
+    int deathknellExtraAt(PlayerId controller, const LocationId& where) const;
+
     /// Fires WhenIConquer, WhenIHold, WhenIConquerOrHold for units at the BF.
     /// Also fires WhenYouConquerHere, WhenYouHoldHere for the battlefield card.
     void onScore(const ScoreEvent& e);
@@ -133,7 +138,9 @@ private:
     /// kInvalidId) restricts firing to the BF whose id matches — used so a
     /// "play a unit here" trigger only fires for the BF the unit landed at.
     void fireBattlefieldTriggers(TriggerType t, PlayerId player,
-                                  BattlefieldId at_battlefield = kInvalidId);
+                                  BattlefieldId at_battlefield = kInvalidId,
+                                  GameObjectId subject = kInvalidId);
+
 
     /// Fire `t` on any legend in the champion zone that declares it. Pass
     /// `relevant_player = PlayerId::None` to sweep both players (the

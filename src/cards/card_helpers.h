@@ -581,4 +581,222 @@ inline void moveTo(CardContext& ctx, GameObjectId u, int dest) {
     else ctx.executor.moveToBattlefield(u, static_cast<BattlefieldId>(dest - 1));
 }
 
+
+// ── Radiance tokens and keywords ────────────────────────────────────────────
+/// The Bomb gear token (CR 187.12): [Deploy] and "[Deathknell][>] Deal 2 to an
+/// enemy unit here and kill all other Bombs you control here."
+constexpr CardDefId kBombTokenCardDefId = 1086;
+
+/// "Play a Bomb gear token to `bf`."
+inline GameObjectId createBomb(CardContext& ctx, BattlefieldId bf,
+                               PlayerId player = PlayerId::None) {
+    if (player == PlayerId::None) player = ctx.controller;
+    auto tok = ctx.executor.createToken(player, CardType::Gear, "Bomb", 0, {"Bomb"}, {},
+                                        LocationId{BattlefieldLocation{bf}}, /*enter_ready=*/true);
+    if (ctx.state.objectExists(tok)) {
+        auto& b = ctx.state.getObject(tok);
+        b.card_def_id = kBombTokenCardDefId;
+        b.deploy = true;
+
+        b.is_exhausted = false;
+    }
+    return tok;
+}
+
+/// "Play a 1 [M] Recruit unit token to `loc`."
+inline GameObjectId createRecruit(CardContext& ctx, LocationId loc, bool ready = false,
+                                  PlayerId player = PlayerId::None) {
+    if (player == PlayerId::None) player = ctx.controller;
+    return ctx.executor.createToken(player, CardType::Unit, "Recruit", 1, {"Recruit"},
+                                    KeywordSet{}, loc, ready);
+}
+inline GameObjectId createRecruitAtBase(CardContext& ctx, PlayerId player = PlayerId::None) {
+    if (player == PlayerId::None) player = ctx.controller;
+    return createRecruit(ctx, LocationId{BaseLocation{player}}, false, player);
+}
+
+/// "Play a 3 [M] Mech unit token to `loc`."
+inline GameObjectId createMech(CardContext& ctx, LocationId loc, bool ready = false) {
+    return ctx.executor.createToken(ctx.controller, CardType::Unit, "Mech", 3, {"Mech"},
+                                    KeywordSet{}, loc, ready);
+}
+
+/// Where `source` is ("here"): its location, or its controller's base.
+inline LocationId locationHere(const GameState& state, GameObjectId source, PlayerId controller) {
+    if (state.objectExists(source)) {
+        const auto& o = state.getObject(source);
+        if (o.location.has_value()) return *o.location;
+        if (o.last_known.valid && o.last_known.location.has_value()) return *o.last_known.location;
+    }
+    return LocationId{BaseLocation{controller}};
+}
+
+/// Units at battlefield `bf` not controlled by `chooser` that `chooser` may choose.
+inline std::vector<GameObjectId> enemyUnitsAt(const GameState& state, PlayerId chooser,
+                                              std::optional<BattlefieldId> bf) {
+    std::vector<GameObjectId> out;
+    if (!bf) return out;
+    for (const auto& [id, obj] : state.objects) {
+        if (!obj.isUnit() || obj.controller == chooser || obj.untargetable_by_enemy) continue;
+        if (obj.battlefieldId() == bf) out.push_back(id);
+    }
+    return out;
+}
+
+/// Battlefield index (as BattlefieldId) chosen with pickMode: -1 waiting,
+/// -2 no legal battlefield. `ok` filters the battlefields offered.
+template <typename Ok>
+inline int pickBattlefield(Card& self, CardContext& ctx, const std::string& label, Ok&& ok) {
+    const int n = static_cast<int>(ctx.state.battlefields.size());
+    if (n == 0) return -2;
+    uint32_t legal = 0;
+    std::vector<std::string> labels;
+    for (int i = 0; i < n && i < 32; ++i) {
+        labels.push_back("Battlefield #" + std::to_string(i));
+        if (ok(ctx.state.battlefields[i].id)) legal |= (1u << i);
+    }
+    const int m = self.pickMode(ctx, label, n, labels, legal);
+    if (m < 0) return m;
+    return static_cast<int>(ctx.state.battlefields[m].id);
+}
+inline int pickBattlefield(Card& self, CardContext& ctx, const std::string& label) {
+    return pickBattlefield(self, ctx, label, [](BattlefieldId) { return true; });
+}
+
+/// [Disarm X] (CR 831): "When I attack, give an enemy unit here -X [M] this
+/// turn." Called from the unit's WhenIAttack trigger (`unit` = the attacker).
+/// Returns false while the choice is pending or being finalized.
+inline bool resolveDisarm(Card& self, CardContext& ctx, GameObjectId unit, int x) {
+    std::optional<BattlefieldId> here;
+    if (ctx.state.objectExists(unit)) here = ctx.state.getObject(unit).battlefieldId();
+    const auto t = self.pickTarget(ctx, "Disarm: an enemy unit here",
+                                   enemyUnitsAt(ctx.state, ctx.controller, here));
+    if (ctx.executor.hasPendingChoice()) return false;
+    if (Card::finalizingChoices(ctx)) return false;
+    if (t == kInvalidId || !ctx.state.objectExists(t) || x <= 0) return true;
+    ctx.executor.giveTemporaryMight(t, -x);
+    ctx.events.logTrace("DISARM " + std::to_string(x) + ": " + ctx.state.getObject(t).name +
+                        " -" + std::to_string(x) + " [M] this turn");
+    return true;
+}
+
+/// Deal `amount` to `target` and kill it if that is lethal.
+inline void dealAndKill(CardContext& ctx, GameObjectId target, int amount) {
+    if (amount <= 0 || !ctx.state.objectExists(target)) return;
+    ctx.executor.dealDamage(target, amount, ctx.source);
+    if (ctx.state.objectExists(target) && ctx.state.getObject(target).location.has_value() &&
+        ctx.state.getObject(target).hasLethalDamage())
+        ctx.executor.killObject(target);
+}
+
+/// The Energy cost printed on `obj`'s card (0 for tokens).
+inline int printedEnergy(const CardContext& ctx, const GameObject& obj) {
+    return obj.card_def_id == kInvalidId ? 0 : ctx.executor.cardDB().get(obj.card_def_id).energy_cost;
+}
+
+/// "When you play me, play a Bomb gear token to a battlefield." (the whole
+/// trigger body; the battlefield is chosen at finalization).
+inline void playBombTrigger(Card& self, CardContext& ctx, const std::string& who) {
+    const int bf = pickBattlefield(self, ctx, who + ": play a Bomb to a battlefield");
+    if (bf == -1) return;   // waiting for the agent
+    if (Card::finalizingChoices(ctx)) return;
+    if (bf < 0) return;
+    createBomb(ctx, static_cast<BattlefieldId>(bf));
+    ctx.events.logTrace(who + ": played a Bomb to battlefield #" + std::to_string(bf));
+}
+
+/// Units at battlefield `bf` that `chooser` may choose (enemy ones that can't
+/// be chosen are left out).
+inline std::vector<GameObjectId> unitsAtBattlefield(const GameState& state, PlayerId chooser,
+                                                    BattlefieldId bf) {
+    std::vector<GameObjectId> out;
+    for (const auto& [id, obj] : state.objects) {
+        if (!obj.isUnit() || obj.battlefieldId() != bf) continue;
+        if (obj.controller != chooser && obj.untargetable_by_enemy) continue;
+        out.push_back(id);
+    }
+    return out;
+}
+
+/// Every unit on the board `chooser` may choose.
+inline std::vector<GameObjectId> anyUnits(const GameState& state, PlayerId chooser) {
+    return chooseableUnits(state, chooser, [](const GameObject&) { return true; });
+}
+inline std::vector<GameObjectId> friendlyUnits(const GameState& state, PlayerId chooser) {
+    return chooseableUnits(state, chooser,
+                           [&](const GameObject& o) { return o.controller == chooser; });
+}
+inline std::vector<GameObjectId> enemyUnits(const GameState& state, PlayerId chooser) {
+    return chooseableUnits(state, chooser,
+                           [&](const GameObject& o) { return o.controller != chooser; });
+}
+/// Gear on the board (`friendly_only`: `chooser`'s) that `chooser` may choose.
+inline std::vector<GameObjectId> boardGear(const GameState& state, PlayerId chooser,
+                                           bool friendly_only = false) {
+    std::vector<GameObjectId> out;
+    for (const auto& [id, obj] : state.objects) {
+        if (!obj.isGear() || !obj.location.has_value()) continue;
+        if (friendly_only && obj.controller != chooser) continue;
+        if (obj.controller != chooser && obj.untargetable_by_enemy) continue;
+        out.push_back(id);
+    }
+    return out;
+}
+/// The chain item's triggering subject (kInvalidId if none).
+inline GameObjectId triggerSubject(const CardContext& ctx) {
+    return ctx.state.chain.resuming ? ctx.state.chain.resuming->triggering_subject : kInvalidId;
+}
+/// Kill the units in `ids` that have lethal damage (after an AoE).
+inline void killLethal(CardContext& ctx, const std::vector<GameObjectId>& ids) {
+    for (auto id : ids)
+        if (ctx.state.objectExists(id) && ctx.state.getObject(id).location.has_value() &&
+            ctx.state.getObject(id).isUnit() && ctx.state.getObject(id).hasLethalDamage())
+            ctx.executor.killObject(id);
+}
+
+/// A unit's total [Shield]: printed/temporary value plus one instance per
+/// aura source that grants it (as GameObject::recomputeMight counts them).
+inline int totalShield(const GameState& state, GameObjectId id) {
+    if (!state.objectExists(id)) return 0;
+    const auto& o = state.getObject(id);
+    int v = o.shield_value;
+    std::vector<GameObjectId> seen;
+    for (const auto& ae : o.aura_effects) {
+        if (ae.keyword != Keyword::Shield) continue;
+        if (std::find(seen.begin(), seen.end(), ae.source) != seen.end()) continue;
+        seen.push_back(ae.source);
+        v += ae.keyword_value > 0 ? ae.keyword_value : 1;
+    }
+    if (v == 0 && o.hasKeyword(Keyword::Shield)) v = 1;
+    return v;
+}
+
+/// The battlefield a battlefield card object stands for.
+inline std::optional<BattlefieldId> bfOfCard(const GameState& state, GameObjectId card) {
+    for (const auto& bf : state.battlefields)
+        if (bf.card_object_id == card) return bf.id;
+    return std::nullopt;
+}
+
+/// Friendly units of `p` at battlefield `bf`.
+inline std::vector<GameObjectId> friendlyUnitsAt(const GameState& state, PlayerId p,
+                                                 std::optional<BattlefieldId> bf) {
+    std::vector<GameObjectId> out;
+    if (!bf) return out;
+    for (const auto& [id, o] : state.objects)
+        if (o.isUnit() && o.controller == p && o.battlefieldId() == bf) out.push_back(id);
+    return out;
+}
+
+/// Take `card` out of its owner's hand / trash / banishment list (before an
+/// effect plays it from there).
+inline void pullFromZoneLists(GameState& state, GameObjectId card) {
+    for (auto pid : {PlayerId::Player1, PlayerId::Player2}) {
+        auto& ps = state.player(pid);
+        for (auto* v : {&ps.hand, &ps.trash, &ps.banishment})
+            v->erase(std::remove(v->begin(), v->end(), card), v->end());
+    }
+}
+
 } // namespace riftbound
+

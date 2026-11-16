@@ -56,6 +56,13 @@ struct CardDef {
     // have any number of cards named Spiderling").
     bool unlimited_copies = false;
 
+    // [Deploy] (Radiance, CR 830): play or create this only to a battlefield
+    // (any battlefield); a non-unit gear with Deploy is not recalled in
+    // cleanups; when an opponent holds its battlefield, it is killed. A
+    // characteristic of the card rather than a Keyword bit, so the network's
+    // keyword layout (kNumKeywords) is unchanged.
+    bool deploy = false;
+
     bool hasTag(const std::string& tag) const {
         for (auto& t : tags)
             if (t == tag) return true;

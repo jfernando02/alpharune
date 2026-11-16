@@ -83,6 +83,8 @@ struct GameObject {
 
     // ── Intrinsic token-ness (CR 185.1) ──
     bool is_token = false;
+    bool deploy = false;   // [Deploy] (CR 830), from the card (CardDef::deploy)
+
 
     // ── Last-known information (CR 383.2.c.3.b / 429.1.a.1.b) ──
     // Snapshot taken just before this object leaves the board by dying, so
