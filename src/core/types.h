@@ -281,6 +281,10 @@ struct ModeOfPlay {
     int battlefield_count = 2;
     int battlefields_per_player = 1;
     bool second_player_extra_channel = true;
+    // CR 489.7 / 490.7 / 491.7 (FFA3, FFA4, 2v2): the player going first
+    // skips their first draw. 1v1 has no such rule (CR 487.7 / 488.7), so
+    // it is off by default.
+    bool first_player_skips_first_draw = false;
     MatchFormat format = MatchFormat::BestOf3;
 };
 

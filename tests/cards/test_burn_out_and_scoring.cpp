@@ -540,7 +540,7 @@ TEST_F(BurnOutScoringTest, ContestedBF_StuckAfter0vs0Showdown_MoveByOpponentStag
     EXPECT_FALSE(bf.showdown_staged);
 }
 
-// ─── CR 482.7 / 483.7 / 484.7 — First Turn Process: first player skips draw ──
+// ─── CR 487.7–491.7 — First Turn Process: who skips the first draw ──
 
 // Helper: push a fresh deck card directly into the engine's GameState
 // (fixture `state` is a separate object — addToDeck() doesn't touch the
@@ -558,11 +558,35 @@ GameObjectId seedDeckCard(GameState& s, PlayerId owner) {
 }
 }  // namespace
 
-TEST_F(BurnOutScoringTest, FirstPlayerFirstTurn_DrawPhaseSkipped) {
-    // Per CR 482.7: "The player going first does not draw a card during
-    // their first Draw Phase of the game." Going-second is unaffected.
+TEST_F(BurnOutScoringTest, FirstPlayerFirstTurn_DrawsIn1v1) {
+    // CR 487.7 / 488.7: in 1v1 the only first-turn adjustment is the
+    // second player's extra channel — the player going first still draws.
     makeEngineAndSeedBattlefields();
     auto& s = *eng_state();
+    s.turn.turn_player = P1;
+    s.turn.starting_player = P1;
+    s.turn.turn_number = 0;
+    s.player(P1).is_first_turn = true;
+    s.player(P2).is_first_turn = true;
+
+    seedDeckCard(s, P1);
+    seedDeckCard(s, P1);
+    int hand_before = s.player(P1).hand.size();
+    int deck_before = s.player(P1).main_deck.size();
+
+    engine_->testHook_drawPhase();
+
+    EXPECT_EQ(s.player(P1).hand.size(), static_cast<size_t>(hand_before + 1))
+        << "P1 (going first) draws on their first Draw Phase in 1v1";
+    EXPECT_EQ(s.player(P1).main_deck.size(), static_cast<size_t>(deck_before - 1));
+}
+
+TEST_F(BurnOutScoringTest, FirstPlayerFirstTurn_DrawSkippedInMultiplayerModes) {
+    // CR 489.7 / 490.7 / 491.7: "The player going first does not draw a
+    // card during their first Draw Phase of the game."
+    makeEngineAndSeedBattlefields();
+    auto& s = *eng_state();
+    s.mode.first_player_skips_first_draw = true;
     s.turn.turn_player = P1;
     s.turn.starting_player = P1;
     s.turn.turn_number = 0;

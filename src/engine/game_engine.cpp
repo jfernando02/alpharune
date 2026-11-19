@@ -1073,13 +1073,15 @@ void GameEngine::drawPhase() {
         return;
     }
 
-    // CR 482.7 / 483.7 / 484.7: the player going first does not draw a
-    // card during their first Draw Phase of the game. (The player going
-    // second receives a compensating extra channel in channelPhase().)
-    if (state_.player(player).is_first_turn &&
+    // CR 489.7 / 490.7 / 491.7: in the multiplayer modes the player going
+    // first does not draw during their first Draw Phase. In 1v1 (CR 487.7 /
+    // 488.7) they draw as normal; the player going second's only
+    // adjustment is the extra channel in channelPhase().
+    if (state_.mode.first_player_skips_first_draw &&
+        state_.player(player).is_first_turn &&
         player == state_.turn.starting_player) {
         events_.logTrace("DRAW PHASE: " + std::string(player == PlayerId::Player1 ? "P1" : "P2") +
-                          " skips draw (first turn, going first — CR 482.7)");
+                          " skips draw (first turn, going first — CR 489.7)");
     } else {
         // Draw 1 card (CR 315.4.b)
         drawCards(player, 1);
