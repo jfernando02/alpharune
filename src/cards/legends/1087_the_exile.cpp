@@ -11,8 +11,9 @@ namespace riftbound {
 namespace {
 
 // "Units you play to battlefields you control enter ready."
-// Id 1101: The Exile is missing from the card gallery snapshot the Radiance ids
-// were ranked from (956 + rank), so it takes an id past that range.
+// Id 1087: The Exile is missing from the card gallery snapshot the Radiance ids
+// were ranked from (956 + rank), so it takes the first free id after them. It
+// was 1101, past kCardVocabSize, which hid the top meta legend from the models.
 class TheExile : public LegendCard {
 public:
     const CardDef& def() const override { return def_; }
@@ -29,7 +30,7 @@ public:
 private:
     const CardDef def_ = [] {
         CardDef d;
-        d.id = 1101;
+        d.id = 1087;
         d.def_id = R"RB(rad-149-167)RB";
         d.name = R"RB(The Exile)RB";
         d.set_code = R"RB(RAD)RB";
@@ -49,8 +50,8 @@ private:
 
 }  // anonymous namespace
 
-void register_card_1101(CardRegistry& r) {
-    r.registerCard(1101, std::make_unique<TheExile>());
+void register_card_1087(CardRegistry& r) {
+    r.registerCard(1087, std::make_unique<TheExile>());
 }
 
 } // namespace riftbound

@@ -35,7 +35,7 @@ constexpr CardDefId kBladeOfTheExile    = 1082;
 constexpr CardDefId kRakelstake         = 1097;
 constexpr CardDefId kRuinedMonastery    = 1098;
 constexpr CardDefId kBattlePreparations = 1100;
-constexpr CardDefId kTheExile           = 1101;
+constexpr CardDefId kTheExile           = 1087;
 constexpr CardDefId kBrutalizer         = 365;   // a 2-cost gear
 constexpr CardDefId kSingularity        = 105;   // a 6-cost spell
 
@@ -291,7 +291,7 @@ TEST_F(RadianceMeta, BladeOfTheExile_AttachesWhenPaidByExhausting) {
     EXPECT_FALSE(blade->onEquipPaid(ctx2, enemy));
 }
 
-// ── 1101 The Exile ─────────────────────────────────────────────────────────
+// ── 1087 The Exile ─────────────────────────────────────────────────────────
 
 TEST_F(RadianceMeta, TheExile_UnitsPlayedToControlledBattlefieldsEnterReady) {
     const Card* exile = card_registry.get(kTheExile);

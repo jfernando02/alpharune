@@ -70,6 +70,15 @@ protected:
     }
 };
 
+// A card id past kCardVocabSize is encoded as "no card": every model
+// (gradient-boosted and neural) would be blind to it.
+TEST_F(ValueModelTest, EveryCardIdIsInTheModelVocabulary) {
+    for (const auto& [id, def] : card_db.all()) {
+        EXPECT_GE(id, 1) << def.name;
+        EXPECT_LE(id, ml::kCardVocabSize) << def.name;
+    }
+}
+
 TEST_F(ValueModelTest, EncodingIsSortedAndInRange) {
     for (const GameState& s : turnStarts(5)) {
         ml::SparseRow row;
