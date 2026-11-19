@@ -464,6 +464,40 @@ TEST_F(HeuristicAgentTest, TreeReturnsALegalActionAndIsDeterministic) {
     }
 }
 
+// root_mix blends the root's priors toward uniform: at 1 every option the
+// agent may take gets the same prior.
+TEST_F(HeuristicAgentTest, TreeRootMixFlattensRootPriors) {
+    HeuristicConfig config;
+    config.tree = true;
+    config.tree_sims = 8;
+    config.seed = 123;
+    for (const auto& [state, legal] : cleanPoints(23, 4)) {
+        HeuristicAgent plain(card_db, card_registry, config);
+        plain.selectAction(state, legal);
+        HeuristicConfig mixed_config = config;
+        mixed_config.tree_root_mix = 1.0;
+        HeuristicAgent mixed(card_db, card_registry, mixed_config);
+        mixed.selectAction(state, legal);
+
+        const auto& plain_p = plain.lastRoot().priors;
+        const auto& mixed_p = mixed.lastRoot().priors;
+        ASSERT_EQ(mixed_p.size(), legal.size());
+        double plain_max = 0.0, sum = 0.0;
+        int options = 0;
+        for (size_t i = 0; i < legal.size(); ++i) {
+            if (legal[i].type == IntentType::Concede) continue;
+            ++options;
+            plain_max = std::max(plain_max, plain_p[i]);
+            sum += mixed_p[i];
+        }
+        for (size_t i = 0; i < legal.size(); ++i)
+            if (legal[i].type != IntentType::Concede)
+                EXPECT_NEAR(mixed_p[i], 1.0 / options, 1e-12);
+        EXPECT_NEAR(sum, 1.0, 1e-12);
+        if (options > 2) EXPECT_GT(plain_max, 1.0 / options);  // the mix changed something
+    }
+}
+
 // The turn's budget stops a tree search between simulations.
 TEST_F(HeuristicAgentTest, TreeStopsAtTheTurnBudget) {
     HeuristicConfig config;

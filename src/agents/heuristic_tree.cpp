@@ -113,12 +113,18 @@ Intent HeuristicAgent::treeSearch(const GameState& state, const std::vector<Inte
         tree.reset(me, state.turn.turn_number, last_turn);
 
     const uint64_t root_key = treeKey(state, legal, me);
-    const std::vector<double> priors = treePriors(state, legal);
-    stats_.root_max_prior += *std::max_element(priors.begin(), priors.end());
+    std::vector<double> priors = treePriors(state, legal);
 
     int options = 0;
     for (const Intent& a : legal)
         if (a.type != IntentType::Concede) ++options;
+    if (config_.tree_root_mix > 0.0 && options > 0) {
+        const double mix = std::min(config_.tree_root_mix, 1.0);
+        for (size_t i = 0; i < legal.size(); ++i)
+            if (legal[i].type != IntentType::Concede)
+                priors[i] = (1.0 - mix) * priors[i] + mix / options;
+    }
+    stats_.root_max_prior += *std::max_element(priors.begin(), priors.end());
     const int sims = std::min(config_.tree_sims, config_.tree_sims_per_action * options);
     bool budget_spent = false;
     if (config_.tree_halving) {

@@ -158,6 +158,11 @@ struct HeuristicConfig {
     // node's mean so far minus this (normalized, floored at 0) instead of the
     // worst value seen. Below 0: off (the worst value, as MuZero).
     double tree_fpu = -1.0;
+    // Root exploration: the root's priors become (1 - mix) * policy + mix /
+    // options, as AlphaZero mixes in noise. Without it the policy's prior
+    // decides which root options get simulated at all: on a Jax turn 1 the
+    // policy put 0.76 on End Turn and Doran's Blade got 1 of 16 simulations.
+    double tree_root_mix = 0.0;
     uint64_t seed = 1;              // 0 picks a random seed
 };
 

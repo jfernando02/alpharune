@@ -70,7 +70,7 @@ inline DeckSet loadLegalDecks(const std::string& dir, const CardDB& db) {
 ///   | policy:policy=FILE[,temp=X,eps=X]   (agents/policy_agent: the policy, no search)
 /// model= and policy= take either kind of file: gradient-boosted trees (JSON)
 /// or the neural model (agents/nn_model). The heuristic agent's tree search
-/// also takes tree_skip_rune=0/1 and tree_fpu=X (HeuristicConfig).
+/// also takes tree_skip_rune=0/1, tree_fpu=X and root_mix=X (HeuristicConfig).
 /// where <weight> is any EvalWeights field (agents/evaluator.h). A model is
 /// loaded once here and shared by every game (models are read-only).
 /// Either look-ahead agent also takes offsearch=random[:KIND]: the decisions
@@ -197,6 +197,7 @@ inline ToolAgentSpec parseToolAgent(const std::string& spec) {
         else if (key == "tree_hscale" && h) out.heuristic.tree_halving_scale = std::stod(val);
         else if (key == "tree_skip_rune" && h) out.heuristic.tree_skip_rune = std::stoi(val) != 0;
         else if (key == "tree_fpu" && h) out.heuristic.tree_fpu = std::stod(val);
+        else if (key == "root_mix" && h) out.heuristic.tree_root_mix = std::stod(val);
         else if (key == "sims" && !h) out.ismcts.max_simulations = std::stoi(val);
         else if (key == "uct_c" && !h) out.ismcts.uct_c = std::stod(val);
         else if (!setWeight(h ? out.heuristic.weights : out.ismcts.weights, key, std::stod(val)))

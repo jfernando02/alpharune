@@ -209,6 +209,7 @@ bool applyTreeOption(HeuristicConfig& c, const std::string& key, double v) {
     else if (key == "tree_hscale") c.tree_halving_scale = v;
     else if (key == "tree_skip_rune") c.tree_skip_rune = v != 0;
     else if (key == "tree_fpu") c.tree_fpu = v;
+    else if (key == "root_mix") c.tree_root_mix = v;
     else return false;
     return true;
 }
