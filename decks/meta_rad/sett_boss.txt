@@ -1,0 +1,32 @@
+# Sett, The Boss -- 1st, MysteryHS, Eldar Radiance Summoner Skirmish (deck-sett-the-boss-354961). No banned cards.
+Legend:
+1 Sett, The Boss
+
+Champion:
+1 Sett, Kingpin
+
+MainDeck:
+3 Irresistible Faefolk
+3 Pit Rookie
+3 Trifarian Captain
+2 Kayle, Justified
+3 Kinkou Initiate
+2 Lucian, Merciless
+3 Fiora, Victorious
+2 Rengar, Trophy Hunter
+2 Vi, Peacekeeper
+2 Ruin Runner
+3 Punch First
+3 Showstopper
+3 Call to Glory
+2 Rampage
+3 Pillaged Armory
+
+Battlefields:
+1 Monastery of Hirana
+1 Packed Amphitheater
+1 Valley of Idols
+
+Runes:
+7 Body Rune
+5 Order Rune

@@ -1,0 +1,34 @@
+# LeBlanc, Deceiver -- 3rd, S5 Beijing (deck-yao-ji5-0-353283)
+# Nov 23 2026 bans: Star Spring -> Seat of Power.
+Legend:
+1 LeBlanc, Deceiver
+
+Champion:
+1 LeBlanc, Fragmented
+
+MainDeck:
+2 Honest Broker
+3 Soaring Scout
+3 Watchful Sentry
+2 Black Rose Dignitary
+3 Karthus, Eternal
+3 Glasc Mixologist
+2 Vi, Peacekeeper
+2 Ruined Rex
+3 Thousand-Tailed Watcher
+2 Sacrifice
+3 Stupefy
+2 Cull the Weak
+3 Deathgrip
+3 Salvage
+2 Mirror Image
+1 Sprite Fountain
+
+Battlefields:
+1 Dusk Rose Lab
+1 Seat of Power
+1 Windswept Hillock
+
+Runes:
+4 Mind Rune
+8 Order Rune

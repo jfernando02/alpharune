@@ -1,0 +1,34 @@
+# Jayce, Defender of Tomorrow -- 2nd, Ali Aintrazi, CCS $50,000 (deck-jayce-defender-of-tomorrow-354513)
+# Nov 23 2026 bans: 3 Dazzling Aurora -> 3 Deadly Flourish (sideboard).
+Legend:
+1 Jayce, Defender of Tomorrow
+
+Champion:
+1 Jayce, Brilliant Inventor
+
+MainDeck:
+3 Elder Dragon
+3 Bellows Breath
+3 Flurry of Blades
+2 Repulse
+1 Sabotage
+3 Dredge Up
+3 Mobilize
+1 Temporal Breach
+3 Catalyst of Aeons
+1 Rocket Barrage
+1 Progress Day
+3 Clairvoyance
+3 Garbage Grabber
+3 Platewyrm Egg
+3 Gutter Palace
+3 Deadly Flourish
+
+Battlefields:
+1 Dragon Roost
+1 Forgotten Monument
+1 Sigil of the Storm
+
+Runes:
+7 Body Rune
+5 Mind Rune

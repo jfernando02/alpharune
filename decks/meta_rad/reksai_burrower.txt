@@ -1,0 +1,32 @@
+# Rek'Sai, Void Burrower -- 4th, S5 Shenzhen (deck-wen-jiu-shi-yao-shen-me-lai-shen-me-355307). No banned cards.
+Legend:
+1 Rek'Sai, Void Burrower
+
+Champion:
+1 Rek'Sai, Breacher
+
+MainDeck:
+3 Carrion Dredger
+3 Inferna
+3 Noxian Emissary
+3 Bilgewater Tracker
+3 Faithful Manufactor
+3 Noxus Hopeful
+2 Safety Inspector
+3 Undertitan
+2 Blood Rush
+3 Cleave
+1 Hextech Ray
+3 Cull the Weak
+3 Falling Star
+2 Imperial Decree
+2 Concert Poster
+
+Battlefields:
+1 Forbidding Waste
+1 Rockfall Path
+1 The Candlelit Sanctum
+
+Runes:
+6 Fury Rune
+6 Order Rune

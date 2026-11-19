@@ -1,0 +1,39 @@
+# Vex, Gloomist -- 1st, RTR Skylar, CFG's Radiance Summoner Skirmish (deck-vex-gloomist-353995). No banned cards.
+# The list on riftdecks has no battlefields; these three are taken from the Calm/Chaos Irelia list.
+Legend:
+1 Vex, Gloomist
+
+Champion:
+1 Vex, Apathetic
+
+MainDeck:
+3 Steel Paws
+3 Bedeviling Stranger
+3 Sneaky Deckhand
+3 Tornado Warrior
+1 Blitzcrank, Impassive
+3 Astral Heron
+1 Baron Nashor
+2 Defy
+1 Gust
+1 Hush
+2 Life from Stone
+1 Abandon
+1 An Offer You Can't Refuse
+1 Emperor's Divide
+1 Rebuke
+3 Switcheroo
+1 Back Off
+1 Star-Crossed
+3 Guardian Angel
+2 Boots of Swiftness
+2 The Good Stuff
+
+Battlefields:
+1 Abandoned Hall
+1 Sunken Temple
+1 Targon's Peak
+
+Runes:
+6 Calm Rune
+6 Chaos Rune

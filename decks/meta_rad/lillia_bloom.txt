@@ -1,0 +1,36 @@
+# Lillia, Bashful Bloom -- 6th, S5 Shenzhen (deck-kuai-gong-355309). No banned cards.
+Legend:
+1 Lillia, Bashful Bloom
+
+Champion:
+1 Lillia, Fae Fawn
+
+MainDeck:
+3 Ravenbloom Student
+2 Scuttle Crab
+1 Janna, Savior
+1 Lillia, Fae Fawn
+1 Thousand-Tailed Watcher
+1 Charm
+3 Defy
+2 En Garde
+2 Life from Stone
+3 Stupefy
+2 Battle Preparations
+3 Discipline
+1 Lilting Lullaby
+3 Smoke and Mirrors
+2 Sprite Burst
+1 Unchecked Power
+2 Brutalizer
+3 Mask of Foresight
+3 Sprite Fountain
+
+Battlefields:
+1 Abandoned Hall
+1 Dusk Rose Lab
+1 Seat of Power
+
+Runes:
+6 Calm Rune
+6 Mind Rune

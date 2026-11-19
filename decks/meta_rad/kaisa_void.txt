@@ -1,0 +1,34 @@
+# Kai'Sa, Daughter of the Void -- 1st, JGT Threebet, Skirmish Noviembre Radiance (deck-kai-sa-daughter-of-the-void-355033)
+# Nov 23 2026 bans: 3 Brynhir Thundersong -> 2 Ferrous Forerunner + 1 Brittle Steel (sideboard cards).
+Legend:
+1 Kai'Sa, Daughter of the Void
+
+Champion:
+1 Kai'Sa, Survivor
+
+MainDeck:
+3 Plundering Poro
+3 Bilgewater Tracker
+3 Lecturing Yordle
+3 Noxus Hopeful
+2 Ferrous Forerunner
+3 Thousand-Tailed Watcher
+2 The Empyrean
+1 Bellows Breath
+3 Hextech Ray
+3 Stupefy
+2 Brittle Steel
+3 Falling Star
+2 Smoke Screen
+3 Temporal Breach
+1 Singularity
+2 Time Warp
+
+Battlefields:
+1 Frozen Fortress
+1 Rockfall Path
+1 Void Gate
+
+Runes:
+6 Fury Rune
+6 Mind Rune

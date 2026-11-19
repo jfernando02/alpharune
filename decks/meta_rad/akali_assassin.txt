@@ -1,0 +1,38 @@
+# Akali, Rogue Assassin -- 6th, S5 Guangzhou (deck-huono-yi-zhi-354023)
+# Nov 23 2026 bans: 3 Stellacorn Herder + 3 Zhonya's Hourglass -> 2 Irelia, Fervent, 1 Akali, Silent,
+# 1 Tomb-Raider Barbara, 1 Ferrous Forerunner, 1 Not So Fast (sideboard cards).
+Legend:
+1 Akali, Rogue Assassin
+
+Champion:
+1 Akali, Deadly Weapon
+
+MainDeck:
+2 Mischievous Marai
+2 Mournful Witness
+1 Scuttle Crab
+3 Kai'Sa, Survivor
+2 Irelia, Fervent
+1 Akali, Silent
+2 Tomb-Raider Barbara
+1 Ferrous Forerunner
+2 Blitzcrank, Impassive
+3 Astral Heron
+3 Defy
+3 Shuriken Flip
+1 Battle Preparations
+1 Block
+3 Discipline
+3 Falling Star
+2 Not So Fast
+2 Back Off
+2 Long Sword
+
+Battlefields:
+1 Forgotten Monument
+1 Sigil of the Storm
+1 Void Gate
+
+Runes:
+5 Calm Rune
+7 Fury Rune

@@ -1,0 +1,39 @@
+# Irelia, Blade Dancer -- 1st, Card Citadel Skirmish (deck-irelia-353231)
+# Nov 23 2026 bans: 3 Stellacorn Herder + 1 Zhonya's Hourglass -> 1 Fizz, Trickster, 1 Akali, Silent,
+# 1 Vex, Apathetic, 1 Not So Fast (sideboard cards).
+Legend:
+1 Irelia, Blade Dancer
+
+Champion:
+1 Irelia, Fervent
+
+MainDeck:
+3 Scuttle Crab
+3 Tideturner
+2 Akali, Silent
+2 Vex, Apathetic
+1 Fizz, Trickster
+2 Charm
+3 Defiant Dance
+3 Defy
+1 En Garde
+2 Gust
+1 Twilight Shroud
+1 Abandon
+2 Battle Preparations
+3 Discipline
+1 Flash
+2 Ride the Wind
+1 Star-Crossed
+1 Not So Fast
+2 Guardian Angel
+3 Boots of Swiftness
+
+Battlefields:
+1 Abandoned Hall
+1 Sunken Temple
+1 Targon's Peak
+
+Runes:
+6 Calm Rune
+6 Chaos Rune

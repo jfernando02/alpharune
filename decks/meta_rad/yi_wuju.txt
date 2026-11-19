@@ -1,0 +1,35 @@
+# Master Yi, Wuju Bladesman -- 1st, S5 City League Shenyang (deck-jian-sheng-353514). No banned cards.
+Legend:
+1 Master Yi, Wuju Bladesman
+
+Champion:
+1 Master Yi, Tempered
+
+MainDeck:
+2 Steel Paws
+3 Lonely Poro
+3 Scuttle Crab
+2 First Mate
+1 Tomb-Raider Barbara
+3 Irelia, Fervent
+3 Rengar, Trophy Hunter
+2 Elnuk Herd
+3 Charm
+3 Defy
+2 En Garde
+3 Punch First
+1 Sabotage
+3 Discipline
+1 Alpha Strike
+2 Rampage
+1 Onslaught
+1 Invigorating Bloom
+
+Battlefields:
+1 Black Rose Sanctum
+1 Packed Amphitheater
+1 Seat of Power
+
+Runes:
+7 Body Rune
+5 Calm Rune
