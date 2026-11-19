@@ -249,8 +249,85 @@ std::string ReplayWriter::boardJson(const GameState& state, const Intent* chosen
     return board.dump();
 }
 
-ReplayWriter::ReplayWriter(const CardDB& db, const std::string& output_path)
-    : db_(db), output_path_(output_path) {}
+ReplayFormat parseReplayFormat(const std::string& name) {
+    if (name == "cards") return ReplayFormat::Cards;
+    if (name == "text")  return ReplayFormat::Text;
+    throw std::invalid_argument("replay format must be 'cards' or 'text', got '" +
+                                name + "'");
+}
+
+const char* replayExtension(ReplayFormat format) {
+    return format == ReplayFormat::Text ? "txt" : "html";
+}
+
+ReplayWriter::ReplayWriter(const CardDB& db, const std::string& output_path,
+                           ReplayFormat format)
+    : db_(db), output_path_(output_path), format_(format) {}
+
+void ReplayWriter::write() {
+    if (format_ == ReplayFormat::Text) writeText();
+    else writeHtml();
+}
+
+void ReplayWriter::writeText() {
+    std::ofstream file(output_path_);
+    if (!file.is_open()) {
+        throw std::runtime_error("Failed to open replay file: " + output_path_);
+    }
+    auto endLine = [&file](const std::string& s) {
+        if (!s.empty() && s.back() != '\n') file << '\n';
+    };
+    file << "Riftbound replay | " << kVersionTag << '\n';
+    if (!game_header_.empty()) file << game_header_ << '\n';
+    file << snapshots_.size() << " snapshots (a board is printed only when it "
+            "differs from the last one printed)\n";
+    // The board without its "| TURN ... | D:<n> ..." header line, which
+    // changes at every decision even when nothing on the board does.
+    auto boardBody = [](const std::string& board) {
+        const size_t turn = board.find("| TURN ");
+        if (turn == std::string::npos) return board;
+        const size_t end = board.find('\n', turn);
+        return board.substr(0, turn) +
+               (end == std::string::npos ? std::string() : board.substr(end + 1));
+    };
+    std::string last_board;
+    for (size_t i = 0; i < snapshots_.size(); ++i) {
+        const auto& snap = snapshots_[i];
+        file << "\n==== [" << (i + 1) << "/" << snapshots_.size() << "] "
+             << snap.turn_info << " ====\n";
+        if (snap.mcts_player >= 0) {
+            const double p = (snap.mcts_value + 1.0) / 2.0;
+            file << "Win estimate: P" << (snap.mcts_player + 1) << " "
+                 << static_cast<int>(p * 100.0 + 0.5) << "% (" << snap.mcts_sims
+                 << " sims)\n";
+        }
+        if (!snap.board_ascii.empty()) {
+            std::string body = boardBody(snap.board_ascii);
+            if (body == last_board) {
+                file << "(board unchanged)\n";
+            } else {
+                // Drop each line's box padding ("text      |" -> "text").
+                std::istringstream lines(snap.board_ascii);
+                for (std::string line; std::getline(lines, line);) {
+                    size_t end = line.size();
+                    if (end > 0 && line[end - 1] == '|') --end;
+                    while (end > 0 && line[end - 1] == ' ') --end;
+                    file.write(line.data(), static_cast<std::streamsize>(end));
+                    file << '\n';
+                }
+                last_board = std::move(body);
+            }
+        }
+        if (!snap.decision_text.empty()) {
+            file << "-- Decision --\n" << snap.decision_text;
+            endLine(snap.decision_text);
+        }
+        if (!snap.trace_lines.empty()) {
+            file << "-- Log --\n";
+            for (const auto& line : snap.trace_lines) file << line << '\n';
+        }
+    }
+}
 
 void ReplayWriter::setGameHeader(const std::string& header) {
     game_header_ = header;
@@ -324,7 +401,7 @@ void ReplayWriter::recordPhaseSeam(const GameState& state,
     snap.turn_info = ti.str();
 
     if (new_phase != TurnPhase::Mulligan) snap.board_ascii = renderer.render(state);
-    snap.board_json = boardJson(state, nullptr);
+    if (format_ == ReplayFormat::Cards) snap.board_json = boardJson(state, nullptr);
 
     std::ostringstream dec;
     dec << "  ── Phase transition ──\n";
@@ -370,7 +447,7 @@ void ReplayWriter::recordDecision(const GameState& state,
     // Board ASCII (only for non-mulligan); the picture board also shows the
     // opening hands while they are mulliganed.
     if (state.turn.phase != TurnPhase::Mulligan) snap.board_ascii = renderer.render(state);
-    snap.board_json = boardJson(state, &chosen_action);
+    if (format_ == ReplayFormat::Cards) snap.board_json = boardJson(state, &chosen_action);
 
     // Decision text, one option per line: the panel wraps them to its width.
     StateRenderer listing = renderer;

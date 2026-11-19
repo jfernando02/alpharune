@@ -69,8 +69,9 @@ GameResult GameRunner::run() {
     // Set up HTML replay writer
     std::unique_ptr<ReplayWriter> replay;
     if (config_.do_render) {
-        std::string replay_path = "replay_game" + std::to_string(config_.game_index + 1) + ".html";
-        replay = std::make_unique<ReplayWriter>(card_db_, replay_path);
+        std::string replay_path = "replay_game" + std::to_string(config_.game_index + 1) +
+                                  "." + replayExtension(config_.replay_format);
+        replay = std::make_unique<ReplayWriter>(card_db_, replay_path, config_.replay_format);
         replay->setGameHeader("Game " + std::to_string(config_.game_index + 1) +
             " | UUID: " + game_uuid +
             " | Seed: " + std::to_string(game_seed));
@@ -135,7 +136,7 @@ GameResult GameRunner::run() {
     // Finalize outputs
     if (replay) {
         replay->addTraceLine("[TRC] GAME_OVER: " + result.termination_reason);
-        replay->writeHtml();
+        replay->write();
     }
 
     // Update aggregate results (atomic)

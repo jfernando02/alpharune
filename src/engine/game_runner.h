@@ -9,6 +9,7 @@
 #include "cards/card_registry.h"
 #include "core/events.h"
 #include "engine/game_engine.h"
+#include "io/replay_writer.h"
 #include "rules/deck_validator.h"
 
 #include <atomic>
@@ -24,6 +25,7 @@ struct GameConfig {
     int game_index = 0;           // 0-based game number
     uint64_t base_seed = 0;       // base seed (0 = random per game)
     bool do_render = false;
+    ReplayFormat replay_format = ReplayFormat::Cards;  // when do_render
     bool show_hand = false;
     bool step_mode = false;
     bool debug_mode = false;

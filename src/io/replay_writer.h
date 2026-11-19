@@ -19,9 +19,22 @@
 
 namespace riftbound {
 
+/// How a replay is written. Cards (the default) is the HTML viewer, which
+/// opens on the card-image board and can switch to the ASCII board. Text is
+/// a plain-text file of the same snapshots (ASCII board, decision, trace),
+/// meant for reading by tools and language models rather than people.
+enum class ReplayFormat { Cards, Text };
+
+/// Parses "cards" / "text"; throws std::invalid_argument otherwise.
+ReplayFormat parseReplayFormat(const std::string& name);
+
+/// The file extension (no dot) a replay in this format is written with.
+const char* replayExtension(ReplayFormat format);
+
 class ReplayWriter {
 public:
-    ReplayWriter(const CardDB& db, const std::string& output_path);
+    ReplayWriter(const CardDB& db, const std::string& output_path,
+                 ReplayFormat format = ReplayFormat::Cards);
 
     /// Record a decision point snapshot.
     void recordDecision(const GameState& state,
@@ -58,12 +71,19 @@ public:
     /// reads as "no estimate."
     void setNextWinProb(double mean_value, int sims, int deciding_player);
 
-    /// Write the HTML file. Call once at game end.
+    /// Write the replay in the writer's format. Call once at game end.
+    void write();
+
+    /// Write the HTML viewer, whatever the writer's format.
     void writeHtml();
+
+    /// Write the plain-text replay, whatever the writer's format.
+    void writeText();
 
 private:
     const CardDB& db_;
     std::string output_path_;
+    ReplayFormat format_;
     std::string game_header_;
 
     struct Snapshot {

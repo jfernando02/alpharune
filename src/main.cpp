@@ -15,7 +15,8 @@
 ///
 /// When any seat is human:
 ///   • `god_mode` edits are accepted by the WebSocket API.
-///   • An HTML replay is written to ./replays/<timestamp>/replay.html.
+///   • A replay is written to ./replays/<timestamp>/replay.html (or
+///     replay.txt with --replay-format text).
 ///   • Trace + debug logging stream to the UI by default.
 ///
 /// See docs/play-api.md for the WS wire protocol.
@@ -495,8 +496,12 @@ int main(int argc, char* argv[]) {
          "Write HTML replay: auto (default — ON if any seat is human), "
          "on (force ON), off (force OFF)")
         ("replay-dir", po::value<std::string>()->default_value("replays"),
-         "Directory for HTML replay output. Single-game writes "
-         "<dir>/<timestamp>/replay.html; batch writes <dir>/replay_gameN.html.")
+         "Directory for replay output. Single-game writes "
+         "<dir>/<timestamp>/replay.<ext>; batch writes replay_gameN.<ext>.")
+        ("replay-format", po::value<std::string>()->default_value("cards"),
+         "Replay format: cards (default — HTML viewer with card images, "
+         "T toggles the ASCII board) or text (plain-text replay.txt of the "
+         "ASCII boards, decisions and log, for tools and language models)")
         ("debug", po::bool_switch()->default_value(false),
          "Stream debug-level engine events (trigger firings, ability resolution). "
          "Implied when any seat is human.")
@@ -553,6 +558,13 @@ int main(int argc, char* argv[]) {
     auto seed          = vm["seed"].as<uint64_t>();
     auto render_mode   = vm["render-html"].as<std::string>();
     auto replay_dir    = vm["replay-dir"].as<std::string>();
+    ReplayFormat replay_format;
+    try {
+        replay_format = parseReplayFormat(vm["replay-format"].as<std::string>());
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << "\n";
+        return 1;
+    }
     bool debug_mode    = vm["debug"].as<bool>();
     bool trace_mode    = vm["trace"].as<bool>();
     int  num_games     = vm["games"].as<int>();
@@ -729,6 +741,7 @@ int main(int argc, char* argv[]) {
         GameConfig cfg;
         cfg.base_seed     = seed;
         cfg.do_render     = render_html;
+        cfg.replay_format = replay_format;
         cfg.show_hand     = show_hand;
         cfg.debug_mode    = debug_mode;
         cfg.trace_mode    = trace_mode;
@@ -820,8 +833,8 @@ int main(int argc, char* argv[]) {
     if (render_html) {
         replay_dir_path = (fs::path(replay_dir) / timestampDirName()).string();
         fs::create_directories(replay_dir_path);
-        replay_path = replay_dir_path + "/replay.html";
-        replay = std::make_unique<ReplayWriter>(card_db, replay_path);
+        replay_path = replay_dir_path + "/replay." + replayExtension(replay_format);
+        replay = std::make_unique<ReplayWriter>(card_db, replay_path, replay_format);
 
         std::ostringstream header;
         header << "seed " << game_seed
@@ -907,7 +920,7 @@ int main(int argc, char* argv[]) {
                       << "\n";
             if (replay) {
                 replay->addTraceLine("[TRC] GAME_OVER: " + result.termination_reason);
-                replay->writeHtml();
+                replay->write();
                 std::cout << "Replay saved to " << replay_path << "\n";
             }
         } catch (const std::exception& e) {
