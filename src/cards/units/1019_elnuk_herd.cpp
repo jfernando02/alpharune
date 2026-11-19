@@ -49,7 +49,7 @@ private:
         d.collector_number = 81;
         d.artist = R"RB(Six More Vodka)RB";
         d.card_type = CardType::Unit;
-        d.domains = {Domain::Fury};
+        d.domains = {Domain::Body};  // the gallery says Fury (a mislabel): its collector number is in the Body block, as riftdecks lists it
         d.energy_cost = 6;
         d.might = 5;
         d.rarity = Rarity::Uncommon;

@@ -39,7 +39,7 @@ private:
         d.collector_number = 59;
         d.artist = R"RB(Kudos Productions)RB";
         d.card_type = CardType::Spell;
-        d.domains = {Domain::Order};
+        d.domains = {Domain::Mind};  // the gallery says Order (a mislabel): its collector number is in the Mind block, as riftdecks lists it
         d.energy_cost = 9;
         d.power_cost = 1;
         d.rarity = Rarity::Uncommon;

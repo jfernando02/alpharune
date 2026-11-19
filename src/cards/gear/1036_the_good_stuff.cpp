@@ -41,7 +41,7 @@ private:
         d.public_code = R"RB(RAD-106/167)RB";
         d.collector_number = 106;
         d.card_type = CardType::Gear;
-        d.domains = {Domain::Body};
+        d.domains = {Domain::Chaos};  // the gallery says Body (a mislabel): its collector number is in the Chaos block, as riftdecks lists it
         d.energy_cost = 3;
         d.power_cost = 1;
         d.rarity = Rarity::Uncommon;

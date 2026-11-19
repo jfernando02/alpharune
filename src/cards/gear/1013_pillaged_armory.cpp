@@ -37,7 +37,7 @@ private:
         d.public_code = R"RB(RAD-073/167)RB";
         d.collector_number = 73;
         d.card_type = CardType::Gear;
-        d.domains = {Domain::Calm};
+        d.domains = {Domain::Body};  // the gallery says Calm (a mislabel): its collector number is in the Body block, as riftdecks lists it
         d.energy_cost = 1;
         d.rarity = Rarity::Common;
         d.deploy = true;

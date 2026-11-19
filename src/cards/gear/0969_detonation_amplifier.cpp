@@ -52,7 +52,7 @@ private:
         d.collector_number = 17;
         d.artist = R"RB(Fish Art Studio)RB";
         d.card_type = CardType::Gear;
-        d.domains = {Domain::Chaos};
+        d.domains = {Domain::Fury};  // the gallery says Chaos (a mislabel): its collector number is in the Fury block, as riftdecks lists it
         d.energy_cost = 4;
         d.power_cost = 1;
         d.rarity = Rarity::Rare;

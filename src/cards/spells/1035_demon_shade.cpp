@@ -58,7 +58,7 @@ private:
         d.collector_number = 102;
         d.artist = R"RB(Luscinia Studio)RB";
         d.card_type = CardType::Spell;
-        d.domains = {Domain::Fury};
+        d.domains = {Domain::Chaos};  // the gallery says Fury (a mislabel): its collector number is in the Chaos block, as riftdecks lists it
         d.energy_cost = 3;
         d.rarity = Rarity::Uncommon;
         d.keywords.set(Keyword::Hidden);

@@ -48,7 +48,7 @@ private:
         d.collector_number = 62;
         d.artist = R"RB(Fish Art Studio)RB";
         d.card_type = CardType::Gear;
-        d.domains = {Domain::Calm};
+        d.domains = {Domain::Mind};  // the gallery says Calm (a mislabel): its collector number is in the Mind block, as riftdecks lists it
         d.energy_cost = 5;
         d.power_cost = 1;
         d.rarity = Rarity::Rare;

@@ -33,7 +33,7 @@ private:
         d.collector_number = 24;
         d.artist = R"RB(Fish Art Studio)RB";
         d.card_type = CardType::Gear;
-        d.domains = {Domain::Chaos};
+        d.domains = {Domain::Calm};  // the gallery says Chaos (a mislabel): its collector number is in the Calm block, as riftdecks lists it
         d.energy_cost = 2;
         d.rarity = Rarity::Common;
         d.deploy = true;

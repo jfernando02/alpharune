@@ -36,7 +36,7 @@ private:
         d.public_code = R"RB(RAD-071/167)RB";
         d.collector_number = 71;
         d.card_type = CardType::Gear;
-        d.domains = {Domain::Order};
+        d.domains = {Domain::Body};  // the gallery says Order (a mislabel): its collector number is in the Body block, as riftdecks lists it
         d.tags = {R"RB(Equipment)RB"};
         d.energy_cost = 1;
         d.rarity = Rarity::Common;

@@ -62,7 +62,7 @@ private:
         d.collector_number = 12;
         d.artist = R"RB(Kudos Productions)RB";
         d.card_type = CardType::Gear;
-        d.domains = {Domain::Chaos};
+        d.domains = {Domain::Fury};  // the gallery says Chaos (a mislabel): its collector number is in the Fury block, as riftdecks lists it
         d.energy_cost = 1;
         d.rarity = Rarity::Uncommon;
         d.ability_text = R"RB(When you play this or when this leaves the board, banish the top card of your Main Deck. Until your next Ending Phase, you may play that card. (You still pay its costs.)

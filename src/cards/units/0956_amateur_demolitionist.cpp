@@ -33,7 +33,7 @@ private:
         d.collector_number = 1;
         d.artist = R"RB(Kudos Productions)RB";
         d.card_type = CardType::Unit;
-        d.domains = {Domain::Chaos};
+        d.domains = {Domain::Fury};  // the gallery says Chaos (a mislabel): its collector number is in the Fury block, as riftdecks lists it
         d.energy_cost = 2;
         d.might = 1;
         d.rarity = Rarity::Common;

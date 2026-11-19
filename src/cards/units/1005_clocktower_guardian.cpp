@@ -53,7 +53,7 @@ private:
         d.collector_number = 67;
         d.artist = R"RB(Polar Engine Studio)RB";
         d.card_type = CardType::Unit;
-        d.domains = {Domain::Fury};
+        d.domains = {Domain::Mind};  // the gallery says Fury (a mislabel): its collector number is in the Mind block, as riftdecks lists it
         d.energy_cost = 8;
         d.power_cost = 2;
         d.might = 8;
