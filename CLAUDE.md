@@ -1,6 +1,6 @@
 # Riftbound Simulation Engine — Standards & Guidelines
 
-C++20 game engine that simulates 1v1 Riftbound TCG matches. This file is the standards and conventions reference for engine development. For project status, completed work, and active backlog, see git log + the sibling riftbound-trainer repo's `docs/`.
+C++20 game engine that simulates 1v1 Riftbound TCG matches. This file is the standards and conventions reference for engine development. For project status and history, see git log and the sibling riftbound-trainer repo's README.md / CLAUDE.md (it has no `docs/` folder). The "AI agent and training pipeline" section below maps the parts that play and learn.
 
 ## Build
 
@@ -10,7 +10,7 @@ cmake --build build
 RIFTBOUND_ROOT=. ./build/riftbound_tests
 ```
 
-First configure clones OpenSpiel v1.6.14 + abseil-cpp + nlohmann/json + pybind11_json + DDS into `build/_deps/` (~10s configure + one-time ~30s build of `open_spiel_core`). OpenSpiel is mandatory — MCTS/ISMCTS agents in `riftbound_openspiel` depend on it.
+First configure clones OpenSpiel v1.6.14 + abseil-cpp + nlohmann/json + pybind11_json + DDS into `build/_deps/` (~10s configure + one-time ~30s build of `open_spiel_core`). OpenSpiel is mandatory: `riftbound_core` compiles `src/openspiel/action_vocab.cpp`, and the OpenSpiel game wrapper (`src/openspiel/`) and the MCTS / IS-MCTS agents (`src/agents/mcts_agent.*`, `ismcts_bot.*`) use it. Those agents are legacy (tested weaker than the heuristic agent); the strong agent is `heuristic` with `tree=1`.
 
 **Build structure.** `src/pch.h` is precompiled once (`riftbound_pch`) and reused by `riftbound_core` and the card groups. Each `src/cards/<type>/` directory is an OBJECT library (`riftbound_cards_<type>`) folded into `riftbound_core`, compiled as unity batches. Options: `-DRIFTBOUND_USE_PCH=OFF`, `-DRIFTBOUND_UNITY_CARDS=OFF` (one compile per card, e.g. for clangd), `-DRIFTBOUND_CARD_UNITY_BATCH=<n>` (default 16). With ccache, configure with `-DCMAKE_CXX_COMPILER_LAUNCHER="env;CCACHE_SLOPPINESS=pch_defines,time_macros;ccache"` or PCH compiles are not cached.
 
@@ -18,7 +18,7 @@ First configure clones OpenSpiel v1.6.14 + abseil-cpp + nlohmann/json + pybind11
 
 **Dependencies:** cmake, g++ (C++20), libboost-all-dev, nlohmann-json3-dev, ninja-build.
 
-Training pipelines (model architectures, self-play loops, checkpoints) live in the sibling **riftbound-trainer** repo. Engine repo has no torch dependency.
+Training pipelines (model architectures, self-play loops, checkpoints) live in the sibling **riftbound-trainer** repo. Engine repo has no torch dependency by default (the LibTorch targets are opt-in with `-DRIFTBOUND_BUILD_LIBTORCH=ON` and unused by the current pipeline; the neural network runs in plain C++).
 
 ## Coding Standards
 
@@ -125,7 +125,16 @@ The GameEngine handles game flow (phases, turns, chain FEPR loop, cleanup, scori
 
 ## Adding state to `feature_extractor`
 
-When you add a field to `GameState` / `PlayerState` that should be visible to a future ML agent, also bump `kStateFeatureDim` in `src/ml/feature_extractor.h` and append the new dims to `extractStateFeatures` in the `.cpp`. This is what `RiftboundState::ObservationTensor` reports to OpenSpiel. The trainer repo's `docs/additional-gamestate-dims.md` documents the dim layout + a backlog of additional fields to expose.
+When you add a field to `GameState` / `PlayerState` that should be visible to a future ML agent, also bump `kStateFeatureDim` in `src/ml/feature_extractor.h` and append the new dims to `extractStateFeatures` in the `.cpp`. This is what `RiftboundState::ObservationTensor` reports to OpenSpiel. The neural model does NOT read this vector: it reads `src/ml/obs_encoder` (see the next section); a field the network should see goes there, which invalidates trained networks.
+
+## AI agent and training pipeline
+
+- **The agent**: `HeuristicAgent` (`src/agents/heuristic_agent.*`) with `tree=1` (`heuristic_tree.cpp`): PUCT tree search on the searcher's view; leaves are a policy playout to the end of `turns_ahead` turns, scored by the value model. Champion spec: `heuristic:model=M.rbnn,policy=M.rbnn,tree=1,turns_ahead=2,step_budget=80000`. Models: `.rbnn` network (`nn_model`), or the older GBT files (`gbt_evaluator`, `policy_model`).
+- **Tools** (CMake targets): `riftbound_value_data` (record games: `--nn-out` shards for the network), `riftbound_arena` (paired match, `--sprt`), `riftbound_nn_eval` (C++ forward over a shard, for parity), `riftbound_gauntlet`, `riftbound_rules_fuzz`, `riftbound_decision_census`, `riftbound` (CLI / replays, `--explain`).
+- **The training loop** lives in riftbound-trainer (`nn_iteration.py`, run on a cloud VM via `cloud/run.sh`); it builds this repo from a bundle (`cloud/make_bundle.sh`, default `--engine-ref HEAD` of this checkout — keep it on `master`).
+- **What invalidates trained networks**: `ml::kObsVersion`, `kObsCardVocab` (= `kCardVocabSize` + 1), `kObsActionDim` (= `kPolicyActionGlobalDim`), any entity / action / bag feature in `obs_encoder`, the network layout in `nn_model.cpp` (mirrored by the trainer's `nn_model.py`; `tests/test_nn_model.cpp` + `tests/data/nn_fixture.*` pin it). Card ids above `kCardVocabSize` are invisible to every model. Rules changes do not invalidate a network but make its training data stale.
+- **Search determinism**: the tree's node keys hash `extractStateFeatures` (`src/ml/feature_extractor`, `cfr_util`), so changing that vector changes search behaviour too.
+- **Judging a change**: arena on fresh seeds (`--sprt 0.5,0.53`, or a sign test on decisive pairs), confirmed on a second seed. Same-seed arena JSON is reproducible, so a pure speed-up must give identical results.
 
 ## Important game rules
 
@@ -145,7 +154,7 @@ When you add a field to `GameState` / `PlayerState` that should be visible to a 
 - `rules/core-rules.md` — full game rules (2026-10-09 edition, sections 000–832; regenerate from the PDF with `scripts/rules_to_md.py`)
 - `rules/patch-notes/` — per-set core-rules patch notes, FAQs and ban announcements; `errata/` — card errata
 - `rules/tournament-rules.md` — deck construction + tournament policies
-- Sibling **riftbound-trainer** repo holds training-side docs (V*/model designs, ReBeL inference, engineering history, gamestate-dims backlog) and the trainer source.
+- Sibling **riftbound-trainer** repo: the training loops (Python), the cloud VM tooling (`cloud/`), and its own README.md / CLAUDE.md.
 
 ## Card data
 
