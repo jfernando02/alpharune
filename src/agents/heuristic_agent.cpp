@@ -68,6 +68,9 @@ bool HeuristicAgent::isSetupLookaheadPoint(const GameState& state,
 
 int HeuristicAgent::defaultIndex(const GameState& state, const std::vector<Intent>& legal,
                                  bool use_policy) const {
+    // A forced decision (the engine surfaces those too): every caller would
+    // apply index 0, so skip ScriptedAgent and the policy network's forward.
+    if (legal.size() == 1) return 0;
     const int scripted = scripted_.selectIndex(state, legal);
     if (use_policy && config_.policy) {
         const int pick = config_.policy->pick(state, card_db_, legal, scripted);
