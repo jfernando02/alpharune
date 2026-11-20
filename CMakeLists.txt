@@ -327,7 +327,14 @@ add_library(riftbound_core
     src/core/card_db.cpp
     src/core/events.cpp
     src/rules/deck_validator.cpp
-    src/engine/game_engine.cpp
+    src/engine/game_engine_setup.cpp
+    src/engine/game_engine_turn.cpp
+    src/engine/game_engine_play.cpp
+    src/engine/game_engine_chain.cpp
+    src/engine/game_engine_actions.cpp
+    src/engine/game_engine_combat.cpp
+    src/engine/game_engine_state.cpp
+    src/engine/game_engine_costs.cpp
     src/engine/chain_manager.cpp
     src/engine/effect_executor.cpp
     src/engine/trigger_manager.cpp

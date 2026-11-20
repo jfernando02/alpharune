@@ -50,7 +50,7 @@ Legends (`card_type=legend`) and champion units (`card_type=unit, super_type=cha
 
 ### Core principle: card mechanics are encapsulated in Card objects, not the engine
 
-The GameEngine handles game flow (phases, turns, chain FEPR loop, cleanup, scoring) and provides atomic operations via EffectExecutor. All card-specific behavior lives in Card subclass `onResolve()` / `onTrigger()` / `onActivate()` overrides. **Never add card-specific logic to game_engine.cpp.** If you find yourself adding `if (card_name == "X")` or matching `ability_text.find("pattern")` in the engine, it belongs in the Card object.
+The GameEngine handles game flow (phases, turns, chain FEPR loop, cleanup, scoring) and provides atomic operations via EffectExecutor. All card-specific behavior lives in Card subclass `onResolve()` / `onTrigger()` / `onActivate()` overrides. **Never add card-specific logic to the engine (`src/engine/game_engine_*.cpp`).** If you find yourself adding `if (card_name == "X")` or matching `ability_text.find("pattern")` in the engine, it belongs in the Card object.
 
 ## Architecture Notes
 
@@ -89,7 +89,7 @@ The GameEngine handles game flow (phases, turns, chain FEPR loop, cleanup, scori
 
 ## Lessons learned / pitfalls
 
-- **Never put card-specific logic in `game_engine.cpp`.** All card behavior belongs in Card subclass overrides. Engine dispatches; cards decide.
+- **Never put card-specific logic in `game_engine_*.cpp`.** All card behavior belongs in Card subclass overrides. Engine dispatches; cards decide.
 - **Counter spells must NOT directly manipulate the chain.** Use peek-and-pop: the counter resolves (popped by FEPR), then pops the next spell. Never set flags or scan the chain — if the counter is countered first, its `onResolve` never runs, so the target is naturally preserved.
 - **AoE damage must collect targets BEFORE killing.** Deal damage to all targets first, then iterate again to kill lethally damaged units. Killing during the damage loop causes iterator invalidation.
 - **`addAbility()` must close state** (`oc_state = Closed`). Without this, `generateSpellActions` falls through to `isNeutralOpen()` and allows Action spells during ability chain resolution.
